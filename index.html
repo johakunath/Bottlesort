@@ -71,8 +71,17 @@ body::after { /* teal pool under the stage */
 body[data-theme="ocean"]  { --bg-0: #061d2c; --bg-1: #0c3146; --bg-2: #06283a; --accent: #5fd9ff; --accent-deep: #1f9fd6; --on-accent: #062c3a; --aur1: #1f8fff; --aur2: #00d6c3; }
 body[data-theme="candy"]  { --bg-0: #2a0f33; --bg-1: #43164f; --bg-2: #33102e; --accent: #ff8ad1; --accent-deep: #e0489f; --on-accent: #3a0a26; --aur1: #ff5fa8; --aur2: #8a5cff; }
 body[data-theme="galaxy"] { --bg-0: #05040f; --bg-1: #161040; --bg-2: #0a0820; --accent: #b39bff; --accent-deep: #7a4ce8; --on-accent: #1d0c3a; --aur1: #7a4ce8; --aur2: #2bd4ff; }
+.aurora.a3 { left: 32%; top: 58%; width: 48vmax; height: 48vmax; background: radial-gradient(circle, var(--accent) 0%, transparent 60%); opacity: 0.09; animation: drift3 47s ease-in-out infinite alternate; }
 @keyframes drift1 { from { transform: translate(0, 0) scale(1); } to { transform: translate(9vmax, 7vmax) scale(1.15); } }
 @keyframes drift2 { from { transform: translate(0, 0) scale(1.1); } to { transform: translate(-8vmax, -6vmax) scale(0.95); } }
+@keyframes drift3 { from { transform: translate(-6vmax, 0) scale(0.9); } to { transform: translate(6vmax, -5vmax) scale(1.12); } }
+#vignette { /* filmic edge darkening over the whole scene */
+  position: fixed; inset: 0; pointer-events: none; z-index: 2;
+  background: radial-gradient(125% 105% at 50% 45%, transparent 62%, rgba(3, 5, 18, 0.38) 100%);
+}
+#flash { position: fixed; inset: 0; z-index: 185; pointer-events: none; opacity: 0; background: radial-gradient(60% 60% at 50% 40%, rgba(255, 245, 224, 0.55), transparent 70%); }
+#flash.go { animation: flashPop 0.65s ease-out; }
+@keyframes flashPop { 0% { opacity: 0; } 16% { opacity: 1; } 100% { opacity: 0; } }
 .hidden { display: none !important; }
 
 h1, h2, .display { font-family: 'Fredoka', 'Nunito', ui-rounded, system-ui, sans-serif; }
@@ -92,8 +101,11 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   background: linear-gradient(180deg, #fff 18%, color-mix(in srgb, var(--accent) 55%, #fff) 55%, var(--accent) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
   text-shadow: 0 22px 60px color-mix(in srgb, var(--accent) 18%, transparent);
+  background-size: 100% 230%;
+  animation: brandShine 6.5s ease-in-out infinite;
 }
 .brand p { margin: 4px 0 0; color: var(--ink-dim); font-size: clamp(14px, 2.2vmin, 18px); letter-spacing: 0.22em; text-transform: uppercase; font-weight: 700; }
+@keyframes brandShine { 0%, 100% { background-position: 50% 0%; } 50% { background-position: 50% 55%; } }
 
 .hero-bottles { display: flex; gap: 18px; align-items: flex-end; height: clamp(96px, 16vh, 150px); }
 .hero-bottles svg { width: clamp(40px, 7vh, 62px); height: auto; filter: drop-shadow(0 14px 22px rgba(4, 8, 26, 0.5)); animation: bob 4.2s ease-in-out infinite; }
@@ -178,7 +190,12 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   filter: blur(4px);
 }
 
-.slot { position: relative; width: var(--bw); height: var(--bh); }
+.slot {
+  position: relative; width: var(--bw); height: var(--bh);
+  animation: slotIn 0.55s cubic-bezier(0.25, 1.5, 0.45, 1) backwards;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes slotIn { 0% { opacity: 0; transform: translateY(26px) scale(0.92); } 100% { opacity: 1; transform: none; } }
 .slot.tall { height: calc(var(--bw) * 3.2); }
 .slot.s-tall .cap { left: 29%; width: 42%; }
 .slot.s-flask .cap { left: 29%; width: 42%; }
@@ -189,9 +206,10 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 }
 .slot .glow {
   position: absolute; left: -8%; right: -8%; bottom: calc(var(--bw) * -0.14); height: calc(var(--bw) * 0.3);
-  border-radius: 50%; filter: blur(6px); opacity: 0.5; transition: background 0.4s;
+  border-radius: 50%; filter: blur(6px); opacity: 0.5; transition: background 0.4s, opacity 0.3s, transform 0.3s;
   pointer-events: none;
 }
+.slot.selected .glow { opacity: 0.95; transform: scale(1.3); }
 .bottle {
   position: absolute; inset: 0; display: block; width: 100%; height: 100%;
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.5, 1);
@@ -323,7 +341,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   border: 1px solid rgba(255, 255, 255, 0.18); box-shadow: var(--shadow-pop);
   transform: translateY(24px) scale(0.94); transition: transform 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
 }
-#overlay.show .card { transform: translateY(0) scale(1); }
+#overlay.show .card { transform: translateY(0) scale(1); box-shadow: var(--shadow-pop), 0 0 70px color-mix(in srgb, var(--accent) 26%, transparent); }
 .card h2 { margin: 0 0 4px; font-size: clamp(26px, 5vmin, 36px); font-weight: 600; }
 .card .win-stars { font-size: clamp(34px, 7vmin, 50px); letter-spacing: 6px; margin: 6px 0 2px; color: var(--accent); text-shadow: 0 6px 24px rgba(255, 180, 94, 0.4); }
 .card .win-stars .off { color: rgba(255, 255, 255, 0.16); text-shadow: none; }
@@ -342,7 +360,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 .btn:active { transform: scale(0.95); }
 .btn.primary { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 62%, #fff), var(--accent-deep)); color: var(--on-accent); border-color: transparent; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent-deep) 42%, transparent); }
 
-#confetti { position: fixed; inset: 0; z-index: 190; pointer-events: none; }
+#confetti { position: fixed; inset: 0; z-index: 250; pointer-events: none; }
 
 /* ---------------- Menu: chips & mode cards ---------------- */
 .stat-chips { display: flex; gap: 10px; }
@@ -361,7 +379,8 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 }
 .mode-card:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.25); }
 .mode-card:active { transform: scale(0.96); }
-.mode-card .mc-icon { font-size: clamp(22px, 3.6vmin, 30px); }
+.mode-card .mc-icon { font-size: clamp(22px, 3.6vmin, 30px); transition: transform 0.22s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.mode-card:hover .mc-icon { transform: scale(1.18) rotate(-7deg); }
 .mode-card .mc-name { font-family: 'Fredoka', sans-serif; font-weight: 600; font-size: clamp(16px, 2.6vmin, 20px); }
 .mode-card .mc-sub { font-size: clamp(11px, 1.7vmin, 13px); color: var(--ink-dim); font-weight: 800; }
 .mode-card.done { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: inset 0 0 24px color-mix(in srgb, var(--accent) 8%, transparent); }
@@ -393,6 +412,26 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 /* rush timer urgency */
 .hud .sub.warn { color: #ff7d7d; animation: warnBlink 1s steps(2) infinite; }
 @keyframes warnBlink { 50% { opacity: 0.45; } }
+
+/* roaming light sweep across the glass */
+.sheenmove { animation: sheenMove 8s ease-in-out infinite; }
+@keyframes sheenMove {
+  0%, 58% { transform: translateX(-55px) skewX(-13deg); opacity: 0; }
+  66% { opacity: 0.55; }
+  80%, 100% { transform: translateX(150px) skewX(-13deg); opacity: 0; }
+}
+
+/* splash droplets at the pour impact point */
+.droplet {
+  position: absolute; width: calc(var(--bw) * 0.07); height: calc(var(--bw) * 0.07);
+  min-width: 4px; min-height: 4px; border-radius: 50%; pointer-events: none; z-index: 72;
+  animation: dropFly 0.55s ease-out forwards;
+}
+@keyframes dropFly {
+  0% { opacity: 0.9; transform: translate(0, 0) scale(1); }
+  55% { opacity: 0.8; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.25); }
+}
 
 /* liquid bubbles */
 .bub { animation: bubRise 3.6s linear infinite; }
@@ -475,7 +514,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   .seg button { padding: 9px 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hero-bottles svg, .stream, .splash { animation: none !important; }
+  .hero-bottles svg, .stream, .splash, .slot, .sheenmove, .droplet, .bub, .brand h1, #flash, .aurora { animation: none !important; }
   * { transition-duration: 0.01s !important; }
 }
 </style>
@@ -484,6 +523,9 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 <canvas id="ambient"></canvas>
 <div class="aurora a1"></div>
 <div class="aurora a2"></div>
+<div class="aurora a3"></div>
+<div id="vignette"></div>
+<div id="flash"></div>
 
 <!-- ============ Menu ============ -->
 <div id="menu" class="screen">
@@ -1078,6 +1120,11 @@ function buildDefs() {
   [['0', 0.34], ['0.16', 0.06], ['0.5', 0], ['0.84', 0.1], ['1', 0.4]].forEach(([o, a]) =>
     gs.appendChild(svgEl('stop', { offset: o, 'stop-color': '#0a0f2a', 'stop-opacity': a })));
   defs.appendChild(gs);
+  const shn = svgEl('linearGradient', { id: 'sheenGrad', x1: 0, y1: 0, x2: 1, y2: 0 });
+  shn.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#fff', 'stop-opacity': 0 }));
+  shn.appendChild(svgEl('stop', { offset: '0.5', 'stop-color': '#fff', 'stop-opacity': 0.34 }));
+  shn.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#fff', 'stop-opacity': 0 }));
+  defs.appendChild(shn);
   const lipG = svgEl('linearGradient', { id: 'lipGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
   lipG.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#fff', 'stop-opacity': 0.55 }));
   lipG.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#fff', 'stop-opacity': 0.12 }));
@@ -1102,6 +1149,15 @@ function buildBottleSVG(shapeName) {
   svg.appendChild(liquids);
   /* cylinder shading sits over the liquid, under the gloss */
   svg.appendChild(svgEl('path', { d: sh.interior, fill: 'url(#glassSide)', 'pointer-events': 'none' }));
+  /* roaming sheen, clipped to the interior, desynced per bottle */
+  if (!RM) {
+    const sheenWrap = svgEl('g', { 'clip-path': 'url(#' + id + ')' });
+    const sheen = svgEl('rect', { x: -20, y: -20, width: 30, height: sh.vbH + 40, fill: 'url(#sheenGrad)' });
+    sheen.setAttribute('class', 'sheenmove');
+    sheen.style.animationDelay = (-Math.random() * 8).toFixed(2) + 's';
+    sheenWrap.appendChild(sheen);
+    svg.appendChild(sheenWrap);
+  }
   const gloss = svgEl('g', {});
   (sh.gloss || []).forEach(r =>
     gloss.appendChild(svgEl('rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: r.rx, fill: 'url(#hlGrad)', opacity: r.o })));
@@ -1152,7 +1208,7 @@ function mergeRuns(bottle) {
    The liquid group is counter-rotated against the bottle's tilt, so
    bands and surfaces stay horizontal in world space; the interior
    clip (in bottle space) shapes the pool. */
-function renderBottle(i, tiltDeg) {
+function renderBottle(i, tiltDeg, wob) {
   const slot = slots[i];
   const sh = slot.sh;
   const segs = visual[i];
@@ -1199,12 +1255,16 @@ function renderBottle(i, tiltDeg) {
   }
   ellipses.forEach((e, k) => {
     const isTop = k === ellipses.length - 1;
-    inner.appendChild(svgEl('ellipse', {
-      cx: px, cy: e.y + 0.8, rx: sh.surfRx, ry: 5,
+    const wdy = isTop && wob ? wob.dy : 0;
+    const wrot = isTop && wob ? wob.rot : 0;
+    const surf = svgEl('ellipse', {
+      cx: px, cy: e.y + 0.8 + wdy, rx: sh.surfRx, ry: 5,
       fill: COLORS[e.c][0], opacity: (isTop ? 0.75 : 0.42) * fade
-    }));
+    });
+    if (wrot) surf.setAttribute('transform', 'rotate(' + wrot.toFixed(2) + ' ' + px + ' ' + (e.y + 0.8 + wdy).toFixed(1) + ')');
+    inner.appendChild(surf);
     if (isTop) inner.appendChild(svgEl('ellipse', {
-      cx: px - 7, cy: e.y - 0.2, rx: 6.5, ry: 1.9,
+      cx: px - 7 + (wob ? wob.dy * 1.4 : 0), cy: e.y - 0.2 + wdy, rx: 6.5, ry: 1.9,
       fill: '#ffffff', opacity: 0.5 * fade
     }));
   });
@@ -1371,6 +1431,7 @@ function setupBoard(gen) {
     const sh = SHAPES[shapeName];
     const slot = document.createElement('div');
     slot.className = 'slot s-' + shapeName + (shapeName === 'tall' ? ' tall' : '');
+    slot.style.setProperty('--d', (i * 45) + 'ms');
     const glow = document.createElement('span'); glow.className = 'glow';
     const shadow = document.createElement('span'); shadow.className = 'shadow';
     const btn = document.createElement('button');
@@ -1697,6 +1758,18 @@ async function doPour(si, di) {
   splash.style.left = (Pm.x - stageRect.left) + 'px';
   splash.style.top = (surfaceY - stageRect.top) + 'px';
   fx.appendChild(stream); fx.appendChild(splash);
+  const dropTimer = RM ? null : setInterval(() => {
+    const d = document.createElement('span');
+    d.className = 'droplet';
+    d.style.background = COLORS[color][0];
+    d.style.boxShadow = '0 0 6px ' + COLORS[color][0] + '88';
+    d.style.left = (Pm.x - stageRect.left + (Math.random() * 14 - 7)).toFixed(1) + 'px';
+    d.style.top = (surfaceY - stageRect.top).toFixed(1) + 'px';
+    d.style.setProperty('--dx', (Math.random() * 44 - 22).toFixed(0) + 'px');
+    d.style.setProperty('--dy', (-(10 + Math.random() * 30)).toFixed(0) + 'px');
+    fx.appendChild(d);
+    setTimeout(() => d.remove(), 600);
+  }, 120);
   AudioFX.pour(dur / 1000 + 0.1);
   buzz(12);
 
@@ -1708,6 +1781,7 @@ async function doPour(si, di) {
     renderBottle(si, A);
     renderBottle(di, 0);
   });
+  if (dropTimer) clearInterval(dropTimer);
   stream.remove(); splash.remove();
   if (!RM) spawnSparkles(slots[di].el, 4, 0.25);
 
@@ -1737,6 +1811,7 @@ async function doPour(si, di) {
   }
 
   locked.delete(si); locked.delete(di); activePours--;
+  sloshBottle(di);
   updateHUD();
   if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
   if (activePours === 0 && window.isSolved(state)) {
@@ -1758,6 +1833,21 @@ function anyUsefulMove() {
     }
   }
   return false;
+}
+
+/* ---------------- liquid slosh (settling surface after a pour) ---------------- */
+function sloshBottle(i, amp) {
+  if (RM || !slots[i]) return;
+  const a0 = amp || 1;
+  const t0 = performance.now();
+  tween(700, p => {
+    if (!slots[i] || locked.has(i)) return; /* a new pour owns this bottle now */
+    const decay = (1 - p) * a0;
+    const t = (performance.now() - t0) / 1000;
+    renderBottle(i, 0, decay > 0.02
+      ? { dy: Math.sin(t * 19) * 2.4 * decay, rot: Math.sin(t * 19 + 1.3) * 4.5 * decay }
+      : null);
+  });
 }
 
 /* ---------------- sparkles ---------------- */
@@ -1990,19 +2080,24 @@ function onWin() {
   const orbHost = $('#orb');
   if (orbHost && !RM) { orbHost.classList.add('burst'); spawnSparkles(orbHost, 10, 0.7); setTimeout(() => orbHost.classList.remove('burst'), 900); }
   AudioFX.win(); buzz([20, 50, 20, 50, 60]);
-  if (!RM) confetti();
+  if (!RM) {
+    confetti();
+    const fl = $('#flash');
+    fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
+  }
 }
 
-/* ---------------- confetti ---------------- */
+/* ---------------- celebration: confetti + firework bursts ---------------- */
 function confetti() {
   const cv = $('#confetti');
   const ctx = cv.getContext && cv.getContext('2d');
   if (!ctx) return;
   cv.width = innerWidth; cv.height = innerHeight;
   const parts = [];
-  for (let i = 0; i < 140; i++) {
+  for (let i = 0; i < 130; i++) {
     const c = COLORS[i % COLORS.length];
     parts.push({
+      kind: 'c',
       x: innerWidth / 2 + (Math.random() - 0.5) * innerWidth * 0.5,
       y: innerHeight * 0.28 + (Math.random() - 0.5) * 60,
       vx: (Math.random() - 0.5) * 9,
@@ -2013,19 +2108,59 @@ function confetti() {
       col: Math.random() < 0.5 ? c[0] : c[1]
     });
   }
+  /* timed firework shells, each exploding into glowing sparks with trails */
+  const bursts = [
+    { x: innerWidth * 0.26, y: innerHeight * 0.30, at: 0.12 },
+    { x: innerWidth * 0.74, y: innerHeight * 0.24, at: 0.48 },
+    { x: innerWidth * 0.50, y: innerHeight * 0.16, at: 0.86 }
+  ];
+  function explode(b) {
+    const c = COLORS[Math.floor(Math.random() * COLORS.length)];
+    const n = 38;
+    for (let k = 0; k < n; k++) {
+      const ang = (k / n) * Math.PI * 2 + Math.random() * 0.18;
+      const sp = 3.2 + Math.random() * 4.6;
+      parts.push({
+        kind: 'f', x: b.x, y: b.y, px: b.x, py: b.y,
+        vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+        life: 1, fade: 0.014 + Math.random() * 0.012,
+        col: Math.random() < 0.7 ? c[0] : '#ffffff'
+      });
+    }
+  }
   const t0 = performance.now();
   (function frame(now) {
     const t = (now - t0) / 1000;
     ctx.clearRect(0, 0, cv.width, cv.height);
+    bursts.forEach(b => { if (!b.done && t >= b.at) { b.done = true; explode(b); } });
     for (const p of parts) {
-      p.vy += 0.28; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.vx *= 0.992;
-      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
-      ctx.globalAlpha = Math.max(0, 1 - t / 2.6);
-      ctx.fillStyle = p.col;
-      ctx.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * 0.66);
-      ctx.restore();
+      if (p.kind === 'c') {
+        p.vy += 0.28; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.vx *= 0.992;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
+        ctx.globalAlpha = Math.max(0, 1 - t / 2.6);
+        ctx.fillStyle = p.col;
+        ctx.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * 0.66);
+        ctx.restore();
+      } else {
+        if (p.life <= 0) continue;
+        p.px = p.x; p.py = p.y;
+        p.vy += 0.075; p.vx *= 0.975; p.vy *= 0.985;
+        p.x += p.vx; p.y += p.vy;
+        p.life -= p.fade;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.strokeStyle = p.col;
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(p.px - p.vx * 1.6, p.py - p.vy * 1.6);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
-    if (t < 2.7) requestAnimationFrame(frame);
+    if (t < 3.1) requestAnimationFrame(frame);
     else ctx.clearRect(0, 0, cv.width, cv.height);
   })(t0);
 }
@@ -2047,6 +2182,7 @@ function startAmbient() {
       vy: -(0.06 + Math.random() * 0.16),
       vx: (Math.random() - 0.5) * 0.06,
       ph: Math.random() * Math.PI * 2,
+      big: Math.random() < 0.12,
       hue: Math.random() < 0.7 ? '255,220,170' : '160,200,255'
     });
   }
@@ -2064,6 +2200,15 @@ function startAmbient() {
       ctx.fillStyle = 'rgba(' + p.hue + ',' + tw.toFixed(2) + ')';
       ctx.arc(p.x, p.y, p.r, 0, 7);
       ctx.fill();
+      if (p.big) { /* four-point twinkle on the brightest motes */
+        ctx.strokeStyle = 'rgba(' + p.hue + ',' + (tw * 0.7).toFixed(2) + ')';
+        ctx.lineWidth = 0.8;
+        const e = p.r * (2.2 + tw * 2);
+        ctx.beginPath();
+        ctx.moveTo(p.x - e, p.y); ctx.lineTo(p.x + e, p.y);
+        ctx.moveTo(p.x, p.y - e); ctx.lineTo(p.x, p.y + e);
+        ctx.stroke();
+      }
     }
   })(0);
 }
