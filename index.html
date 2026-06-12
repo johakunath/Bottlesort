@@ -25,6 +25,9 @@
   --accent-deep: #e8893a;
   --glass: rgba(255, 255, 255, 0.07);
   --glass-edge: rgba(255, 255, 255, 0.14);
+  --aur1: #6d5cff;
+  --aur2: #0aa9a0;
+  --on-accent: #3a2008;
   --bw: 72px;               /* bottle width, set by JS */
   --bh: calc(var(--bw) * 2.4);
   --r-lg: 22px;
@@ -61,8 +64,13 @@ body::after { /* teal pool under the stage */
 .screen { position: fixed; inset: 0; display: flex; flex-direction: column; z-index: 1; }
 #ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 .aurora { position: fixed; width: 64vmax; height: 64vmax; border-radius: 50%; filter: blur(90px); pointer-events: none; z-index: 0; opacity: 0.22; }
-.aurora.a1 { left: -22vmax; top: -18vmax; background: radial-gradient(circle, #6d5cff 0%, transparent 65%); animation: drift1 34s ease-in-out infinite alternate; }
-.aurora.a2 { right: -24vmax; bottom: -22vmax; background: radial-gradient(circle, #0aa9a0 0%, transparent 65%); animation: drift2 41s ease-in-out infinite alternate; }
+.aurora.a1 { left: -22vmax; top: -18vmax; background: radial-gradient(circle, var(--aur1) 0%, transparent 65%); animation: drift1 34s ease-in-out infinite alternate; }
+.aurora.a2 { right: -24vmax; bottom: -22vmax; background: radial-gradient(circle, var(--aur2) 0%, transparent 65%); animation: drift2 41s ease-in-out infinite alternate; }
+
+/* ---------------- themes ---------------- */
+body[data-theme="ocean"]  { --bg-0: #061d2c; --bg-1: #0c3146; --bg-2: #06283a; --accent: #5fd9ff; --accent-deep: #1f9fd6; --on-accent: #062c3a; --aur1: #1f8fff; --aur2: #00d6c3; }
+body[data-theme="candy"]  { --bg-0: #2a0f33; --bg-1: #43164f; --bg-2: #33102e; --accent: #ff8ad1; --accent-deep: #e0489f; --on-accent: #3a0a26; --aur1: #ff5fa8; --aur2: #8a5cff; }
+body[data-theme="galaxy"] { --bg-0: #05040f; --bg-1: #161040; --bg-2: #0a0820; --accent: #b39bff; --accent-deep: #7a4ce8; --on-accent: #1d0c3a; --aur1: #7a4ce8; --aur2: #2bd4ff; }
 @keyframes drift1 { from { transform: translate(0, 0) scale(1); } to { transform: translate(9vmax, 7vmax) scale(1.15); } }
 @keyframes drift2 { from { transform: translate(0, 0) scale(1.1); } to { transform: translate(-8vmax, -6vmax) scale(0.95); } }
 .hidden { display: none !important; }
@@ -73,14 +81,17 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 12px; }
 
 /* ---------------- Menu ---------------- */
-#menu { align-items: center; justify-content: center; gap: clamp(14px, 2.6vh, 26px); padding: 4vh 20px; overflow-y: auto; }
+#menu { align-items: center; justify-content: flex-start; gap: clamp(14px, 2.6vh, 26px); padding: 4vh 20px; overflow-y: auto; }
+/* keeps short content centered while letting tall content scroll from the top */
+#menu > :first-child { margin-top: auto; }
+#menu > :last-child { margin-bottom: auto; }
 
 .brand { text-align: center; }
 .brand h1 {
   margin: 0; font-size: clamp(44px, 9vmin, 84px); font-weight: 600; letter-spacing: 0.02em;
-  background: linear-gradient(180deg, #fff 18%, #ffd9a8 55%, var(--accent) 100%);
+  background: linear-gradient(180deg, #fff 18%, color-mix(in srgb, var(--accent) 55%, #fff) 55%, var(--accent) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  text-shadow: 0 22px 60px rgba(255, 180, 94, 0.18);
+  text-shadow: 0 22px 60px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .brand p { margin: 4px 0 0; color: var(--ink-dim); font-size: clamp(14px, 2.2vmin, 18px); letter-spacing: 0.22em; text-transform: uppercase; font-weight: 700; }
 
@@ -96,7 +107,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   color: var(--ink-dim); transition: background 0.2s, color 0.2s, transform 0.15s;
 }
 .seg button:active { transform: scale(0.96); }
-.seg button.on { background: linear-gradient(180deg, #ffc985, var(--accent-deep)); color: #3a2008; box-shadow: 0 6px 18px rgba(232, 137, 58, 0.35); }
+.seg button.on { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 62%, #fff), var(--accent-deep)); color: var(--on-accent); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent-deep) 38%, transparent); }
 
 .level-grid { display: grid; grid-template-columns: repeat(5, minmax(74px, 110px)); gap: clamp(10px, 1.6vmin, 16px); }
 .tile {
@@ -204,7 +215,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   position: absolute; left: 26%; width: 48%; height: calc(var(--bw) * 0.26);
   top: calc(var(--bw) * -0.11);
   border-radius: calc(var(--bw) * 0.10);
-  background: linear-gradient(180deg, #ffd9a4 0%, var(--accent) 38%, var(--accent-deep) 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 55%, #fff) 0%, var(--accent) 38%, var(--accent-deep) 100%);
   box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.65), inset 0 -3px 5px rgba(120, 56, 8, 0.5), 0 6px 14px rgba(4, 8, 26, 0.45);
   opacity: 0; pointer-events: none; transform: translateY(-26px) scale(1.1);
 }
@@ -286,10 +297,12 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 .twinkle.t2 { animation-delay: -1.7s; }
 @keyframes twinkle { 0%, 100% { opacity: 0.15; transform: scale(0.6); } 50% { opacity: 0.95; transform: scale(1.1); } }
 
-/* hint toast */
+/* hint toast (top of stage, clear of the AI buttons) */
 #hint {
-  position: absolute; bottom: clamp(10px, 4vh, 36px); left: 50%; transform: translateX(-50%);
+  position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+  max-width: calc(100% - 24px);
   padding: 10px 20px; border-radius: 999px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
   background: rgba(12, 16, 38, 0.72); border: 1px solid var(--glass-edge);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   color: var(--ink-dim); font-weight: 800; font-size: clamp(12px, 2vmin, 15px);
@@ -327,9 +340,134 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   background: rgba(255, 255, 255, 0.1); border: 1px solid var(--glass-edge); transition: transform 0.12s, background 0.2s;
 }
 .btn:active { transform: scale(0.95); }
-.btn.primary { background: linear-gradient(180deg, #ffc985, var(--accent-deep)); color: #3a2008; border-color: transparent; box-shadow: 0 8px 22px rgba(232, 137, 58, 0.4); }
+.btn.primary { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 62%, #fff), var(--accent-deep)); color: var(--on-accent); border-color: transparent; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent-deep) 42%, transparent); }
 
 #confetti { position: fixed; inset: 0; z-index: 190; pointer-events: none; }
+
+/* ---------------- Menu: chips & mode cards ---------------- */
+.stat-chips { display: flex; gap: 10px; }
+.chip {
+  padding: 7px 16px; border-radius: 999px; font-weight: 900; font-size: clamp(13px, 2vmin, 15px);
+  background: var(--glass); border: 1px solid var(--glass-edge); color: var(--accent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+.modes { display: flex; gap: 12px; width: min(560px, 92vw); }
+.mode-card {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 14px 10px 12px; border-radius: var(--r-lg);
+  background: var(--glass); border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  transition: transform 0.15s, background 0.2s, border-color 0.2s;
+}
+.mode-card:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.25); }
+.mode-card:active { transform: scale(0.96); }
+.mode-card .mc-icon { font-size: clamp(22px, 3.6vmin, 30px); }
+.mode-card .mc-name { font-family: 'Fredoka', sans-serif; font-weight: 600; font-size: clamp(16px, 2.6vmin, 20px); }
+.mode-card .mc-sub { font-size: clamp(11px, 1.7vmin, 13px); color: var(--ink-dim); font-weight: 800; }
+.mode-card.done { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: inset 0 0 24px color-mix(in srgb, var(--accent) 8%, transparent); }
+.section-label { color: var(--ink-dim); font-size: clamp(11px, 1.8vmin, 13px); font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; margin: 2px 0 -6px; }
+.credit { color: var(--ink-dim); opacity: 0.75; font-size: 12px; font-weight: 700; margin: 0; }
+
+/* ---------------- AI assistant FABs ---------------- */
+.fabs { position: absolute; right: clamp(10px, 2vw, 24px); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; z-index: 90; }
+.fab {
+  display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 999px;
+  background: rgba(20, 26, 56, 0.78); border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  font-weight: 900; font-size: clamp(13px, 2.1vmin, 15px); color: var(--ink);
+  box-shadow: 0 10px 26px rgba(4, 8, 26, 0.45);
+  transition: transform 0.13s, background 0.2s, opacity 0.2s;
+}
+.fab:active { transform: scale(0.94); }
+.fab:disabled { opacity: 0.4; pointer-events: none; }
+.fab .fi { font-size: 17px; }
+
+/* hint glow on suggested bottles */
+@keyframes hintPulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 75%, transparent), 0 0 26px color-mix(in srgb, var(--accent) 55%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 90%, transparent), 0 0 44px color-mix(in srgb, var(--accent) 80%, transparent); }
+}
+.slot.hint-src .bottle, .slot.hint-dst .bottle { animation: hintPulse 0.9s ease-in-out infinite; border-radius: 999px; }
+.slot.hint-dst .bottle { animation-delay: 0.45s; }
+
+/* rush timer urgency */
+.hud .sub.warn { color: #ff7d7d; animation: warnBlink 1s steps(2) infinite; }
+@keyframes warnBlink { 50% { opacity: 0.45; } }
+
+/* liquid bubbles */
+.bub { animation: bubRise 3.6s linear infinite; }
+@keyframes bubRise {
+  0% { transform: translateY(0); opacity: 0; }
+  18% { opacity: 0.55; }
+  85% { opacity: 0.35; }
+  100% { transform: translateY(-30px); opacity: 0; }
+}
+
+/* ---------------- Modals (settings / achievements) ---------------- */
+.modal {
+  position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 11, 28, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.sheet {
+  width: min(460px, 90vw); max-height: 84vh; overflow-y: auto;
+  padding: clamp(20px, 3.6vmin, 30px); border-radius: 26px;
+  background: linear-gradient(180deg, rgba(46, 56, 104, 0.92), rgba(22, 28, 60, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.18); box-shadow: var(--shadow-pop);
+}
+.sheet h2 { margin: 0 0 14px; font-size: clamp(22px, 4vmin, 28px); font-weight: 600; }
+.set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 2px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-weight: 800; font-size: clamp(14px, 2.2vmin, 16px);
+}
+.set-row .desc { display: block; font-size: 12px; color: var(--ink-dim); font-weight: 700; margin-top: 2px; }
+.switch {
+  position: relative; width: 52px; height: 30px; border-radius: 999px; flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.12); border: 1px solid var(--glass-edge); transition: background 0.2s;
+}
+.switch::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; transition: transform 0.2s; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.switch.on { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 70%, #fff), var(--accent-deep)); }
+.switch.on::after { transform: translateX(22px); }
+.theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0 4px; }
+.theme-card {
+  position: relative; aspect-ratio: 1 / 1.15; border-radius: 16px; overflow: hidden;
+  border: 2px solid var(--glass-edge); transition: transform 0.14s, border-color 0.2s;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px;
+  font-size: 11px; font-weight: 900; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.theme-card:active { transform: scale(0.94); }
+.theme-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+.theme-card.locked { opacity: 0.45; }
+.theme-card .tlock { position: absolute; top: 6px; right: 7px; font-size: 12px; }
+.danger-btn { width: 100%; margin-top: 14px; padding: 11px; border-radius: 14px; font-weight: 900; color: #ff8c8c; background: rgba(255, 90, 90, 0.1); border: 1px solid rgba(255, 110, 110, 0.35); }
+.sheet .btn.primary { width: 100%; margin-top: 16px; }
+
+/* achievements */
+.ach-row {
+  display: flex; align-items: center; gap: 14px; padding: 11px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ach-row .ai { font-size: 26px; width: 38px; text-align: center; filter: grayscale(1); opacity: 0.4; }
+.ach-row.got .ai { filter: none; opacity: 1; }
+.ach-row .an { font-weight: 900; font-size: 15px; }
+.ach-row.got .an { color: var(--accent); }
+.ach-row .ad { font-size: 12.5px; color: var(--ink-dim); font-weight: 700; }
+#ach-toast {
+  position: fixed; top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -90px);
+  z-index: 400; display: flex; align-items: center; gap: 12px;
+  padding: 12px 22px; border-radius: 999px;
+  background: linear-gradient(180deg, rgba(46, 56, 104, 0.95), rgba(22, 28, 60, 0.97));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 14px 40px rgba(4, 8, 26, 0.6), 0 0 30px color-mix(in srgb, var(--accent) 25%, transparent);
+  font-weight: 900; white-space: nowrap; transition: transform 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
+  pointer-events: none;
+}
+#ach-toast.show { transform: translate(-50%, 0); }
+#ach-toast .at-icon { font-size: 24px; }
+#ach-toast .at-sub { display: block; font-size: 11px; color: var(--ink-dim); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 
 /* ---------------- Responsive ---------------- */
 @media (max-width: 560px) {
@@ -354,6 +492,21 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
     <p>sort the spill</p>
   </div>
   <div class="hero-bottles" aria-hidden="true"></div>
+  <div class="stat-chips">
+    <span class="chip" id="chip-stars">★ 0</span>
+    <span class="chip" id="chip-streak">🔥 0 day streak</span>
+  </div>
+  <div class="modes">
+    <button class="mode-card" id="card-daily">
+      <span class="mc-icon">📅</span><span class="mc-name">Daily</span>
+      <span class="mc-sub" id="daily-sub">Play today's puzzle</span>
+    </button>
+    <button class="mode-card" id="card-rush">
+      <span class="mc-icon">⚡</span><span class="mc-name">Rush</span>
+      <span class="mc-sub" id="rush-sub">Race the clock</span>
+    </button>
+  </div>
+  <p class="section-label">Classic · pick your level</p>
   <div class="seg" id="diff-seg" role="group" aria-label="Difficulty">
     <button data-d="relaxed">Relaxed</button>
     <button data-d="normal">Normal</button>
@@ -361,8 +514,11 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   </div>
   <div class="level-grid" id="level-grid"></div>
   <div class="menu-foot">
+    <button id="btn-ach">🏆 Awards</button>
+    <button id="btn-settings">⚙️ Settings</button>
     <button id="btn-sound-menu">🔊 Sound on</button>
   </div>
+  <p class="credit">Crafted &amp; solved by Claude — every puzzle is AI-verified solvable</p>
 </div>
 
 <!-- ============ Game ============ -->
@@ -381,13 +537,17 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   <div id="stage">
     <div id="fx"></div>
     <div id="hint">Tap a bottle, then tap where to pour</div>
+    <div class="fabs">
+      <button class="fab" id="btn-hint" aria-label="Ask Claude for a hint"><span class="fi">💡</span>Hint</button>
+      <button class="fab" id="btn-solve" aria-label="Watch Claude solve this level"><span class="fi">✨</span>Claude solves</button>
+    </div>
   </div>
 </div>
 
 <!-- ============ Win overlay ============ -->
 <div id="overlay">
   <div class="card">
-    <h2>Level complete</h2>
+    <h2 id="win-title">Level complete</h2>
     <div class="win-stars" id="win-stars"></div>
     <div class="meta" id="win-meta"></div>
     <div class="btns">
@@ -398,6 +558,31 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
   </div>
 </div>
 <canvas id="confetti"></canvas>
+
+<!-- ============ Settings ============ -->
+<div class="modal hidden" id="settings-modal">
+  <div class="sheet">
+    <h2>Settings</h2>
+    <div class="set-row"><span>Sound<span class="desc">Pours, chimes and fanfares</span></span><button class="switch" id="sw-sound" role="switch" aria-label="Sound"></button></div>
+    <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
+    <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
+    <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Unlock new looks by earning stars</span></span></div>
+    <div class="theme-grid" id="theme-grid"></div>
+    <button class="danger-btn" id="btn-reset">Erase all progress</button>
+    <button class="btn primary" id="settings-close">Done</button>
+  </div>
+</div>
+
+<!-- ============ Achievements ============ -->
+<div class="modal hidden" id="ach-modal">
+  <div class="sheet">
+    <h2>Achievements</h2>
+    <div id="ach-list"></div>
+    <button class="btn primary" id="ach-close">Done</button>
+  </div>
+</div>
+
+<div id="ach-toast"><span class="at-icon"></span><span><span class="at-sub">Achievement unlocked</span><span class="at-name"></span></span></div>
 
 <script>
 /* ============================================================
@@ -412,10 +597,20 @@ const CAP = 4;
    colors * sets; each color exists sets*4 units. Repeating colors across
    multiple bottle-sets is how big boards stay readable with few hues. */
 const LEVEL_TABLE = {
-  relaxed: { empties: 3, undos: Infinity, mystery: 0, levels: [[3,1],[4,1],[4,1],[5,1],[5,1],[6,1],[6,1],[7,1],[7,1],[8,1]] },
-  normal:  { empties: 2, undos: Infinity, mystery: 0, levels: [[4,1],[5,1],[6,1],[7,1],[8,1],[5,2],[6,2],[7,2],[8,2],[6,3]] },
-  expert:  { empties: 2, undos: 5, mystery: 1, levels: [[5,1],[6,1],[7,1],[8,1],[9,1],[6,2],[7,2],[8,2],[6,3],[7,3]] }
+  relaxed: { empties: 3, undos: Infinity, mystery: 0, levels: [
+    [3,1],[4,1],[4,1],[5,1],[5,1],[6,1],[6,1],[7,1],[7,1],[8,1],
+    [5,2],[6,2],[7,2],[8,2],[9,1],[9,2],[6,3],[7,3],[8,2],[6,3],
+    [7,2],[8,2],[9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[9,2],[7,3]] },
+  normal:  { empties: 2, undos: Infinity, mystery: 0, levels: [
+    [4,1],[5,1],[6,1],[7,1],[8,1],[5,2],[6,2],[7,2],[8,2],[6,3],
+    [7,2],[8,2],[6,3],[9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[8,2],
+    [9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[9,2],[8,2],[7,3],[9,2]] },
+  expert:  { empties: 2, undos: 5, mystery: 1, levels: [
+    [5,1],[6,1],[7,1],[8,1],[9,1],[6,2],[7,2],[8,2],[6,3],[7,3],
+    [8,2],[6,3],[9,2],[7,3],[8,2],[9,2],[7,3],[8,2],[9,2],[6,3],
+    [7,3],[9,2],[8,2],[7,3],[9,2],[8,2],[7,3],[9,2],[8,2],[7,3]] }
 };
+const MAX_LEVEL = 30;
 
 /* Baked seed offsets + par, found at build time so runtime never searches. */
 const BAKED = {"relaxed":[{"o":0,"p":7},{"o":0,"p":11},{"o":0,"p":13},{"o":0,"p":15},{"o":0,"p":16},{"o":0,"p":19},{"o":0,"p":20},{"o":0,"p":28},{"o":0,"p":25},{"o":0,"p":33}],"normal":[{"o":0,"p":14},{"o":0,"p":18},{"o":0,"p":22},{"o":0,"p":24},{"o":0,"p":30},{"o":0,"p":35},{"o":0,"p":34},{"o":0,"p":45},{"o":0,"p":61},{"o":0,"p":60}],"expert":[{"o":0,"p":14},{"o":0,"p":20},{"o":0,"p":24},{"o":0,"p":27},{"o":0,"p":35},{"o":0,"p":35},{"o":0,"p":48},{"o":0,"p":61},{"o":0,"p":50},{"o":0,"p":71}]};
@@ -590,7 +785,17 @@ function specialsFor(level, difficulty, fillCount, state) {
   return out;
 }
 
+const GEN_CACHE = {};
+
 function generateLevel(level, difficulty) {
+  const ck = difficulty + ':' + level;
+  if (GEN_CACHE[ck]) return GEN_CACHE[ck];
+  const out = generateLevelUncached(level, difficulty);
+  GEN_CACHE[ck] = out;
+  return out;
+}
+
+function generateLevelUncached(level, difficulty) {
   const baked = BAKED && BAKED[difficulty] && BAKED[difficulty][level - 1];
   if (baked) {
     const b = buildState(level, difficulty, baked.o);
@@ -611,9 +816,52 @@ function generateLevel(level, difficulty) {
   throw new Error('Level generation failed for level ' + level + ' / ' + difficulty);
 }
 
+/* ---------- Custom boards (Daily / Rush) ----------
+   Seeded, solver-verified boards independent of the classic tables. */
+function generateFromSeed(seedBase, colors, sets, empties, maxAttempts) {
+  for (let attempt = 0; attempt < (maxAttempts || 200); attempt++) {
+    const rng = mulberry32((seedBase + attempt * 104729) >>> 0);
+    const units = [];
+    for (let c = 0; c < colors; c++) for (let k = 0; k < CAP * sets; k++) units.push(c);
+    shuffleInPlace(units, rng);
+    const state = [];
+    for (let b = 0; b < colors * sets; b++) state.push(units.slice(b * CAP, b * CAP + CAP));
+    for (let e = 0; e < empties; e++) state.push([]);
+    if (state.some(isBottleComplete)) continue;
+    const res = solve(cloneState(state), 300000);
+    if (res.solution && res.solution.length > 2) {
+      return { state, par: res.solution.length, colors, sets, empties,
+               undos: Infinity, specials: { mystery: [], veiled: [], frozen: [] } };
+    }
+  }
+  return null;
+}
+
+/* One puzzle per calendar day; weekends run bigger boards. */
+function dailyConfig(dateStr) { // dateStr: 'YYYY-MM-DD'
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const seed = (y * 10000 + m * 100 + d) >>> 0;
+  const dow = new Date(y, m - 1, d).getDay();
+  const weekend = dow === 0 || dow === 6;
+  const colors = 5 + (seed % 4);                 // 5-8
+  const sets = weekend ? 2 : 1;
+  return { seed: (seed * 2654435761) >>> 0, colors, sets, empties: 2 };
+}
+
+/* Rush ladder: shapes grow with the stage number. */
+function rushConfig(stage) {
+  const s = Math.max(1, stage);
+  const colors = Math.min(3 + s, 9);             // 4,5,6,7,8,9,9...
+  const sets = s >= 8 ? 2 : 1;
+  return { seed: (s * 48271 + 7) >>> 0, colors, sets, empties: 2 };
+}
+
+function rushTimeFor(par) { return Math.round(18 + par * 2.4); }
+
 /* ---------- Exports ---------- */
 const VesselLogic = {
-  CAP, LEVEL_TABLE, buildState, diffSeed, specialsFor,
+  CAP, LEVEL_TABLE, MAX_LEVEL, buildState, diffSeed, specialsFor,
+  generateFromSeed, dailyConfig, rushConfig, rushTimeFor,
   mulberry32, cloneState, stateKey, topRun,
   isBottleComplete, isBottleClear, isSolved,
   canPour, pourAmount, applyPour, solve, generateLevel
@@ -644,6 +892,9 @@ const COLORS = [
   ['#d8b48c', '#7d4f28']  // mocha
 ];
 const HIDDEN_FILL = ['#525b78', '#2e3550'];
+const COLOR_NAMES = ['cherry', 'tangerine', 'lemon', 'lime', 'teal', 'blue', 'violet', 'pink', 'mocha'];
+/* one distinct glyph per liquid color, for colorblind-friendly play */
+const COLOR_GLYPHS = ['♥', '▲', '●', '✿', '◆', '★', '✚', '♪', '⬣'];
 
 /* ---------------- bottle shapes ----------------
    Every shape: viewBox 100 x vbH. pivot = element center (CSS rotate origin).
@@ -703,11 +954,18 @@ const store = {
     try { localStorage.setItem(KEY, raw); } catch (e) {}
   }
 };
-const DEFAULT_SAVE = { progress: { relaxed: {}, normal: {}, expert: {} }, sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {} };
+const DEFAULT_SAVE = {
+  progress: { relaxed: {}, normal: {}, expert: {} },
+  sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
+  theme: 'dusk', symbols: false, haptics: true,
+  ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0
+};
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
 save.progress = Object.assign({}, DEFAULT_SAVE.progress, save.progress || {});
 if (!['relaxed', 'normal', 'expert'].includes(save.difficulty)) save.difficulty = 'normal';
 save.seenSpecials = save.seenSpecials || {};
+save.ach = save.ach || {};
+save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
 function persist() { store.save(save); }
 
 /* ---------------- audio ---------------- */
@@ -767,7 +1025,7 @@ const AudioFX = {
     this.tone(1568, 0.5, 'sine', 0.06, 1568, 0.46);
   }
 };
-function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+function buzz(p) { try { if (save.haptics && navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
 
 /* ---------------- helpers ---------------- */
 const $ = s => document.querySelector(s);
@@ -868,6 +1126,10 @@ function buildBottleSVG(shapeName) {
 
 /* ---------------- game state ---------------- */
 let level = 1, difficulty = save.difficulty || 'normal';
+let mode = 'classic';            /* classic | daily | rush */
+let rushStage = 1, rushTimeLeft = 0, rushTicker = null, rushNextT = null;
+let usedHint = false, usedAuto = false, autoPlaying = false;
+let undosUsed = 0, perfectStreak = 0;
 let pendingLayout = false;
 let state = [], visual = [], par = 0, undosAllowed = Infinity, undosLeft = Infinity;
 let moves = 0, history = [], sel = null, activePours = 0;
@@ -923,6 +1185,15 @@ function renderBottle(i, tiltDeg) {
     const h = seg.u * hUnit;
     const y = low - (cum + seg.u) * hUnit;
     inner.appendChild(svgEl('rect', { x: -160, y: y, width: 420, height: h + 1.4, fill: 'url(#liq' + seg.c + ')' }));
+    if (save.symbols && fade > 0.3 && seg.u >= 0.8) {
+      const gl = svgEl('text', {
+        x: px, y: y + h / 2 + 5, 'text-anchor': 'middle',
+        'font-size': 13, fill: 'rgba(255,255,255,0.85)', opacity: fade,
+        style: 'paint-order:stroke; stroke:rgba(0,0,0,0.25); stroke-width:2px;'
+      });
+      gl.textContent = COLOR_GLYPHS[seg.c];
+      inner.appendChild(gl);
+    }
     if (fade > 0.04) ellipses.push({ y, c: seg.c });
     cum += seg.u;
   }
@@ -937,6 +1208,22 @@ function renderBottle(i, tiltDeg) {
       fill: '#ffffff', opacity: 0.5 * fade
     }));
   });
+
+  /* idle bubbles in the top liquid (skipped mid-pour: bottle is locked) */
+  if (!t && !RM && ellipses.length && !locked.has(i) && cum > 0.5) {
+    const surfY = ellipses[ellipses.length - 1].y;
+    const depth = low - surfY;
+    for (let b = 0; b < 2; b++) {
+      const c = svgEl('circle', {
+        cx: px - 9 + b * 17 + Math.random() * 3,
+        cy: low - 3 - Math.random() * Math.max(4, depth * 0.35),
+        r: 1.4 + Math.random() * 0.9, fill: 'rgba(255,255,255,0.45)'
+      });
+      c.setAttribute('class', 'bub');
+      c.style.animationDelay = (-Math.random() * 3.6).toFixed(2) + 's';
+      inner.appendChild(c);
+    }
+  }
 
   /* mystery overlay: unit bands counted from the bottom */
   const hid = hiddenDepth[i] || 0;
@@ -1048,21 +1335,29 @@ function applySpecials(gen) {
   if (sp.frozen.length && !save.seenSpecials.f) { msgs.push('Ice thaws when you complete a bottle'); save.seenSpecials.f = 1; }
   if (msgs.length) {
     persist();
-    const h = $('#hint');
-    h.textContent = msgs.join('  ·  ');
-    h.style.opacity = 1;
-    setTimeout(() => { h.style.opacity = 0; }, 5200);
+    toastMsg(msgs.join('  ·  '), 5200);
   }
   return sp;
 }
 
-function loadLevel(lvl) {
-  level = lvl;
-  const gen = window.generateLevel(lvl, difficulty);
-  state = gen.state; par = gen.par;
+let toastT = null;
+function toastMsg(msg, ms) {
+  const h = $('#hint');
+  h.textContent = msg;
+  h.style.opacity = 1;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { h.style.opacity = 0; }, ms || 2600);
+}
+
+function setupBoard(gen) {
+  /* boards can come from a cache — never mutate the generated original */
+  state = gen.state.map(b => b.slice());
+  par = gen.par;
   undosAllowed = gen.undos; undosLeft = gen.undos;
   visual = state.map(mergeRuns);
   moves = 0; history = []; sel = null; locked.clear(); activePours = 0;
+  usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
+  clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
   const specials = applySpecials(gen);
   needCaps = gen.colors * gen.sets;
@@ -1107,8 +1402,91 @@ function loadLevel(lvl) {
   syncCaps();
   orbUpdate(false);
   updateHUD();
-  if (!save.seenHint && lvl === 1) { $('#hint').textContent = 'Tap a bottle, then tap where to pour'; $('#hint').style.opacity = 1; }
   $('#overlay').classList.remove('show');
+}
+
+function loadLevel(lvl) {
+  mode = 'classic';
+  stopRushTimer();
+  level = lvl;
+  setupBoard(window.generateLevel(lvl, difficulty));
+  if (!save.seenHint && lvl === 1) { $('#hint').textContent = 'Tap a bottle, then tap where to pour'; $('#hint').style.opacity = 1; }
+}
+
+/* ---------------- daily challenge ---------------- */
+function todayStr(offsetDays) {
+  const d = new Date();
+  if (offsetDays) d.setDate(d.getDate() + offsetDays);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function loadDaily() {
+  mode = 'daily';
+  stopRushTimer();
+  const cfg = window.dailyConfig(todayStr());
+  const gen = window.generateFromSeed(cfg.seed, cfg.colors, cfg.sets, cfg.empties);
+  if (!gen) { toastMsg('Today’s puzzle would not mix — try Classic'); return; }
+  level = 1;
+  setupBoard(gen);
+}
+
+/* ---------------- rush mode ---------------- */
+function startRush() {
+  rushStage = 1;
+  loadRushStage();
+}
+
+function loadRushStage() {
+  mode = 'rush';
+  clearTimeout(rushNextT);
+  const cfg = window.rushConfig(rushStage);
+  const gen = window.generateFromSeed(cfg.seed, cfg.colors, cfg.sets, cfg.empties);
+  if (!gen) { toastMsg('Rush hit a wall — try Classic'); return; }
+  level = rushStage;
+  setupBoard(gen);
+  startRushTimer(window.rushTimeFor(gen.par));
+}
+
+function startRushTimer(sec) {
+  rushTimeLeft = sec;
+  clearInterval(rushTicker);
+  rushTicker = setInterval(() => {
+    if (document.hidden || activePours > 0 && rushTimeLeft <= 1) return;
+    rushTimeLeft--;
+    if (rushTimeLeft === 10) AudioFX.ice();
+    updateHUD();
+    if (rushTimeLeft <= 0) { stopRushTimer(); rushFail(); }
+  }, 1000);
+  updateHUD();
+}
+
+function stopRushTimer() {
+  clearInterval(rushTicker); rushTicker = null;
+  clearTimeout(rushNextT);
+}
+
+function rushFail() {
+  setSelected(null);
+  const cleared = rushStage - 1;
+  if (cleared > save.rushBest) { save.rushBest = cleared; persist(); }
+  $('#win-title').textContent = 'Time’s up!';
+  $('#win-stars').innerHTML = '<span>⏱️</span>';
+  $('#win-meta').textContent = 'Cleared ' + cleared + (cleared === 1 ? ' stage' : ' stages') + ' · best ' + save.rushBest;
+  $('#btn-next').classList.add('hidden');
+  $('#overlay').classList.add('show');
+  AudioFX.invalid(); buzz([30, 60, 30]);
+}
+
+function onRushStageClear() {
+  stopRushTimer();
+  if (rushStage > save.rushBest) { save.rushBest = rushStage; persist(); }
+  if (rushStage >= 5) unlockAch('rush5');
+  toastMsg('Stage ' + rushStage + ' clear! ⚡ +next', 1400);
+  AudioFX.win(); buzz([20, 50, 40]);
+  if (!RM) confetti();
+  rushNextT = setTimeout(() => {
+    if (mode === 'rush') { rushStage++; loadRushStage(); }
+  }, RM ? 250 : 1300);
 }
 
 /* ---------------- magic orb (fills as bottles complete) ---------------- */
@@ -1151,14 +1529,27 @@ function orbUpdate(pulse) {
 }
 
 function updateHUD() {
-  $('#hud-level').textContent = 'Level ' + level;
-  $('#hud-sub').textContent = cap1(difficulty) + ' · Moves ' + moves + ' · Par ' + par;
+  const lvlEl = $('#hud-level'), subEl = $('#hud-sub');
+  if (mode === 'daily') {
+    lvlEl.textContent = 'Daily Challenge';
+    subEl.textContent = todayStr().slice(5).replace('-', '/') + ' · Moves ' + moves + ' · Par ' + par;
+  } else if (mode === 'rush') {
+    lvlEl.textContent = 'Rush · Stage ' + rushStage;
+    subEl.textContent = '⏱ ' + Math.max(0, rushTimeLeft) + 's · Moves ' + moves;
+  } else {
+    lvlEl.textContent = 'Level ' + level;
+    subEl.textContent = cap1(difficulty) + ' · Moves ' + moves + ' · Par ' + par;
+  }
+  subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
-  undoBtn.disabled = history.length === 0 || activePours > 0 || undosLeft <= 0;
+  undoBtn.disabled = history.length === 0 || activePours > 0 || undosLeft <= 0 || autoPlaying;
   const badge = $('#undo-badge');
   if (undosAllowed !== Infinity) { badge.classList.remove('hidden'); badge.textContent = undosLeft; }
   else badge.classList.add('hidden');
-  $('#btn-restart').disabled = activePours > 0;
+  $('#btn-restart').disabled = activePours > 0 || autoPlaying;
+  $('#btn-hint').disabled = autoPlaying;
+  $('#btn-solve').disabled = autoPlaying;
+  $('#btn-solve').classList.toggle('hidden', mode === 'rush');
 }
 function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
@@ -1201,6 +1592,7 @@ function thawAll() {
 
 function onTap(i) {
   AudioFX.ensure();
+  if (autoPlaying) return;
   if (locked.has(i)) return;
   if (frozen.has(i)) { shake(i); AudioFX.ice(); buzz([8, 20, 8]); return; }
   if (veiled[i]) { unveil(i); return; }
@@ -1350,7 +1742,22 @@ async function doPour(si, di) {
   if (activePours === 0 && window.isSolved(state)) {
     await wait(RM ? 100 : 550);
     onWin();
+  } else if (activePours === 0 && !autoPlaying && !anyUsefulMove()) {
+    toastMsg('No moves left — undo ↩ or restart ⟳', 3200);
+    AudioFX.invalid();
   }
+}
+
+/* a position is stuck when no pour between usable bottles is legal */
+function anyUsefulMove() {
+  for (let i = 0; i < state.length; i++) {
+    if (frozen.has(i) || !state[i].length || window.isBottleComplete(state[i])) continue;
+    for (let j = 0; j < state.length; j++) {
+      if (i === j || frozen.has(j)) continue;
+      if (window.canPour(state, i, j)) return true;
+    }
+  }
+  return false;
 }
 
 /* ---------------- sparkles ---------------- */
@@ -1370,9 +1777,10 @@ function spawnSparkles(host, count, spread) {
 
 /* ---------------- undo / restart ---------------- */
 function undo() {
-  if (!history.length || activePours > 0 || undosLeft <= 0) return;
+  if (!history.length || activePours > 0 || undosLeft <= 0 || autoPlaying) return;
   const snap = history.pop();
   state = snap.state; moves = snap.moves;
+  undosUsed++;
   if (undosAllowed !== Infinity) undosLeft--;
   visual = state.map(mergeRuns);
   hiddenDepth = hiddenDepth.map((h, i) => Math.min(h, Math.max(0, state[i].length - 1)));
@@ -1384,21 +1792,200 @@ function undo() {
   updateHUD();
 }
 
+/* ---------------- AI assistant (hints & autoplay) ----------------
+   The same solver that verifies every level also plays it: hints show
+   the first move of a fresh optimal-ish solution from the current
+   position; autoplay performs the whole line with real pours. */
+function aiSolution(budget) {
+  if (!state.length || window.isSolved(state)) return null;
+  const res = window.solve(window.cloneState(state), budget || 250000, frozen.size ? new Set(frozen) : null);
+  return res.solution && res.solution.length ? res.solution : null;
+}
+
+function clearHintGlow() {
+  document.querySelectorAll('.hint-src, .hint-dst').forEach(el => el.classList.remove('hint-src', 'hint-dst'));
+}
+
+let hintGlowT = null;
+function showHint() {
+  if (activePours > 0 || autoPlaying || !state.length || window.isSolved(state)) return;
+  AudioFX.ensure();
+  const sol = aiSolution();
+  if (!sol) { toastMsg('Claude sees no way out from here — undo ↩ a little', 3000); AudioFX.invalid(); return; }
+  const [i, j] = sol[0];
+  clearHintGlow();
+  slots[i].el.classList.add('hint-src');
+  slots[j].el.classList.add('hint-dst');
+  clearTimeout(hintGlowT);
+  hintGlowT = setTimeout(clearHintGlow, 2400);
+  const c = state[i][state[i].length - 1];
+  const what = veiled[i] || (hiddenDepth[i] || 0) >= state[i].length ? 'that bottle' : 'the ' + COLOR_NAMES[c];
+  toastMsg('Claude: pour ' + what + ' into the glowing bottle — ' + sol.length + ' to go');
+  usedHint = true;
+  unlockAch('oracle');
+  AudioFX.reveal(); buzz(8);
+}
+
+async function autoSolve() {
+  if (activePours > 0 || autoPlaying || !state.length || window.isSolved(state)) return;
+  AudioFX.ensure();
+  const sol = aiSolution(350000);
+  if (!sol) { toastMsg('Even Claude is stuck here — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
+  autoPlaying = true; usedAuto = true;
+  setSelected(null); clearHintGlow();
+  updateHUD();
+  toastMsg('Claude takes over — watch the ' + sol.length + '-move solve ✨', 2400);
+  unlockAch('showoff');
+  for (const [i, j] of sol) {
+    if (!autoPlaying) break;
+    if (veiled[i]) unveil(i);
+    if (veiled[j]) unveil(j);
+    await doPour(i, j);
+    await wait(RM ? 30 : 140);
+  }
+  autoPlaying = false;
+  updateHUD();
+}
+
+/* ---------------- achievements ---------------- */
+const ACHIEVEMENTS = [
+  { id: 'first',    icon: '🍾', name: 'First pour',       desc: 'Complete your first level' },
+  { id: 'triple',   icon: '🌟', name: 'Flawless',         desc: 'Earn 3 stars on a level' },
+  { id: 'perfect3', icon: '👑', name: 'Hat trick',        desc: '3-star three levels in a row' },
+  { id: 'stars25',  icon: '✨', name: 'Constellation',    desc: 'Collect 25 stars in Classic' },
+  { id: 'stars60',  icon: '🌌', name: 'Galaxy brain',     desc: 'Collect 60 stars in Classic' },
+  { id: 'expert',   icon: '🧠', name: 'Master mixer',     desc: 'Beat an Expert level' },
+  { id: 'pure',     icon: '🎯', name: 'No takebacks',     desc: 'Beat Normal or Expert without undo' },
+  { id: 'daily',    icon: '📅', name: 'Fresh squeeze',    desc: 'Complete a Daily Challenge' },
+  { id: 'streak3',  icon: '🔥', name: 'On a roll',        desc: 'Reach a 3-day Daily streak' },
+  { id: 'rush5',    icon: '⚡', name: 'Quicksilver',      desc: 'Clear stage 5 in Rush' },
+  { id: 'oracle',   icon: '💡', name: 'Ask the oracle',   desc: 'Use one of Claude’s hints' },
+  { id: 'showoff',  icon: '🤖', name: 'Sit back & relax', desc: 'Watch Claude solve a level' }
+];
+
+let achToastT = null;
+function unlockAch(id) {
+  if (save.ach[id]) return;
+  save.ach[id] = Date.now();
+  persist();
+  const a = ACHIEVEMENTS.find(x => x.id === id);
+  if (!a) return;
+  const t = $('#ach-toast');
+  t.querySelector('.at-icon').textContent = a.icon;
+  t.querySelector('.at-name').textContent = a.name;
+  t.classList.add('show');
+  AudioFX.cap(); buzz([10, 30, 10]);
+  clearTimeout(achToastT);
+  achToastT = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function renderAchList() {
+  const list = $('#ach-list');
+  list.innerHTML = '';
+  ACHIEVEMENTS.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'ach-row' + (save.ach[a.id] ? ' got' : '');
+    row.innerHTML = '<span class="ai">' + a.icon + '</span><span><div class="an">' + a.name + '</div><div class="ad">' + a.desc + '</div></span>';
+    list.appendChild(row);
+  });
+}
+
+/* ---------------- themes ---------------- */
+const THEMES = [
+  { id: 'dusk',   name: 'Dusk',   stars: 0,  bg: 'linear-gradient(180deg, #1b2348, #0d2730)' },
+  { id: 'ocean',  name: 'Ocean',  stars: 10, bg: 'linear-gradient(180deg, #0c3146, #04342b)' },
+  { id: 'candy',  name: 'Candy',  stars: 25, bg: 'linear-gradient(180deg, #43164f, #6e1c47)' },
+  { id: 'galaxy', name: 'Galaxy', stars: 50, bg: 'linear-gradient(180deg, #2a1d6e, #05040f)' }
+];
+
+function totalStars() {
+  let t = 0;
+  for (const d of ['relaxed', 'normal', 'expert']) {
+    const p = save.progress[d] || {};
+    for (const k in p) t += p[k].stars || 0;
+  }
+  return t;
+}
+
+function applyTheme() {
+  const t = THEMES.find(x => x.id === save.theme) || THEMES[0];
+  if (t.id === 'dusk') document.body.removeAttribute('data-theme');
+  else document.body.setAttribute('data-theme', t.id);
+}
+
+function renderThemeGrid() {
+  const grid = $('#theme-grid');
+  grid.innerHTML = '';
+  const stars = totalStars();
+  THEMES.forEach(t => {
+    const b = document.createElement('button');
+    const lockedTheme = stars < t.stars;
+    b.className = 'theme-card' + (save.theme === t.id ? ' on' : '') + (lockedTheme ? ' locked' : '');
+    b.style.background = t.bg;
+    b.innerHTML = '<span>' + t.name + '</span>' + (lockedTheme ? '<span class="tlock">🔒' + t.stars + '★</span>' : '');
+    b.addEventListener('click', () => {
+      if (totalStars() < t.stars) { AudioFX.invalid(); buzz([12, 30, 12]); return; }
+      save.theme = t.id;
+      persist();
+      applyTheme();
+      renderThemeGrid();
+      AudioFX.select();
+    });
+    grid.appendChild(b);
+  });
+}
+
+function renderSettings() {
+  $('#sw-sound').classList.toggle('on', !!save.sound);
+  $('#sw-haptics').classList.toggle('on', !!save.haptics);
+  $('#sw-symbols').classList.toggle('on', !!save.symbols);
+  renderThemeGrid();
+}
+
 /* ---------------- win ---------------- */
 function starsFor(m) { return m <= par ? 3 : m <= Math.ceil(par * 1.5) ? 2 : 1; }
 
 function onWin() {
-  const st = starsFor(moves);
-  const prev = save.progress[difficulty][level];
-  save.progress[difficulty][level] = {
-    stars: Math.max(st, prev ? prev.stars : 0),
-    best: Math.min(moves, prev ? prev.best : Infinity)
-  };
-  persist();
+  if (mode === 'rush') return onRushStageClear();
+  const st = usedAuto ? 1 : starsFor(moves);
+  let meta = moves + ' moves · par ' + par;
+
+  if (mode === 'daily') {
+    const today = todayStr();
+    if (save.daily.lastWin !== today) {
+      save.daily.streak = save.daily.lastWin === todayStr(-1) ? save.daily.streak + 1 : 1;
+      save.daily.lastWin = today;
+    }
+    persist();
+    unlockAch('daily');
+    if (save.daily.streak >= 3) unlockAch('streak3');
+    $('#win-title').textContent = 'Daily complete!';
+    meta += ' · 🔥 ' + save.daily.streak + '-day streak';
+    $('#btn-next').classList.add('hidden');
+  } else {
+    const prev = save.progress[difficulty][level];
+    save.progress[difficulty][level] = {
+      stars: Math.max(st, prev ? prev.stars : 0),
+      best: Math.min(moves, prev ? prev.best : Infinity)
+    };
+    persist();
+    unlockAch('first');
+    if (difficulty === 'expert') unlockAch('expert');
+    if (!undosUsed && !usedAuto && difficulty !== 'relaxed') unlockAch('pure');
+    if (st === 3) { unlockAch('triple'); perfectStreak++; if (perfectStreak >= 3) unlockAch('perfect3'); }
+    else perfectStreak = 0;
+    const ts = totalStars();
+    if (ts >= 25) unlockAch('stars25');
+    if (ts >= 60) unlockAch('stars60');
+    $('#win-title').textContent = 'Level complete';
+    const best = save.progress[difficulty][level].best;
+    if (best < moves) meta += ' · best ' + best;
+    $('#btn-next').classList.toggle('hidden', level >= window.MAX_LEVEL);
+  }
+
+  if (usedAuto) meta += ' · solved by Claude ✨';
   $('#win-stars').innerHTML = [1, 2, 3].map(k => '<span class="' + (k <= st ? '' : 'off') + '">★</span>').join('');
-  const best = save.progress[difficulty][level].best;
-  $('#win-meta').textContent = moves + ' moves · par ' + par + (best < moves ? ' · best ' + best : '');
-  $('#btn-next').classList.toggle('hidden', level >= 10);
+  $('#win-meta').textContent = meta;
   $('#overlay').classList.add('show');
   const orbHost = $('#orb');
   if (orbHost && !RM) { orbHost.classList.add('burst'); spawnSparkles(orbHost, 10, 0.7); setTimeout(() => orbHost.classList.remove('burst'), 900); }
@@ -1489,16 +2076,22 @@ function showScreen(name) {
 
 function unlockedUpTo() {
   let u = 1;
-  while (u < 10 && save.progress[difficulty][u]) u++;
+  while (u < window.MAX_LEVEL && save.progress[difficulty][u]) u++;
   return u;
 }
 
 function renderMenu() {
   document.querySelectorAll('#diff-seg button').forEach(b => b.classList.toggle('on', b.dataset.d === difficulty));
+  $('#chip-stars').textContent = '★ ' + totalStars();
+  $('#chip-streak').textContent = '🔥 ' + (save.daily.streak || 0) + ' day streak';
+  const doneToday = save.daily.lastWin === todayStr();
+  $('#card-daily').classList.toggle('done', doneToday);
+  $('#daily-sub').textContent = doneToday ? '✓ Done · back tomorrow' : 'Play today’s puzzle';
+  $('#rush-sub').textContent = save.rushBest > 0 ? 'Best · stage ' + save.rushBest : 'Race the clock';
   const grid = $('#level-grid');
   grid.innerHTML = '';
   const maxOpen = unlockedUpTo();
-  for (let l = 1; l <= 10; l++) {
+  for (let l = 1; l <= window.MAX_LEVEL; l++) {
     const t = document.createElement('button');
     t.className = 'tile';
     const p = save.progress[difficulty][l];
@@ -1540,8 +2133,24 @@ function buildHeroBottles() {
 }
 
 /* ---------------- wiring ---------------- */
+function goMenu() {
+  stopRushTimer();
+  autoPlaying = false;
+  setSelected(null);
+  $('#overlay').classList.remove('show');
+  renderMenu();
+  showScreen('menu');
+}
+
+function restartCurrent() {
+  if (mode === 'daily') loadDaily();
+  else if (mode === 'rush') loadRushStage();
+  else loadLevel(level);
+}
+
 function init() {
   for (const k in SHAPES) SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
+  applyTheme();
   buildDefs();
   buildOrb();
   buildHeroBottles();
@@ -1557,9 +2166,9 @@ function init() {
   $('#btn-sound-menu').addEventListener('click', () => {
     save.sound = !save.sound; persist(); renderMenu(); AudioFX.select();
   });
-  $('#btn-back').addEventListener('click', () => { AudioFX.swap(); renderMenu(); showScreen('menu'); });
+  $('#btn-back').addEventListener('click', () => { AudioFX.swap(); goMenu(); });
   $('#btn-undo').addEventListener('click', undo);
-  $('#btn-restart').addEventListener('click', () => { if (activePours === 0) { AudioFX.swap(); loadLevel(level); } });
+  $('#btn-restart').addEventListener('click', () => { if (activePours === 0 && !autoPlaying) { AudioFX.swap(); restartCurrent(); } });
   $('#btn-sound').addEventListener('click', () => {
     save.sound = !save.sound; persist();
     $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
@@ -1567,9 +2176,46 @@ function init() {
   });
   $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
 
-  $('#btn-replay').addEventListener('click', () => { $('#overlay').classList.remove('show'); loadLevel(level); });
-  $('#btn-menu').addEventListener('click', () => { $('#overlay').classList.remove('show'); renderMenu(); showScreen('menu'); });
-  $('#btn-next').addEventListener('click', () => { $('#overlay').classList.remove('show'); if (level < 10) loadLevel(level + 1); });
+  $('#btn-replay').addEventListener('click', () => {
+    $('#overlay').classList.remove('show');
+    if (mode === 'rush') startRush();      /* a fresh run after Time's up */
+    else restartCurrent();
+  });
+  $('#btn-menu').addEventListener('click', () => { goMenu(); });
+  $('#btn-next').addEventListener('click', () => { $('#overlay').classList.remove('show'); if (level < window.MAX_LEVEL) loadLevel(level + 1); });
+
+  /* modes */
+  $('#card-daily').addEventListener('click', () => { AudioFX.select(); loadDaily(); });
+  $('#card-rush').addEventListener('click', () => { AudioFX.select(); startRush(); });
+
+  /* AI assistant */
+  $('#btn-hint').addEventListener('click', showHint);
+  $('#btn-solve').addEventListener('click', autoSolve);
+
+  /* settings & achievements */
+  $('#btn-settings').addEventListener('click', () => { AudioFX.select(); renderSettings(); $('#settings-modal').classList.remove('hidden'); });
+  $('#settings-close').addEventListener('click', () => { AudioFX.swap(); $('#settings-modal').classList.add('hidden'); renderMenu(); });
+  $('#btn-ach').addEventListener('click', () => { AudioFX.select(); renderAchList(); $('#ach-modal').classList.remove('hidden'); });
+  $('#ach-close').addEventListener('click', () => { AudioFX.swap(); $('#ach-modal').classList.add('hidden'); });
+  [['#settings-modal'], ['#ach-modal']].forEach(([sel2]) => {
+    const m = $(sel2);
+    m.addEventListener('click', e => { if (e.target === m) m.classList.add('hidden'); });
+  });
+  $('#sw-sound').addEventListener('click', () => { save.sound = !save.sound; persist(); renderSettings(); AudioFX.select(); });
+  $('#sw-haptics').addEventListener('click', () => { save.haptics = !save.haptics; persist(); renderSettings(); buzz(15); });
+  $('#sw-symbols').addEventListener('click', () => {
+    save.symbols = !save.symbols; persist(); renderSettings(); AudioFX.select();
+    if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
+  });
+  $('#btn-reset').addEventListener('click', () => {
+    if (!confirm('Erase all progress, stars and achievements?')) return;
+    save = JSON.parse(JSON.stringify(DEFAULT_SAVE));
+    persist();
+    applyTheme();
+    renderSettings();
+    renderMenu();
+    AudioFX.undo();
+  });
 
   let rT;
   const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (activePours === 0) layoutStage(); else pendingLayout = true; }, 120); };
@@ -1579,7 +2225,11 @@ function init() {
 }
 
 window.__vessel = {
-  loadLevel, onTap, undo,
+  loadLevel, onTap, undo, loadDaily, startRush, showHint, autoSolve, totalStars,
+  get mode() { return mode; },
+  get rushStage() { return rushStage; },
+  get rushTimeLeft() { return rushTimeLeft; },
+  get autoPlaying() { return autoPlaying; },
   get state() { return state; },
   get moves() { return moves; },
   get activePours() { return activePours; },
