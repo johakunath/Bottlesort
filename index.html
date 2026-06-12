@@ -388,18 +388,18 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 .credit { color: var(--ink-dim); opacity: 0.75; font-size: 12px; font-weight: 700; margin: 0; }
 
 /* ---------------- AI assistant FABs ---------------- */
-.fabs { position: absolute; right: clamp(10px, 2vw, 24px); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; z-index: 90; }
+.fabs { position: absolute; right: max(8px, env(safe-area-inset-right)); bottom: max(8px, env(safe-area-inset-bottom)); z-index: 90; }
 .fab {
-  display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 999px;
+  width: 42px; height: 42px; border-radius: 50%;
+  display: grid; place-items: center; padding: 0;
   background: rgba(20, 26, 56, 0.78); border: 1px solid var(--glass-edge);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  font-weight: 900; font-size: clamp(13px, 2.1vmin, 15px); color: var(--ink);
-  box-shadow: 0 10px 26px rgba(4, 8, 26, 0.45);
+  box-shadow: 0 8px 20px rgba(4, 8, 26, 0.45);
   transition: transform 0.13s, background 0.2s, opacity 0.2s;
 }
 .fab:active { transform: scale(0.94); }
 .fab:disabled { opacity: 0.4; pointer-events: none; }
-.fab .fi { font-size: 17px; }
+.fab .fi { font-size: 18px; }
 
 /* hint glow on suggested bottles */
 @keyframes hintPulse {
@@ -509,10 +509,10 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 #ach-toast .at-sub { display: block; font-size: 11px; color: var(--ink-dim); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 
 /* ---------------- Liquid element effects ---------------- */
-@keyframes iceShimmer { 0%,100%{opacity:0.18} 50%{opacity:0.38} }
-@keyframes electricArc { 0%,82%,100%{opacity:0.12} 83%,85%,87%,89%{opacity:1} 84%,86%,88%{opacity:0.2} }
-@keyframes boilBubble { 0%{transform:translateY(0) scale(1);opacity:0.7} 100%{transform:translateY(-26px) scale(0.3);opacity:0} }
-@keyframes toxicPulse { 0%,100%{opacity:0.18} 50%{opacity:0.42} }
+@keyframes iceShimmer { 0%,100%{opacity:0.55} 50%{opacity:0.95} }
+@keyframes electricArc { 0%,82%,100%{opacity:0.35} 83%,85%,87%,89%{opacity:1} 84%,86%,88%{opacity:0.45} }
+@keyframes boilBubble { 0%{transform:translateY(0) scale(1);opacity:0.85} 100%{transform:translateY(-26px) scale(0.3);opacity:0} }
+@keyframes toxicPulse { 0%,100%{opacity:0.55} 50%{opacity:0.95} }
 .elem-frozen { animation: iceShimmer 3.2s ease-in-out infinite; }
 .elem-electric { animation: electricArc 2.2s step-start infinite; }
 .elem-boil { animation: boilBubble 1.9s ease-in infinite; transform-box: fill-box; transform-origin: center bottom; }
@@ -594,8 +594,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
     <div id="fx"></div>
     <div id="hint">Tap a bottle, then tap where to pour</div>
     <div class="fabs">
-      <button class="fab" id="btn-hint" aria-label="Ask Claude for a hint"><span class="fi">💡</span>Hint</button>
-      <button class="fab" id="btn-solve" aria-label="Watch Claude solve this level"><span class="fi">✨</span>Claude solves</button>
+      <button class="fab" id="btn-hint" aria-label="Ask Claude for a hint"><span class="fi">💡</span></button>
     </div>
   </div>
 </div>
@@ -1266,53 +1265,64 @@ function buildElementMap(gen) {
   const stateHash = gen.state.reduce((s, b, i) => (s ^ b.reduce((x, c) => (x * 31 + c) | 0, i * 997)) | 0, 0);
   const rng = window.mulberry32(((stateHash >>> 0) ^ (gen.par * 1234567)) >>> 0);
   for (let c = 0; c < gen.colors; c++) {
-    if (rng() < 0.30) ELEMENT_MAP[c] = ELEM_TYPES[Math.floor(rng() * ELEM_TYPES.length)];
+    if (rng() < 0.45) ELEMENT_MAP[c] = ELEM_TYPES[Math.floor(rng() * ELEM_TYPES.length)];
     else rng(); // consume RNG slot
+  }
+  /* every board features at least one element */
+  if (!Object.keys(ELEMENT_MAP).length && gen.colors > 0) {
+    ELEMENT_MAP[Math.floor(rng() * gen.colors)] = ELEM_TYPES[Math.floor(rng() * ELEM_TYPES.length)];
   }
 }
 
 function appendElemOverlay(g, elem, y, h, px) {
   if (elem === 'frozen') {
-    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(190,235,255,0.22)', 'pointer-events': 'none' });
+    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(190,235,255,0.30)', 'pointer-events': 'none' });
     ov.setAttribute('class', 'elem-frozen');
     g.appendChild(ov);
     for (let k = 0; k < 3; k++) {
       const sx = px - 16 + k * 16, sy = y + h * (0.2 + k * 0.3);
       const cross = svgEl('path', {
-        d: `M${sx},${sy - 3.5} L${sx},${sy + 3.5} M${sx - 3.5},${sy} L${sx + 3.5},${sy} M${sx - 2.5},${sy - 2.5} L${sx + 2.5},${sy + 2.5} M${sx + 2.5},${sy - 2.5} L${sx - 2.5},${sy + 2.5}`,
-        stroke: 'rgba(200,245,255,0.8)', 'stroke-width': 0.8, fill: 'none', 'pointer-events': 'none'
+        d: `M${sx},${sy - 5} L${sx},${sy + 5} M${sx - 5},${sy} L${sx + 5},${sy} M${sx - 3.5},${sy - 3.5} L${sx + 3.5},${sy + 3.5} M${sx + 3.5},${sy - 3.5} L${sx - 3.5},${sy + 3.5}`,
+        stroke: 'rgba(220,250,255,0.95)', 'stroke-width': 1.2, fill: 'none', 'pointer-events': 'none'
       });
       cross.setAttribute('class', 'elem-frozen');
       cross.style.animationDelay = (-k * 1.07).toFixed(2) + 's';
       g.appendChild(cross);
     }
   } else if (elem === 'electric') {
-    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(140,255,248,0.15)', 'pointer-events': 'none' });
+    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(140,255,248,0.20)', 'pointer-events': 'none' });
     ov.setAttribute('class', 'elem-electric');
     g.appendChild(ov);
     const zx = px - 5, zy = y + 3, zd = h - 6, steps = 6;
     let d = `M${zx},${zy}`;
-    for (let k = 0; k < steps; k++) d += ` L${zx + (k % 2 === 0 ? 8 : -8)},${zy + (k + 1) * zd / steps}`;
-    const bolt = svgEl('path', { d, fill: 'none', stroke: 'rgba(180,255,255,0.9)', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'pointer-events': 'none' });
+    for (let k = 0; k < steps; k++) d += ` L${zx + (k % 2 === 0 ? 10 : -10)},${zy + (k + 1) * zd / steps}`;
+    const bolt = svgEl('path', { d, fill: 'none', stroke: 'rgba(220,255,255,0.95)', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'pointer-events': 'none' });
     bolt.setAttribute('class', 'elem-electric');
     bolt.style.animationDelay = '-0.7s';
     g.appendChild(bolt);
   } else if (elem === 'boiling') {
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 4; k++) {
       const bub = svgEl('circle', {
-        cx: px - 12 + k * 12, cy: y + h - 4, r: 2.5 - k * 0.3, fill: 'rgba(255,255,255,0.5)', 'pointer-events': 'none'
+        cx: px - 15 + k * 10, cy: y + h - 4, r: 3.2 - k * 0.4, fill: 'rgba(255,255,255,0.65)', 'pointer-events': 'none'
       });
-      bub.setAttribute('class', 'elem-boil b' + k);
+      bub.setAttribute('class', 'elem-boil b' + (k % 3));
       g.appendChild(bub);
     }
   } else if (elem === 'toxic') {
-    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(80,255,120,0.18)', 'pointer-events': 'none' });
+    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(80,255,120,0.26)', 'pointer-events': 'none' });
     ov.setAttribute('class', 'elem-toxic');
     g.appendChild(ov);
-    const glow = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'none', stroke: 'rgba(100,255,150,0.32)', 'stroke-width': 2.5, 'pointer-events': 'none' });
+    const glow = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'none', stroke: 'rgba(120,255,160,0.5)', 'stroke-width': 3, 'pointer-events': 'none' });
     glow.setAttribute('class', 'elem-toxic');
     glow.style.animationDelay = '-1.25s';
     g.appendChild(glow);
+    const skull = svgEl('text', {
+      x: px + 14, y: y + h / 2 + 4, 'text-anchor': 'middle', 'font-size': 10,
+      fill: 'rgba(180,255,200,0.9)', 'pointer-events': 'none'
+    });
+    skull.textContent = '☠';
+    skull.setAttribute('class', 'elem-toxic');
+    g.appendChild(skull);
   }
 }
 
@@ -1738,8 +1748,6 @@ function updateHUD() {
   else badge.classList.add('hidden');
   $('#btn-restart').disabled = activePours > 0 || autoPlaying;
   $('#btn-hint').disabled = autoPlaying;
-  $('#btn-solve').disabled = autoPlaying;
-  $('#btn-solve').classList.toggle('hidden', mode === 'rush');
 }
 function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
@@ -2054,7 +2062,6 @@ async function autoSolve() {
   setSelected(null); clearHintGlow();
   updateHUD();
   toastMsg('Claude takes over — watch the ' + sol.length + '-move solve ✨', 2400);
-  unlockAch('showoff');
   for (const [i, j] of sol) {
     if (!autoPlaying) break;
     if (veiled[i]) unveil(i);
@@ -2078,8 +2085,7 @@ const ACHIEVEMENTS = [
   { id: 'daily',    icon: '📅', name: 'Fresh squeeze',    desc: 'Complete a Daily Challenge' },
   { id: 'streak3',  icon: '🔥', name: 'On a roll',        desc: 'Reach a 3-day Daily streak' },
   { id: 'rush5',    icon: '⚡', name: 'Quicksilver',      desc: 'Clear stage 5 in Rush' },
-  { id: 'oracle',   icon: '💡', name: 'Ask the oracle',   desc: 'Use one of Claude’s hints' },
-  { id: 'showoff',  icon: '🤖', name: 'Sit back & relax', desc: 'Watch Claude solve a level' }
+  { id: 'oracle',   icon: '💡', name: 'Ask the oracle',   desc: 'Use one of Claude’s hints' }
 ];
 
 let achToastT = null;
@@ -2469,7 +2475,6 @@ function init() {
 
   /* AI assistant */
   $('#btn-hint').addEventListener('click', showHint);
-  $('#btn-solve').addEventListener('click', autoSolve);
 
   /* settings & achievements */
   $('#btn-settings').addEventListener('click', () => { AudioFX.select(); renderSettings(); $('#settings-modal').classList.remove('hidden'); });
