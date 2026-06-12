@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Vessel — Liquid Sort</title>
+<meta name="description" content="Sort the spill. A liquid sorting puzzle in glass.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   Vessel — visual system
+   Direction: a glass studio at dusk. Deep indigo→teal field,
+   warm amber key accent, frosted UI, vivid candy liquids.
+   ============================================================ */
+:root {
+  --bg-0: #10142b;
+  --bg-1: #1b2348;
+  --bg-2: #0d2730;
+  --ink: #f3f6ff;
+  --ink-dim: #9aa6cb;
+  --accent: #ffb45e;
+  --accent-deep: #e8893a;
+  --glass: rgba(255, 255, 255, 0.07);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --bw: 72px;               /* bottle width, set by JS */
+  --bh: calc(var(--bw) * 2.4);
+  --r-lg: 22px;
+  --r-md: 14px;
+  --shadow-pop: 0 18px 50px rgba(4, 8, 26, 0.55);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+body {
+  font-family: 'Nunito', ui-rounded, 'SF Pro Rounded', 'Segoe UI', system-ui, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(120% 90% at 50% -10%, var(--bg-1) 0%, var(--bg-0) 58%),
+    var(--bg-0);
+  user-select: none;
+  -webkit-user-select: none;
+}
+body::before { /* warm key light */
+  content: ''; position: fixed; inset: 0; pointer-events: none;
+  background: radial-gradient(60% 38% at 50% 0%, rgba(255, 180, 94, 0.10), transparent 70%);
+}
+body::after { /* teal pool under the stage */
+  content: ''; position: fixed; left: 0; right: 0; bottom: 0; height: 42%;
+  pointer-events: none;
+  background: radial-gradient(70% 100% at 50% 110%, rgba(34, 154, 160, 0.16), transparent 70%);
+}
+
+.screen { position: fixed; inset: 0; display: flex; flex-direction: column; z-index: 1; }
+#ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.aurora { position: fixed; width: 64vmax; height: 64vmax; border-radius: 50%; filter: blur(90px); pointer-events: none; z-index: 0; opacity: 0.22; }
+.aurora.a1 { left: -22vmax; top: -18vmax; background: radial-gradient(circle, #6d5cff 0%, transparent 65%); animation: drift1 34s ease-in-out infinite alternate; }
+.aurora.a2 { right: -24vmax; bottom: -22vmax; background: radial-gradient(circle, #0aa9a0 0%, transparent 65%); animation: drift2 41s ease-in-out infinite alternate; }
+@keyframes drift1 { from { transform: translate(0, 0) scale(1); } to { transform: translate(9vmax, 7vmax) scale(1.15); } }
+@keyframes drift2 { from { transform: translate(0, 0) scale(1.1); } to { transform: translate(-8vmax, -6vmax) scale(0.95); } }
+.hidden { display: none !important; }
+
+h1, h2, .display { font-family: 'Fredoka', 'Nunito', ui-rounded, system-ui, sans-serif; }
+
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 12px; }
+
+/* ---------------- Menu ---------------- */
+#menu { align-items: center; justify-content: center; gap: clamp(14px, 2.6vh, 26px); padding: 4vh 20px; overflow-y: auto; }
+
+.brand { text-align: center; }
+.brand h1 {
+  margin: 0; font-size: clamp(44px, 9vmin, 84px); font-weight: 600; letter-spacing: 0.02em;
+  background: linear-gradient(180deg, #fff 18%, #ffd9a8 55%, var(--accent) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 22px 60px rgba(255, 180, 94, 0.18);
+}
+.brand p { margin: 4px 0 0; color: var(--ink-dim); font-size: clamp(14px, 2.2vmin, 18px); letter-spacing: 0.22em; text-transform: uppercase; font-weight: 700; }
+
+.hero-bottles { display: flex; gap: 18px; align-items: flex-end; height: clamp(96px, 16vh, 150px); }
+.hero-bottles svg { width: clamp(40px, 7vh, 62px); height: auto; filter: drop-shadow(0 14px 22px rgba(4, 8, 26, 0.5)); animation: bob 4.2s ease-in-out infinite; }
+.hero-bottles svg:nth-child(2) { animation-delay: -1.4s; }
+.hero-bottles svg:nth-child(3) { animation-delay: -2.8s; }
+@keyframes bob { 0%, 100% { transform: translateY(0) rotate(-1.2deg); } 50% { transform: translateY(-9px) rotate(1.2deg); } }
+
+.seg { display: flex; gap: 4px; padding: 5px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.seg button {
+  padding: 10px 22px; border-radius: 999px; font-weight: 800; font-size: clamp(14px, 2vmin, 16px);
+  color: var(--ink-dim); transition: background 0.2s, color 0.2s, transform 0.15s;
+}
+.seg button:active { transform: scale(0.96); }
+.seg button.on { background: linear-gradient(180deg, #ffc985, var(--accent-deep)); color: #3a2008; box-shadow: 0 6px 18px rgba(232, 137, 58, 0.35); }
+
+.level-grid { display: grid; grid-template-columns: repeat(5, minmax(74px, 110px)); gap: clamp(10px, 1.6vmin, 16px); }
+.tile {
+  position: relative; aspect-ratio: 1 / 1.04; border-radius: var(--r-lg);
+  background: var(--glass); border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  transition: transform 0.16s, background 0.2s, border-color 0.2s;
+}
+.tile:not(.locked):hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.25); }
+.tile:not(.locked):active { transform: scale(0.94); }
+.tile .num { font-family: 'Fredoka', sans-serif; font-size: clamp(24px, 4.4vmin, 36px); font-weight: 600; line-height: 1; }
+.tile .stars { font-size: clamp(12px, 1.9vmin, 15px); letter-spacing: 2px; color: var(--accent); min-height: 1.2em; }
+.tile .stars .off { color: rgba(255, 255, 255, 0.18); }
+.tile.done { border-color: rgba(255, 180, 94, 0.45); box-shadow: inset 0 0 24px rgba(255, 180, 94, 0.08); }
+.tile.locked { opacity: 0.42; }
+.tile.locked .num { color: var(--ink-dim); }
+.tile .lock { font-size: 14px; color: var(--ink-dim); }
+
+.menu-foot { color: var(--ink-dim); font-size: 13px; font-weight: 700; display: flex; gap: 18px; align-items: center; }
+.menu-foot button { color: var(--ink-dim); font-weight: 800; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--glass-edge); background: var(--glass); }
+
+/* ---------------- Game HUD ---------------- */
+#game { padding: max(10px, env(safe-area-inset-top)) 0 max(8px, env(safe-area-inset-bottom)); }
+.hud {
+  display: flex; align-items: center; gap: 10px;
+  margin: 4px clamp(10px, 2vw, 24px) 0;
+  padding: 8px 10px; border-radius: 18px;
+  background: var(--glass); border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+}
+.hud .mid { flex: 1; text-align: center; min-width: 0; }
+.hud .lvl { font-family: 'Fredoka', sans-serif; font-weight: 600; font-size: clamp(16px, 2.6vmin, 21px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud .sub { font-size: clamp(11px, 1.8vmin, 13px); color: var(--ink-dim); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+#orb { width: clamp(38px, 6vmin, 46px); height: clamp(40px, 6.4vmin, 49px); flex: 0 0 auto; position: relative; }
+#orb svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 4px 10px rgba(232, 137, 58, 0.3)); }
+#orb.pulse { animation: orbPulse 0.5s cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes orbPulse { 0% { transform: scale(1); } 40% { transform: scale(1.28); } 100% { transform: scale(1); } }
+#orb.burst { animation: orbBurst 0.8s ease-out; }
+@keyframes orbBurst { 0% { transform: scale(1); filter: brightness(1); } 35% { transform: scale(1.5); filter: brightness(1.9); } 100% { transform: scale(1); filter: brightness(1); } }
+.icon-btn {
+  width: clamp(40px, 6.4vmin, 48px); height: clamp(40px, 6.4vmin, 48px); flex: 0 0 auto;
+  border-radius: 14px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--glass-edge);
+  display: grid; place-items: center; font-size: clamp(16px, 2.8vmin, 20px);
+  transition: transform 0.12s, background 0.2s;
+  position: relative;
+}
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn:disabled { opacity: 0.35; pointer-events: none; }
+.icon-btn .badge {
+  position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; background: var(--accent); color: #3a2008;
+  font-size: 11px; font-weight: 900; display: grid; place-items: center;
+}
+
+/* ---------------- Stage ---------------- */
+#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: 10px 8px calc(var(--bw) * 0.22); min-height: 0; }
+.row { display: flex; justify-content: center; align-items: flex-end; gap: clamp(6px, calc(var(--bw) * 0.2), 20px); position: relative; padding: 0 calc(var(--bw) * 0.3); }
+.row::after { /* floating glass shelf */
+  content: ''; position: absolute; left: 0; right: 0; bottom: calc(var(--bw) * -0.13); height: calc(var(--bw) * 0.09);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.05));
+  box-shadow: 0 6px 18px rgba(120, 180, 255, 0.12), 0 1px 0 rgba(255, 255, 255, 0.25) inset;
+}
+.row::before { /* shelf under-glow */
+  content: ''; position: absolute; left: 6%; right: 6%; bottom: calc(var(--bw) * -0.3); height: calc(var(--bw) * 0.22);
+  background: radial-gradient(60% 100% at 50% 0%, rgba(110, 170, 230, 0.12), transparent 70%);
+  filter: blur(4px);
+}
+
+.slot { position: relative; width: var(--bw); height: var(--bh); }
+.slot.tall { height: calc(var(--bw) * 3.2); }
+.slot.s-tall .cap { left: 29%; width: 42%; }
+.slot.s-flask .cap { left: 29%; width: 42%; }
+.slot .shadow {
+  position: absolute; left: 10%; right: 10%; bottom: calc(var(--bw) * -0.10); height: calc(var(--bw) * 0.16);
+  background: radial-gradient(50% 50% at 50% 50%, rgba(3, 6, 20, 0.55), transparent 72%);
+  border-radius: 50%; transition: opacity 0.25s, transform 0.25s;
+}
+.slot .glow {
+  position: absolute; left: -8%; right: -8%; bottom: calc(var(--bw) * -0.14); height: calc(var(--bw) * 0.3);
+  border-radius: 50%; filter: blur(6px); opacity: 0.5; transition: background 0.4s;
+  pointer-events: none;
+}
+.bottle {
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.5, 1);
+  will-change: transform; border-radius: 16px;
+}
+.bottle svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 calc(var(--bw) * 0.09) calc(var(--bw) * 0.12) rgba(4, 8, 26, 0.45)); }
+.slot.selected .bottle { transform: translateY(calc(var(--bw) * -0.22)); }
+.slot.selected .shadow { opacity: 0.55; transform: scale(0.88); }
+.slot.pouring { z-index: 60; }
+.slot.pouring .shadow { opacity: 0; }
+.slot.shake .bottle { animation: shake 0.34s; }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px) rotate(-2deg); }
+  55% { transform: translateX(5px) rotate(2deg); }
+  80% { transform: translateX(-3px); }
+}
+
+/* cap (sized to each shape's neck) */
+.cap {
+  position: absolute; left: 26%; width: 48%; height: calc(var(--bw) * 0.26);
+  top: calc(var(--bw) * -0.11);
+  border-radius: calc(var(--bw) * 0.10);
+  background: linear-gradient(180deg, #ffd9a4 0%, var(--accent) 38%, var(--accent-deep) 100%);
+  box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.65), inset 0 -3px 5px rgba(120, 56, 8, 0.5), 0 6px 14px rgba(4, 8, 26, 0.45);
+  opacity: 0; pointer-events: none; transform: translateY(-26px) scale(1.1);
+}
+.cap::after { content: ''; position: absolute; left: 18%; right: 56%; top: 16%; height: 26%; border-radius: 999px; background: rgba(255, 255, 255, 0.55); }
+.slot.capped .cap { animation: capDrop 0.5s cubic-bezier(0.34, 1.6, 0.45, 1) forwards; }
+@keyframes capDrop {
+  0% { opacity: 0; transform: translateY(-30px) scale(1.12); }
+  55% { opacity: 1; transform: translateY(2px) scale(0.98, 0.9); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ring {
+  position: absolute; left: 50%; top: 38%; width: calc(var(--bw) * 1.1); height: calc(var(--bw) * 1.1);
+  border: 3px solid var(--accent); border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.3); opacity: 0; pointer-events: none;
+}
+.slot.capped .ring { animation: ringOut 0.7s ease-out 0.1s forwards; }
+@keyframes ringOut {
+  0% { opacity: 0.9; transform: translate(-50%, -50%) scale(0.35); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); }
+}
+
+/* pour stream FX */
+#fx { position: absolute; inset: 0; pointer-events: none; z-index: 70; }
+.stream {
+  position: absolute; width: calc(var(--bw) * 0.11); min-width: 5px;
+  border-radius: 999px; transform-origin: top center;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
+  animation: streamWobble 0.5s ease-in-out infinite;
+}
+.stream::after { content: ''; position: absolute; left: 18%; top: 4%; bottom: 6%; width: 26%; border-radius: 999px; background: rgba(255, 255, 255, 0.5); }
+@keyframes streamWobble { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(0.8); } }
+.splash {
+  position: absolute; width: calc(var(--bw) * 0.5); height: calc(var(--bw) * 0.14);
+  border-radius: 50%; transform: translate(-50%, -50%);
+  opacity: 0.75; filter: blur(1px);
+  animation: splashPulse 0.42s ease-in-out infinite;
+}
+@keyframes splashPulse { 0%, 100% { transform: translate(-50%, -50%) scale(1, 1); } 50% { transform: translate(-50%, -50%) scale(1.3, 0.7); } }
+
+.ice {
+  position: absolute; left: 2%; right: 2%; bottom: -3%; height: 48%; z-index: 6;
+  border-radius: calc(var(--bw) * 0.16);
+  background: linear-gradient(180deg, rgba(205, 238, 255, 0.16), rgba(140, 205, 255, 0.5));
+  border: 2px solid rgba(225, 246, 255, 0.6);
+  box-shadow: inset 0 5px 12px rgba(255, 255, 255, 0.45), 0 4px 16px rgba(120, 190, 255, 0.35);
+  display: grid; place-items: center;
+  font-size: calc(var(--bw) * 0.3); color: #f0faff; text-shadow: 0 0 10px #cfeeff;
+  pointer-events: none;
+}
+.slot.frozen .bottle svg { filter: drop-shadow(0 calc(var(--bw) * 0.09) calc(var(--bw) * 0.12) rgba(4, 8, 26, 0.45)) saturate(0.55) brightness(1.06) drop-shadow(0 0 calc(var(--bw) * 0.07) rgba(150, 210, 255, 0.5)); }
+.ice.shatter { animation: shatter 0.55s ease-out forwards; }
+@keyframes shatter { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.45); filter: blur(4px); } }
+
+.seal {
+  position: absolute; top: 32%; left: 50%; z-index: 6; pointer-events: none;
+  font-size: calc(var(--bw) * 0.38); color: #e2d2ff; text-shadow: 0 0 12px #9a6bff, 0 0 26px #7c4ce0;
+  transform: translate(-50%, -50%);
+  animation: sealPulse 2.4s ease-in-out infinite;
+  transition: opacity 0.45s, transform 0.45s;
+}
+@keyframes sealPulse { 0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(0.92) rotate(-6deg); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08) rotate(6deg); } }
+.seal.off { opacity: 0; transform: translate(-50%, -50%) scale(1.8); animation: none; }
+.slot.veiled .bottle svg { filter: drop-shadow(0 calc(var(--bw) * 0.09) calc(var(--bw) * 0.12) rgba(4, 8, 26, 0.45)) brightness(0.82) drop-shadow(0 0 calc(var(--bw) * 0.06) rgba(154, 107, 255, 0.45)); }
+
+.slot.pouring .bottle svg { filter: drop-shadow(0 calc(var(--bw) * 0.05) calc(var(--bw) * 0.1) rgba(4, 8, 26, 0.4)) drop-shadow(0 0 calc(var(--bw) * 0.13) rgba(255, 255, 255, 0.5)); }
+
+.spark {
+  position: absolute; left: 50%; top: 30%; width: 7px; height: 7px; pointer-events: none; z-index: 75;
+  background: radial-gradient(circle, #fff 0%, var(--accent) 55%, transparent 75%);
+  border-radius: 50%;
+  animation: sparkFly 0.8s ease-out forwards;
+}
+@keyframes sparkFly {
+  0% { opacity: 1; transform: translate(0, 0) scale(1.2); }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.1); }
+}
+.twinkle { animation: twinkle 2.6s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+.twinkle.t1 { animation-delay: -0.9s; }
+.twinkle.t2 { animation-delay: -1.7s; }
+@keyframes twinkle { 0%, 100% { opacity: 0.15; transform: scale(0.6); } 50% { opacity: 0.95; transform: scale(1.1); } }
+
+/* hint toast */
+#hint {
+  position: absolute; bottom: clamp(10px, 4vh, 36px); left: 50%; transform: translateX(-50%);
+  padding: 10px 20px; border-radius: 999px; white-space: nowrap;
+  background: rgba(12, 16, 38, 0.72); border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  color: var(--ink-dim); font-weight: 800; font-size: clamp(12px, 2vmin, 15px);
+  transition: opacity 0.4s; pointer-events: none; z-index: 80; opacity: 0;
+}
+
+/* ---------------- Win overlay ---------------- */
+#overlay {
+  position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 11, 28, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  opacity: 0; pointer-events: none; transition: opacity 0.35s;
+}
+#overlay.show { opacity: 1; pointer-events: auto; }
+.card {
+  width: min(420px, 86vw); padding: clamp(22px, 4vmin, 36px) clamp(20px, 4vmin, 34px);
+  border-radius: 28px; text-align: center;
+  background: linear-gradient(180deg, rgba(46, 56, 104, 0.85), rgba(22, 28, 60, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.18); box-shadow: var(--shadow-pop);
+  transform: translateY(24px) scale(0.94); transition: transform 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+#overlay.show .card { transform: translateY(0) scale(1); }
+.card h2 { margin: 0 0 4px; font-size: clamp(26px, 5vmin, 36px); font-weight: 600; }
+.card .win-stars { font-size: clamp(34px, 7vmin, 50px); letter-spacing: 6px; margin: 6px 0 2px; color: var(--accent); text-shadow: 0 6px 24px rgba(255, 180, 94, 0.4); }
+.card .win-stars .off { color: rgba(255, 255, 255, 0.16); text-shadow: none; }
+.card .win-stars span { display: inline-block; }
+#overlay.show .win-stars span { animation: starPop 0.5s cubic-bezier(0.3, 1.8, 0.5, 1) backwards; }
+#overlay.show .win-stars span:nth-child(1) { animation-delay: 0.25s; }
+#overlay.show .win-stars span:nth-child(2) { animation-delay: 0.45s; }
+#overlay.show .win-stars span:nth-child(3) { animation-delay: 0.65s; }
+@keyframes starPop { 0% { transform: scale(0) rotate(-40deg); } 100% { transform: scale(1) rotate(0); } }
+.card .meta { color: var(--ink-dim); font-weight: 800; margin-bottom: 18px; font-size: clamp(13px, 2.2vmin, 16px); }
+.card .btns { display: flex; gap: 10px; justify-content: center; }
+.btn {
+  padding: 13px 20px; border-radius: 16px; font-weight: 900; font-size: clamp(14px, 2.4vmin, 17px);
+  background: rgba(255, 255, 255, 0.1); border: 1px solid var(--glass-edge); transition: transform 0.12s, background 0.2s;
+}
+.btn:active { transform: scale(0.95); }
+.btn.primary { background: linear-gradient(180deg, #ffc985, var(--accent-deep)); color: #3a2008; border-color: transparent; box-shadow: 0 8px 22px rgba(232, 137, 58, 0.4); }
+
+#confetti { position: fixed; inset: 0; z-index: 190; pointer-events: none; }
+
+/* ---------------- Responsive ---------------- */
+@media (max-width: 560px) {
+  .level-grid { grid-template-columns: repeat(5, minmax(56px, 1fr)); width: 100%; max-width: 420px; }
+  .seg button { padding: 9px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-bottles svg, .stream, .splash { animation: none !important; }
+  * { transition-duration: 0.01s !important; }
+}
+</style>
+</head>
+<body>
+<canvas id="ambient"></canvas>
+<div class="aurora a1"></div>
+<div class="aurora a2"></div>
+
+<!-- ============ Menu ============ -->
+<div id="menu" class="screen">
+  <div class="brand">
+    <h1>Vessel</h1>
+    <p>sort the spill</p>
+  </div>
+  <div class="hero-bottles" aria-hidden="true"></div>
+  <div class="seg" id="diff-seg" role="group" aria-label="Difficulty">
+    <button data-d="relaxed">Relaxed</button>
+    <button data-d="normal">Normal</button>
+    <button data-d="expert">Expert</button>
+  </div>
+  <div class="level-grid" id="level-grid"></div>
+  <div class="menu-foot">
+    <button id="btn-sound-menu">🔊 Sound on</button>
+  </div>
+</div>
+
+<!-- ============ Game ============ -->
+<div id="game" class="screen hidden">
+  <div class="hud">
+    <button class="icon-btn" id="btn-back" aria-label="Back to levels">‹</button>
+    <div class="mid">
+      <div class="lvl" id="hud-level">Level 1</div>
+      <div class="sub" id="hud-sub"></div>
+    </div>
+    <div id="orb" aria-hidden="true"></div>
+    <button class="icon-btn" id="btn-undo" aria-label="Undo">↩<span class="badge hidden" id="undo-badge"></span></button>
+    <button class="icon-btn" id="btn-restart" aria-label="Restart level">⟳</button>
+    <button class="icon-btn" id="btn-sound" aria-label="Toggle sound">🔊</button>
+  </div>
+  <div id="stage">
+    <div id="fx"></div>
+    <div id="hint">Tap a bottle, then tap where to pour</div>
+  </div>
+</div>
+
+<!-- ============ Win overlay ============ -->
+<div id="overlay">
+  <div class="card">
+    <h2>Level complete</h2>
+    <div class="win-stars" id="win-stars"></div>
+    <div class="meta" id="win-meta"></div>
+    <div class="btns">
+      <button class="btn" id="btn-menu">Levels</button>
+      <button class="btn" id="btn-replay">Replay</button>
+      <button class="btn primary" id="btn-next">Next ›</button>
+    </div>
+  </div>
+</div>
+<canvas id="confetti"></canvas>
+
+<script>
+/* ============================================================
+   Vessel — pure game logic (no DOM)
+   Bottles are arrays of color indices, bottom -> top. Capacity 4.
+   ============================================================ */
+'use strict';
+
+const CAP = 4;
+
+/* Level definitions: [colors, sets] per level. Total filled bottles =
+   colors * sets; each color exists sets*4 units. Repeating colors across
+   multiple bottle-sets is how big boards stay readable with few hues. */
+const LEVEL_TABLE = {
+  relaxed: { empties: 3, undos: Infinity, mystery: 0, levels: [[3,1],[4,1],[4,1],[5,1],[5,1],[6,1],[6,1],[7,1],[7,1],[8,1]] },
+  normal:  { empties: 2, undos: Infinity, mystery: 0, levels: [[4,1],[5,1],[6,1],[7,1],[8,1],[5,2],[6,2],[7,2],[8,2],[6,3]] },
+  expert:  { empties: 2, undos: 5, mystery: 1, levels: [[5,1],[6,1],[7,1],[8,1],[9,1],[6,2],[7,2],[8,2],[6,3],[7,3]] }
+};
+
+/* Baked seed offsets + par, found at build time so runtime never searches. */
+const BAKED = {"relaxed":[{"o":0,"p":7},{"o":0,"p":11},{"o":0,"p":13},{"o":0,"p":15},{"o":0,"p":16},{"o":0,"p":19},{"o":0,"p":20},{"o":0,"p":28},{"o":0,"p":25},{"o":0,"p":33}],"normal":[{"o":0,"p":14},{"o":0,"p":18},{"o":0,"p":22},{"o":0,"p":24},{"o":0,"p":30},{"o":0,"p":35},{"o":0,"p":34},{"o":0,"p":45},{"o":0,"p":61},{"o":0,"p":60}],"expert":[{"o":0,"p":14},{"o":0,"p":20},{"o":0,"p":24},{"o":0,"p":27},{"o":0,"p":35},{"o":0,"p":35},{"o":0,"p":48},{"o":0,"p":61},{"o":0,"p":50},{"o":0,"p":71}]};
+
+/* ---------- RNG ---------- */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleInPlace(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return arr;
+}
+
+/* ---------- State helpers ---------- */
+function cloneState(s) { return s.map(b => b.slice()); }
+
+function stateKey(s) {
+  return s.map(b => b.join(',')).sort().join('|');
+}
+
+function topRun(bottle) {
+  const len = bottle.length;
+  if (!len) return { color: -1, count: 0 };
+  const c = bottle[len - 1];
+  let n = 1;
+  for (let i = len - 2; i >= 0 && bottle[i] === c; i--) n++;
+  return { color: c, count: n };
+}
+
+function isBottleComplete(b) {
+  if (b.length !== CAP) return false;
+  for (let i = 1; i < CAP; i++) if (b[i] !== b[0]) return false;
+  return true;
+}
+
+function isBottleClear(b) { // empty or complete
+  return b.length === 0 || isBottleComplete(b);
+}
+
+function isSolved(s) { return s.every(isBottleClear); }
+
+/* A pour is legal if source has liquid, target has space, and the
+   target is empty or its top color matches the source top color. */
+function canPour(s, i, j) {
+  if (i === j) return false;
+  const src = s[i], dst = s[j];
+  if (src.length === 0) return false;
+  if (dst.length >= CAP) return false;
+  if (dst.length === 0) return true;
+  return dst[dst.length - 1] === src[src.length - 1];
+}
+
+function pourAmount(s, i, j) {
+  const run = topRun(s[i]);
+  return Math.min(run.count, CAP - s[j].length);
+}
+
+/* Mutates s. Returns number of units moved. */
+function applyPour(s, i, j) {
+  const n = pourAmount(s, i, j);
+  const c = s[i][s[i].length - 1];
+  s[i].length -= n;
+  for (let k = 0; k < n; k++) s[j].push(c);
+  return n;
+}
+
+/* ---------- Solver (DFS + memo + move ordering) ----------
+   Optional frozenSet: those bottles cannot be poured from or into
+   until at least one bottle anywhere is complete (thaw is sticky). */
+function solve(initial, budget, frozenSet) {
+  budget = budget || 250000;
+  const frozen = frozenSet && frozenSet.size ? frozenSet : null;
+  const visited = new Set();
+  let nodes = 0;
+  let aborted = false;
+
+  function dfs(s, path, thawed) {
+    if (isSolved(s)) return path;
+    if (++nodes > budget) { aborted = true; return null; }
+    if (!thawed && frozen) thawed = s.some(isBottleComplete);
+    const k = (frozen ? (thawed ? 'T' : 'F') : '') + stateKey(s);
+    if (visited.has(k)) return null;
+    visited.add(k);
+
+    const moves = [];
+    for (let i = 0; i < s.length; i++) {
+      if (frozen && !thawed && frozen.has(i)) continue;
+      const src = s[i];
+      if (!src.length) continue;
+      const run = topRun(src);
+      if (run.count === CAP) continue;
+      const srcUniform = run.count === src.length;
+      for (let j = 0; j < s.length; j++) {
+        if (i === j) continue;
+        if (frozen && !thawed && frozen.has(j)) continue;
+        const dst = s[j];
+        if (dst.length >= CAP) continue;
+        if (dst.length === 0) {
+          if (srcUniform) continue;
+        } else if (dst[dst.length - 1] !== run.color) continue;
+
+        const space = CAP - dst.length;
+        const amount = Math.min(run.count, space);
+        let score = 0;
+        if (dst.length + amount === CAP && (dst.length ? dst.every(x => x === run.color) : amount === CAP)) score += 6;
+        if (amount === run.count) score += 3;
+        if (srcUniform) score += 2;
+        if (dst.length === 0) score -= 2;
+        if (amount < run.count) score -= 2;
+        moves.push({ i, j, score });
+      }
+    }
+    moves.sort((a, b) => b.score - a.score);
+
+    for (let m = 0; m < moves.length; m++) {
+      const ns = cloneState(s);
+      applyPour(ns, moves[m].i, moves[m].j);
+      const r = dfs(ns, path.concat([[moves[m].i, moves[m].j]]), thawed);
+      if (r || aborted) return r;
+    }
+    return null;
+  }
+
+  const result = dfs(initial, [], false);
+  return { solution: result, nodes, aborted };
+}
+
+/* ---------- Level generation ---------- */
+function diffSeed(level, difficulty) {
+  const d = { relaxed: 11, normal: 23, expert: 47 }[difficulty] || 23;
+  return (level * 1000003 + d * 7919 + 12345) >>> 0;
+}
+
+function buildState(level, difficulty, attempt) {
+  const cfg = LEVEL_TABLE[difficulty] || LEVEL_TABLE.normal;
+  const [colors, sets] = cfg.levels[level - 1];
+  const rng = mulberry32(diffSeed(level, difficulty) + attempt * 104729);
+  const units = [];
+  for (let c = 0; c < colors; c++) for (let k = 0; k < CAP * sets; k++) units.push(c);
+  shuffleInPlace(units, rng);
+  const state = [];
+  const fill = colors * sets;
+  for (let b = 0; b < fill; b++) state.push(units.slice(b * CAP, b * CAP + CAP));
+  for (let e = 0; e < cfg.empties; e++) state.push([]);
+  return { state, colors, sets, cfg };
+}
+
+/* Special bottles, expert only. Disjoint sets over the filled bottles.
+   mystery: layers below the top are hidden until exposed.
+   veiled:  fully sealed; a free tap unveils it (no solver impact).
+   frozen:  unusable until the first bottle is completed (solver-verified). */
+function specialsFor(level, difficulty, fillCount, state) {
+  const out = { mystery: [], veiled: [], frozen: [] };
+  if (difficulty !== 'expert') return out;
+  const rng = mulberry32(diffSeed(level, difficulty) + 999);
+  const pool = [];
+  for (let i = 0; i < fillCount; i++) pool.push(i);
+  shuffleInPlace(pool, rng);
+  const take = n => pool.splice(0, Math.max(0, Math.min(n, pool.length)));
+  if (level >= 4) out.mystery = take(Math.min(2 + Math.floor((level - 4) / 2), Math.floor(fillCount / 4)));
+  if (level >= 6) out.veiled = take(Math.min(1 + Math.floor((level - 6) / 3), 2));
+  if (level >= 7) out.frozen = take(Math.min(1 + Math.floor((level - 7) / 2), 2));
+  return out;
+}
+
+function generateLevel(level, difficulty) {
+  const baked = BAKED && BAKED[difficulty] && BAKED[difficulty][level - 1];
+  if (baked) {
+    const b = buildState(level, difficulty, baked.o);
+    const specials = specialsFor(level, difficulty, b.colors * b.sets, b.state);
+    return { state: b.state, par: baked.p, colors: b.colors, sets: b.sets,
+             empties: b.cfg.empties, undos: b.cfg.undos, specials };
+  }
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const b = buildState(level, difficulty, attempt);
+    if (b.state.some(isBottleComplete)) continue;
+    const specials = specialsFor(level, difficulty, b.colors * b.sets, b.state);
+    const res = solve(cloneState(b.state), 400000, new Set(specials.frozen));
+    if (res.solution && res.solution.length > 2) {
+      return { state: b.state, par: res.solution.length, colors: b.colors, sets: b.sets,
+               empties: b.cfg.empties, undos: b.cfg.undos, specials };
+    }
+  }
+  throw new Error('Level generation failed for level ' + level + ' / ' + difficulty);
+}
+
+/* ---------- Exports ---------- */
+const VesselLogic = {
+  CAP, LEVEL_TABLE, buildState, diffSeed, specialsFor,
+  mulberry32, cloneState, stateKey, topRun,
+  isBottleComplete, isBottleClear, isSolved,
+  canPour, pourAmount, applyPour, solve, generateLevel
+};
+if (typeof window !== 'undefined') Object.assign(window, VesselLogic);
+if (typeof module !== 'undefined' && module.exports) module.exports = VesselLogic;
+
+</script>
+<script>
+/* ============================================================
+   Vessel — game runtime v2
+   Shapes, gravity-true liquid, mystery bottles, ambient magic.
+   Requires logic.js loaded first.
+   ============================================================ */
+'use strict';
+(function () {
+
+/* ---------------- palette ---------------- */
+const COLORS = [
+  ['#ff8a96', '#d91d4a'], // cherry
+  ['#ffc06a', '#e0760e'], // tangerine
+  ['#ffec7d', '#e3b006'], // lemon
+  ['#74e89a', '#149a4c'], // green
+  ['#5fe8d6', '#0a8d83'], // teal
+  ['#74b4ff', '#1f5fd6'], // blue
+  ['#bb9cff', '#6d35d9'], // violet
+  ['#ff96c8', '#cf2173'], // pink
+  ['#d8b48c', '#7d4f28']  // mocha
+];
+const HIDDEN_FILL = ['#525b78', '#2e3550'];
+
+/* ---------------- bottle shapes ----------------
+   Every shape: viewBox 100 x vbH. pivot = element center (CSS rotate origin).
+   B/T = liquid bottom/top, box = interior bounds for tilt pooling. */
+const SHAPES = {
+  classic: {
+    vbH: 240, aspect: 2.4, mouthFrac: 20 / 240, surfRx: 26,
+    interior: 'M38,26 L38,54 C38,64 22,68 22,84 L22,204 Q22,224 42,224 L58,224 Q78,224 78,204 L78,84 C78,68 62,64 62,54 L62,26 Z',
+    outline: 'M35,22 L35,53 C35,63 19,67 19,84 L19,205 Q19,227 42,227 L58,227 Q81,227 81,205 L81,84 C81,67 65,63 65,53 L65,22',
+    lip: { x: 31, y: 14, w: 38, h: 12, rx: 6, mouthRx: 14, mouthRy: 3.4, mouthCy: 20 },
+    B: 221, T: 30, box: [22, 78, 26, 224],
+    gloss: [
+      { x: 27, y: 92, w: 9, h: 110, rx: 4.5, o: 0.55 },
+      { x: 68, y: 96, w: 3.5, h: 92, rx: 1.7, o: 0.25 },
+      { x: 40, y: 30, w: 5, h: 22, rx: 2.5, o: 0.5 }
+    ]
+  },
+  tall: {
+    vbH: 320, aspect: 3.2, mouthFrac: 18 / 320, surfRx: 21,
+    interior: 'M40,24 L40,50 C40,58 30,62 30,74 L30,286 Q30,304 50,304 Q70,304 70,286 L70,74 C70,62 60,58 60,50 L60,24 Z',
+    outline: 'M37,20 L37,49 C37,57 27,61 27,74 L27,287 Q27,307 50,307 Q73,307 73,287 L73,74 C73,61 63,57 63,49 L63,20',
+    lip: { x: 34, y: 12, w: 32, h: 11, rx: 5.5, mouthRx: 12, mouthRy: 3, mouthCy: 18 },
+    B: 301, T: 28, box: [30, 70, 24, 304],
+    gloss: [
+      { x: 34, y: 84, w: 8, h: 190, rx: 4, o: 0.55 },
+      { x: 61, y: 90, w: 3, h: 160, rx: 1.5, o: 0.25 },
+      { x: 42, y: 28, w: 4.5, h: 18, rx: 2.2, o: 0.5 }
+    ]
+  },
+  flask: {
+    vbH: 240, aspect: 2.4, mouthFrac: 20 / 240, surfRx: 30, magic: true,
+    interior: 'M42,26 L42,131 A40,40 0 1,0 58,131 L58,26 Z',
+    outline: 'M39,22 L39,129 A43,43 0 1,0 61,129 L61,22',
+    lip: { x: 35, y: 14, w: 30, h: 12, rx: 6, mouthRx: 11, mouthRy: 3, mouthCy: 20 },
+    B: 208, T: 32, box: [10, 90, 26, 210],
+    gloss: [
+      { x: 26, y: 150, w: 10, h: 44, rx: 5, o: 0.5 },
+      { x: 44, y: 32, w: 5, h: 60, rx: 2.5, o: 0.45 }
+    ],
+    sparkle: [[33, 146], [70, 186], [58, 158]]
+  }
+};
+
+const RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------------- storage ---------------- */
+const KEY = 'vessel_save_v1';
+const mem = {};
+const store = {
+  load() {
+    try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch (e) {}
+    return mem[KEY] ? JSON.parse(mem[KEY]) : null;
+  },
+  save(data) {
+    const raw = JSON.stringify(data);
+    mem[KEY] = raw;
+    try { localStorage.setItem(KEY, raw); } catch (e) {}
+  }
+};
+const DEFAULT_SAVE = { progress: { relaxed: {}, normal: {}, expert: {} }, sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {} };
+let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
+save.progress = Object.assign({}, DEFAULT_SAVE.progress, save.progress || {});
+if (!['relaxed', 'normal', 'expert'].includes(save.difficulty)) save.difficulty = 'normal';
+save.seenSpecials = save.seenSpecials || {};
+function persist() { store.save(save); }
+
+/* ---------------- audio ---------------- */
+const AudioFX = {
+  ctx: null,
+  ensure() {
+    if (!save.sound) return null;
+    try {
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+    } catch (e) { this.ctx = null; }
+    return this.ctx;
+  },
+  tone(freq, dur, type, vol, slideTo, delay) {
+    const ctx = this.ensure(); if (!ctx) return;
+    const t0 = ctx.currentTime + (delay || 0);
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol || 0.15, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0); osc.stop(t0 + dur + 0.05);
+  },
+  noise(dur, f0, f1, vol) {
+    const ctx = this.ensure(); if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.1;
+    bp.frequency.setValueAtTime(f0, t0);
+    bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.05);
+    g.gain.setValueAtTime(vol, t0 + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(bp).connect(g).connect(ctx.destination);
+    src.start(t0); src.stop(t0 + dur + 0.05);
+  },
+  select()  { this.tone(520, 0.08, 'sine', 0.10, 660); },
+  swap()    { this.tone(440, 0.07, 'sine', 0.08, 520); },
+  invalid() { this.tone(150, 0.13, 'square', 0.05, 110); },
+  pour(dur) { this.noise(dur, 950, 380, 0.085); },
+  cap()     { this.tone(640, 0.10, 'triangle', 0.18, 330); this.tone(1280, 0.05, 'sine', 0.08, 1180, 0.02); },
+  undo()    { this.tone(360, 0.09, 'sine', 0.08, 300); },
+  reveal()  { this.tone(980, 0.14, 'sine', 0.09, 1480); },
+  ice()     { this.tone(1850, 0.07, 'sine', 0.07, 1700); this.tone(120, 0.08, 'square', 0.03); },
+  thaw()    { this.noise(0.3, 2600, 700, 0.07); this.tone(1320, 0.22, 'sine', 0.08, 880, 0.05); },
+  win() {
+    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.34, 'triangle', 0.13, f, i * 0.11));
+    this.tone(1568, 0.5, 'sine', 0.06, 1568, 0.46);
+  }
+};
+function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+
+/* ---------------- helpers ---------------- */
+const $ = s => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs) {
+  const el = document.createElementNS(NS, tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+function tween(dur, fn) {
+  return new Promise(res => {
+    if (RM || dur <= 0) { fn(1); return res(); }
+    const t0 = performance.now();
+    (function step(now) {
+      const p = Math.min(1, (now - t0) / dur);
+      const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      fn(e);
+      if (p < 1) requestAnimationFrame(step); else res();
+    })(t0);
+  });
+}
+
+/* ---------------- shared SVG defs ---------------- */
+function buildDefs() {
+  const svg = svgEl('svg', { width: 0, height: 0, style: 'position:absolute' });
+  const defs = svgEl('defs', {});
+  function liquidGrad(id, light, dark) {
+    const g = svgEl('linearGradient', { id, x1: 0, y1: 0, x2: 1, y2: 0 });
+    g.appendChild(svgEl('stop', { offset: '0', 'stop-color': dark }));
+    g.appendChild(svgEl('stop', { offset: '0.3', 'stop-color': light }));
+    g.appendChild(svgEl('stop', { offset: '0.55', 'stop-color': light }));
+    g.appendChild(svgEl('stop', { offset: '1', 'stop-color': dark }));
+    defs.appendChild(g);
+  }
+  COLORS.forEach((c, i) => liquidGrad('liq' + i, c[0], c[1]));
+  liquidGrad('liqH', HIDDEN_FILL[0], HIDDEN_FILL[1]);
+
+  const hl = svgEl('linearGradient', { id: 'hlGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
+  hl.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#fff', 'stop-opacity': 0.9 }));
+  hl.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#fff', 'stop-opacity': 0.05 }));
+  defs.appendChild(hl);
+  const gb = svgEl('linearGradient', { id: 'glassBack', x1: 0, y1: 0, x2: 0, y2: 1 });
+  gb.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#ffffff', 'stop-opacity': 0.10 }));
+  gb.appendChild(svgEl('stop', { offset: '0.6', 'stop-color': '#ffffff', 'stop-opacity': 0.04 }));
+  gb.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#9fd4ff', 'stop-opacity': 0.12 }));
+  defs.appendChild(gb);
+  /* cylindrical depth over the liquid: dark edges, clear centre */
+  const gs = svgEl('linearGradient', { id: 'glassSide', x1: 0, y1: 0, x2: 1, y2: 0 });
+  [['0', 0.34], ['0.16', 0.06], ['0.5', 0], ['0.84', 0.1], ['1', 0.4]].forEach(([o, a]) =>
+    gs.appendChild(svgEl('stop', { offset: o, 'stop-color': '#0a0f2a', 'stop-opacity': a })));
+  defs.appendChild(gs);
+  const lipG = svgEl('linearGradient', { id: 'lipGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
+  lipG.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#fff', 'stop-opacity': 0.55 }));
+  lipG.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#fff', 'stop-opacity': 0.12 }));
+  defs.appendChild(lipG);
+  svg.appendChild(defs);
+  document.body.appendChild(svg);
+}
+
+let uid = 0;
+function buildBottleSVG(shapeName) {
+  const sh = SHAPES[shapeName];
+  const id = 'vclip' + (uid++);
+  const svg = svgEl('svg', { viewBox: '0 0 100 ' + sh.vbH });
+  const defs = svgEl('defs', {});
+  const clip = svgEl('clipPath', { id });
+  clip.appendChild(svgEl('path', { d: sh.interior }));
+  defs.appendChild(clip);
+  svg.appendChild(defs);
+  svg.appendChild(svgEl('path', { d: sh.interior, fill: 'url(#glassBack)' }));
+  const liquids = svgEl('g', { 'clip-path': 'url(#' + id + ')' });
+  liquids.setAttribute('class', 'liquids');
+  svg.appendChild(liquids);
+  /* cylinder shading sits over the liquid, under the gloss */
+  svg.appendChild(svgEl('path', { d: sh.interior, fill: 'url(#glassSide)', 'pointer-events': 'none' }));
+  const gloss = svgEl('g', {});
+  (sh.gloss || []).forEach(r =>
+    gloss.appendChild(svgEl('rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: r.rx, fill: 'url(#hlGrad)', opacity: r.o })));
+  gloss.appendChild(svgEl('path', { d: sh.outline, fill: 'none', stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 2.6, 'stroke-linecap': 'round' }));
+  /* bottom rim light */
+  const bb = sh.box;
+  gloss.appendChild(svgEl('path', {
+    d: 'M' + (bb[0] + 9) + ',' + (bb[3] - 4) + ' Q50,' + (bb[3] + 5) + ' ' + (bb[1] - 9) + ',' + (bb[3] - 4),
+    fill: 'none', stroke: 'rgba(255,255,255,0.2)', 'stroke-width': 4, 'stroke-linecap': 'round'
+  }));
+  const lip = sh.lip;
+  gloss.appendChild(svgEl('rect', { x: lip.x, y: lip.y, width: lip.w, height: lip.h, rx: lip.rx, fill: 'url(#lipGrad)', stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 1.4 }));
+  gloss.appendChild(svgEl('ellipse', { cx: 50, cy: lip.mouthCy, rx: lip.mouthRx, ry: lip.mouthRy, fill: 'rgba(10,14,36,0.55)' }));
+  if (sh.sparkle) sh.sparkle.forEach(([x, y], k) => {
+    const s = svgEl('path', { d: 'M' + x + ',' + (y - 4) + ' L' + (x + 1.4) + ',' + (y - 1.4) + ' L' + (x + 4) + ',' + y + ' L' + (x + 1.4) + ',' + (y + 1.4) + ' L' + x + ',' + (y + 4) + ' L' + (x - 1.4) + ',' + (y + 1.4) + ' L' + (x - 4) + ',' + y + ' L' + (x - 1.4) + ',' + (y - 1.4) + ' Z', fill: '#fff', opacity: 0.8 });
+    s.setAttribute('class', 'twinkle t' + (k % 3));
+    gloss.appendChild(s);
+  });
+  svg.appendChild(gloss);
+  return svg;
+}
+
+/* ---------------- game state ---------------- */
+let level = 1, difficulty = save.difficulty || 'normal';
+let pendingLayout = false;
+let state = [], visual = [], par = 0, undosAllowed = Infinity, undosLeft = Infinity;
+let moves = 0, history = [], sel = null, activePours = 0;
+let shapesByBottle = [], hiddenDepth = [], veiled = [];
+let frozen = new Set();
+let needCaps = 0;
+const locked = new Set();
+let slots = [];
+
+function mergeRuns(bottle) {
+  const out = [];
+  for (const c of bottle) {
+    if (out.length && out[out.length - 1].c === c) out[out.length - 1].u++;
+    else out.push({ c, u: 1 });
+  }
+  return out;
+}
+
+/* ---------------- liquid rendering (gravity-true) ----------------
+   The liquid group is counter-rotated against the bottle's tilt, so
+   bands and surfaces stay horizontal in world space; the interior
+   clip (in bottle space) shapes the pool. */
+function renderBottle(i, tiltDeg) {
+  const slot = slots[i];
+  const sh = slot.sh;
+  const segs = visual[i];
+  const g = slot.liquidGroup;
+  while (g.firstChild) g.removeChild(g.firstChild);
+  const t = tiltDeg || 0;
+  const a = t * Math.PI / 180;
+  const px = 50, py = sh.vbH / 2;
+  const inner = svgEl('g', t ? { transform: 'rotate(' + (-t).toFixed(2) + ' ' + px + ' ' + py + ')' } : {});
+
+  /* lowest interior point in world space */
+  let low = sh.B;
+  if (t) {
+    const cs = Math.cos(a), sn = Math.sin(a);
+    low = -1e9;
+    const [xl, xr, yt, yb] = sh.box;
+    [[xl, yt], [xr, yt], [xl, yb], [xr, yb]].forEach(([x, y]) => {
+      const wy = py + sn * (x - px) + cs * (y - py);
+      if (wy > low) low = wy;
+    });
+    low -= 2;
+  }
+  const hUnit = sh.unit * (0.55 + 0.45 * Math.cos(a));
+  const fade = Math.max(0, 1 - Math.abs(t) / 32);
+
+  let cum = 0;
+  const ellipses = [];
+  for (const seg of segs) {
+    if (seg.u <= 0.01) continue;
+    const h = seg.u * hUnit;
+    const y = low - (cum + seg.u) * hUnit;
+    inner.appendChild(svgEl('rect', { x: -160, y: y, width: 420, height: h + 1.4, fill: 'url(#liq' + seg.c + ')' }));
+    if (fade > 0.04) ellipses.push({ y, c: seg.c });
+    cum += seg.u;
+  }
+  ellipses.forEach((e, k) => {
+    const isTop = k === ellipses.length - 1;
+    inner.appendChild(svgEl('ellipse', {
+      cx: px, cy: e.y + 0.8, rx: sh.surfRx, ry: 5,
+      fill: COLORS[e.c][0], opacity: (isTop ? 0.75 : 0.42) * fade
+    }));
+    if (isTop) inner.appendChild(svgEl('ellipse', {
+      cx: px - 7, cy: e.y - 0.2, rx: 6.5, ry: 1.9,
+      fill: '#ffffff', opacity: 0.5 * fade
+    }));
+  });
+
+  /* mystery overlay: unit bands counted from the bottom */
+  const hid = hiddenDepth[i] || 0;
+  for (let u = 0; u < hid && u < cum; u++) {
+    const y = low - (u + 1) * hUnit;
+    inner.appendChild(svgEl('rect', { x: -160, y: y, width: 420, height: hUnit + 1.2, fill: 'url(#liqH)' }));
+    if (fade > 0.3) {
+      const txt = svgEl('text', {
+        x: px, y: y + hUnit / 2 + 5.5, 'text-anchor': 'middle',
+        'font-size': 15, 'font-weight': 700, fill: '#cdd5f2', opacity: 0.85 * fade
+      });
+      txt.textContent = '?';
+      txt.setAttribute('font-family', "Fredoka, Nunito, sans-serif");
+      inner.appendChild(txt);
+    }
+  }
+
+  g.appendChild(inner);
+  const top = segs.length && cum > 0.01 ? segs[segs.length - 1] : null;
+  const glowColor = top ? (hid >= cum ? HIDDEN_FILL[1] : COLORS[top.c][1]) : null;
+  slot.glow.style.background = glowColor
+    ? 'radial-gradient(50% 60% at 50% 50%, ' + glowColor + 'aa, transparent 70%)'
+    : 'none';
+}
+
+function revealMystery(i) {
+  const maxHid = Math.max(0, state[i].length - 1);
+  if ((hiddenDepth[i] || 0) > maxHid) {
+    hiddenDepth[i] = maxHid;
+    if (slots[i] && !RM) spawnSparkles(slots[i].el, 5, 0.4);
+    AudioFX.reveal();
+  }
+}
+
+function syncCaps() {
+  state.forEach((b, i) => {
+    const capped = window.isBottleComplete(b);
+    const has = slots[i].el.classList.contains('capped');
+    if (capped && !has) slots[i].el.classList.add('capped');
+    else if (!capped && has) slots[i].el.classList.remove('capped');
+  });
+}
+
+/* ---------------- layout (1-3 rows + shelves) ---------------- */
+function layoutStage() {
+  const stage = $('#stage');
+  const n = state.length;
+  if (!n) return;
+  const hasTall = shapesByBottle.includes('tall');
+  const W = stage.clientWidth - 14, H = stage.clientHeight - 10;
+  function bwFor(r) {
+    const per = Math.ceil(n / r);
+    const bwW = W / (per + (per + 1) * 0.2);
+    const hUnits = (hasTall ? 3.2 : 2.4) + (r - 1) * 2.4 + (r - 1) * 0.5 + 0.65;
+    return Math.min(bwW, H / hUnits);
+  }
+  let rows = 1, best = bwFor(1);
+  const maxRows = hasTall ? 1 : 4;
+  for (let r = 2; r <= maxRows && r <= n; r++) {
+    const v = bwFor(r);
+    if (v > best * 1.04) { rows = r; best = v; }
+  }
+  const bw = Math.max(30, Math.min(100, Math.floor(best)));
+  document.documentElement.style.setProperty('--bw', bw + 'px');
+
+  if (Number(stage.dataset.rows) !== rows || stage.dataset.n !== String(n)) {
+    stage.querySelectorAll('.row').forEach(r => r.remove());
+    const rowEls = [];
+    for (let r = 0; r < rows; r++) {
+      const el = document.createElement('div'); el.className = 'row';
+      stage.insertBefore(el, $('#fx'));
+      rowEls.push(el);
+    }
+    const base = Math.floor(n / rows), extra = n % rows;
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+      const count = base + (r < extra ? 1 : 0);
+      for (let k = 0; k < count; k++) rowEls[r].appendChild(slots[idx++].slot);
+    }
+    stage.dataset.rows = rows; stage.dataset.n = String(n);
+  }
+}
+
+/* ---------------- level lifecycle ---------------- */
+function assignShapes(n, fillCount, gen) {
+  const rng = window.mulberry32(window.diffSeed(level, difficulty) + 777);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(rng() < (n > 9 ? 0.18 : 0.3) ? 'flask' : 'classic');
+  if (n <= 7) { /* dramatic tall bottles on small boards */
+    const a = Math.floor(rng() * n);
+    let b = Math.floor(rng() * n);
+    if (b === a) b = (b + 1) % n;
+    out[a] = 'tall'; if (n >= 5) out[b] = 'tall';
+  }
+  return out;
+}
+
+function applySpecials(gen) {
+  const sp = gen.specials || { mystery: [], veiled: [], frozen: [] };
+  hiddenDepth = state.map(() => 0);
+  veiled = state.map(() => false);
+  frozen = new Set(sp.frozen);
+  sp.mystery.forEach(i => { hiddenDepth[i] = Math.max(0, state[i].length - 1); });
+  sp.veiled.forEach(i => { veiled[i] = true; hiddenDepth[i] = state[i].length; });
+  /* first-time explainer toasts */
+  const msgs = [];
+  if (sp.mystery.length && !save.seenSpecials.m) { msgs.push('Hidden layers reveal as you pour'); save.seenSpecials.m = 1; }
+  if (sp.veiled.length && !save.seenSpecials.v) { msgs.push('Tap a sealed bottle to unveil it'); save.seenSpecials.v = 1; }
+  if (sp.frozen.length && !save.seenSpecials.f) { msgs.push('Ice thaws when you complete a bottle'); save.seenSpecials.f = 1; }
+  if (msgs.length) {
+    persist();
+    const h = $('#hint');
+    h.textContent = msgs.join('  ·  ');
+    h.style.opacity = 1;
+    setTimeout(() => { h.style.opacity = 0; }, 5200);
+  }
+  return sp;
+}
+
+function loadLevel(lvl) {
+  level = lvl;
+  const gen = window.generateLevel(lvl, difficulty);
+  state = gen.state; par = gen.par;
+  undosAllowed = gen.undos; undosLeft = gen.undos;
+  visual = state.map(mergeRuns);
+  moves = 0; history = []; sel = null; locked.clear(); activePours = 0;
+  shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
+  const specials = applySpecials(gen);
+  needCaps = gen.colors * gen.sets;
+
+  const stage = $('#stage');
+  stage.querySelectorAll('.row').forEach(r => r.remove());
+  stage.dataset.n = ''; stage.dataset.rows = '';
+  $('#fx').innerHTML = '';
+  slots = state.map((b, i) => {
+    const shapeName = shapesByBottle[i];
+    const sh = SHAPES[shapeName];
+    const slot = document.createElement('div');
+    slot.className = 'slot s-' + shapeName + (shapeName === 'tall' ? ' tall' : '');
+    const glow = document.createElement('span'); glow.className = 'glow';
+    const shadow = document.createElement('span'); shadow.className = 'shadow';
+    const btn = document.createElement('button');
+    btn.className = 'bottle';
+    btn.setAttribute('aria-label', 'Bottle ' + (i + 1));
+    const svg = buildBottleSVG(shapeName);
+    btn.appendChild(svg);
+    const cap = document.createElement('span'); cap.className = 'cap';
+    const ring = document.createElement('span'); ring.className = 'ring';
+    btn.appendChild(cap); btn.appendChild(ring);
+    slot.appendChild(glow); slot.appendChild(shadow); slot.appendChild(btn);
+    if (frozen.has(i)) {
+      slot.classList.add('frozen');
+      const ice = document.createElement('span'); ice.className = 'ice'; ice.textContent = '❄';
+      slot.appendChild(ice);
+    }
+    if (veiled[i]) {
+      slot.classList.add('veiled');
+      const seal = document.createElement('span'); seal.className = 'seal'; seal.textContent = '✦';
+      slot.appendChild(seal);
+    }
+    btn.addEventListener('click', () => onTap(i));
+    return { slot, el: slot, glow, btn, sh, liquidGroup: svg.querySelector('.liquids'), svg };
+  });
+  $('#menu').classList.add('hidden');
+  $('#game').classList.remove('hidden');
+  layoutStage();
+  state.forEach((b, i) => renderBottle(i, 0));
+  syncCaps();
+  orbUpdate(false);
+  updateHUD();
+  if (!save.seenHint && lvl === 1) { $('#hint').textContent = 'Tap a bottle, then tap where to pour'; $('#hint').style.opacity = 1; }
+  $('#overlay').classList.remove('show');
+}
+
+/* ---------------- magic orb (fills as bottles complete) ---------------- */
+let orbFill = null, orbSurf = null, orbFrac = 0;
+function buildOrb() {
+  const host = $('#orb');
+  if (!host) return;
+  const svg = svgEl('svg', { viewBox: '0 0 60 64' });
+  const defs = svgEl('defs', {});
+  const clip = svgEl('clipPath', { id: 'orbClip' });
+  clip.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23 }));
+  defs.appendChild(clip);
+  const og = svgEl('linearGradient', { id: 'orbGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
+  og.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#ffe2b3' }));
+  og.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#e8893a' }));
+  defs.appendChild(og);
+  svg.appendChild(defs);
+  svg.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23, fill: 'rgba(255,255,255,0.06)' }));
+  const lg = svgEl('g', { 'clip-path': 'url(#orbClip)' });
+  orbFill = svgEl('rect', { x: 2, y: 59, width: 56, height: 0, fill: 'url(#orbGrad)' });
+  orbSurf = svgEl('ellipse', { cx: 30, cy: 59, rx: 22, ry: 3, fill: '#ffe9c4', opacity: 0.8 });
+  lg.appendChild(orbFill); lg.appendChild(orbSurf);
+  svg.appendChild(lg);
+  svg.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23, fill: 'none', stroke: 'rgba(255,255,255,0.5)', 'stroke-width': 2.2 }));
+  svg.appendChild(svgEl('ellipse', { cx: 22, cy: 26, rx: 6, ry: 9, fill: 'rgba(255,255,255,0.35)', transform: 'rotate(-24 22 26)' }));
+  svg.appendChild(svgEl('rect', { x: 24, y: 4, width: 12, height: 9, rx: 4, fill: 'url(#lipGrad)', stroke: 'rgba(255,255,255,0.4)', 'stroke-width': 1.2 }));
+  host.appendChild(svg);
+}
+function orbUpdate(pulse) {
+  if (!orbFill) return;
+  const capped = state.filter(b => window.isBottleComplete(b)).length;
+  orbFrac = needCaps ? capped / needCaps : 0;
+  const h = 46 * orbFrac;
+  orbFill.setAttribute('y', 59 - h);
+  orbFill.setAttribute('height', h + 1);
+  orbSurf.setAttribute('cy', 59 - h);
+  orbSurf.setAttribute('opacity', orbFrac > 0.01 ? 0.8 : 0);
+  const host = $('#orb');
+  if (pulse && host) { host.classList.remove('pulse'); void host.offsetWidth; host.classList.add('pulse'); }
+}
+
+function updateHUD() {
+  $('#hud-level').textContent = 'Level ' + level;
+  $('#hud-sub').textContent = cap1(difficulty) + ' · Moves ' + moves + ' · Par ' + par;
+  const undoBtn = $('#btn-undo');
+  undoBtn.disabled = history.length === 0 || activePours > 0 || undosLeft <= 0;
+  const badge = $('#undo-badge');
+  if (undosAllowed !== Infinity) { badge.classList.remove('hidden'); badge.textContent = undosLeft; }
+  else badge.classList.add('hidden');
+  $('#btn-restart').disabled = activePours > 0;
+}
+function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+/* ---------------- interaction ---------------- */
+function setSelected(i) {
+  if (sel !== null && slots[sel]) slots[sel].el.classList.remove('selected');
+  sel = i;
+  if (i !== null) slots[i].el.classList.add('selected');
+}
+function shake(i) {
+  const el = slots[i].el;
+  el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+}
+function canBeSource(i) { return state[i].length > 0 && !window.isBottleComplete(state[i]); }
+
+function unveil(i) {
+  veiled[i] = false;
+  hiddenDepth[i] = Math.max(0, state[i].length - 1);
+  const slot = slots[i];
+  slot.el.classList.remove('veiled');
+  const seal = slot.el.querySelector('.seal');
+  if (seal) { seal.classList.add('off'); setTimeout(() => seal.remove(), 500); }
+  if (!RM) spawnSparkles(slot.el, 7, 0.45);
+  AudioFX.reveal(); buzz(10);
+  renderBottle(i, 0);
+}
+
+function thawAll() {
+  const list = [...frozen];
+  frozen.clear();
+  AudioFX.thaw();
+  list.forEach((i, k) => setTimeout(() => {
+    const s = slots[i];
+    s.el.classList.remove('frozen');
+    const ice = s.el.querySelector('.ice');
+    if (ice) { ice.classList.add('shatter'); setTimeout(() => ice.remove(), 600); }
+    if (!RM) spawnSparkles(s.el, 8, 0.5);
+  }, RM ? 0 : 160 + k * 140));
+}
+
+function onTap(i) {
+  AudioFX.ensure();
+  if (locked.has(i)) return;
+  if (frozen.has(i)) { shake(i); AudioFX.ice(); buzz([8, 20, 8]); return; }
+  if (veiled[i]) { unveil(i); return; }
+  if (sel === null) {
+    if (canBeSource(i)) { setSelected(i); AudioFX.select(); buzz(8); }
+    else { shake(i); AudioFX.invalid(); }
+    return;
+  }
+  if (sel === i) { setSelected(null); AudioFX.swap(); return; }
+  if (window.canPour(state, sel, i)) {
+    const s = sel; setSelected(null);
+    doPour(s, i);
+  } else if (canBeSource(i)) {
+    setSelected(i); AudioFX.swap();
+  } else {
+    shake(i); AudioFX.invalid(); buzz([12, 30, 12]);
+  }
+}
+
+/* ---------------- visual drain helpers ---------------- */
+function drainSnapshot(snap, q) {
+  const out = snap.map(s => ({ c: s.c, u: s.u }));
+  let r = q;
+  while (r > 0.001 && out.length) {
+    const t = out[out.length - 1];
+    const take = Math.min(t.u, r);
+    t.u -= take; r -= take;
+    if (t.u <= 0.001) out.pop();
+  }
+  return out;
+}
+function fillSnapshot(snap, color, q) {
+  const out = snap.map(s => ({ c: s.c, u: s.u }));
+  if (q <= 0.001) return out;
+  if (out.length && out[out.length - 1].c === color) out[out.length - 1].u += q;
+  else out.push({ c: color, u: q });
+  return out;
+}
+
+/* ---------------- pour choreography (rAF-driven) ---------------- */
+async function doPour(si, di) {
+  locked.add(si); locked.add(di); activePours++;
+  history.push({ state: window.cloneState(state), moves });
+  if (history.length > 300) history.shift();
+  const n = window.pourAmount(state, si, di);
+  const color = state[si][state[si].length - 1];
+  window.applyPour(state, si, di);
+  moves++;
+  if (!save.seenHint) { save.seenHint = true; persist(); $('#hint').style.opacity = 0; }
+  updateHUD();
+
+  const stage = $('#stage');
+  const stageRect = stage.getBoundingClientRect();
+  const sRect = slots[si].slot.getBoundingClientRect();
+  const dRect = slots[di].slot.getBoundingClientRect();
+  const shS = slots[si].sh, shD = slots[di].sh;
+  const bwS = sRect.width, bhS = sRect.height;
+  const bwD = dRect.width, bhD = dRect.height;
+  const side = dRect.left + bwD / 2 >= sRect.left + bwS / 2 ? 1 : -1;
+  const A = side * (78 + Math.random() * 6);
+  const aR = A * Math.PI / 180;
+
+  const Pm = { x: dRect.left + bwD / 2, y: dRect.top + shD.mouthFrac * bhD };
+  const Q = { x: Pm.x, y: Pm.y - bwS * 0.6 };
+  const C = { x: bwS / 2, y: bhS / 2 };
+  const M = { x: bwS / 2, y: shS.mouthFrac * bhS };
+  const rx = Math.cos(aR) * (M.x - C.x) - Math.sin(aR) * (M.y - C.y);
+  const ry = Math.sin(aR) * (M.x - C.x) + Math.cos(aR) * (M.y - C.y);
+  const dxF = Q.x - (sRect.left + C.x + rx);
+  const dyF = Q.y - (sRect.top + C.y + ry);
+  const lift = bwS * 0.3;
+
+  const slotEl = slots[si].el, bottleEl = slots[si].btn;
+  slotEl.classList.add('pouring');
+  bottleEl.style.transition = 'none';
+
+  /* phase 1: lift, travel, tilt */
+  AudioFX.swap();
+  await tween(RM ? 0 : 360, p => {
+    const ang = A * p;
+    const arc = -Math.sin(p * Math.PI) * lift;
+    bottleEl.style.transform = 'translate(' + (dxF * p).toFixed(1) + 'px,' + (dyF * p + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
+    renderBottle(si, ang);
+  });
+  bottleEl.style.transform = 'translate(' + dxF.toFixed(1) + 'px,' + dyF.toFixed(1) + 'px) rotate(' + A.toFixed(2) + 'deg)';
+  renderBottle(si, A);
+
+  /* phase 2: stream + drain */
+  const dur = RM ? 40 : 300 + 170 * n;
+  const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
+  const surfaceY = dRect.top + ((shD.B - dstUnits0 * shD.unit) / shD.vbH) * bhD;
+  const fx = $('#fx');
+  const stream = document.createElement('span');
+  stream.className = 'stream';
+  stream.style.background = 'linear-gradient(180deg, ' + COLORS[color][0] + ', ' + COLORS[color][1] + ')';
+  stream.style.left = (Q.x - stageRect.left - bwS * 0.055) + 'px';
+  stream.style.top = (Q.y - stageRect.top + bwS * 0.04) + 'px';
+  stream.style.height = Math.max(8, surfaceY - Q.y - bwS * 0.02) + 'px';
+  const splash = document.createElement('span');
+  splash.className = 'splash';
+  splash.style.background = 'radial-gradient(50% 50% at 50% 50%, ' + COLORS[color][0] + 'cc, transparent 75%)';
+  splash.style.left = (Pm.x - stageRect.left) + 'px';
+  splash.style.top = (surfaceY - stageRect.top) + 'px';
+  fx.appendChild(stream); fx.appendChild(splash);
+  AudioFX.pour(dur / 1000 + 0.1);
+  buzz(12);
+
+  const snapS = visual[si].map(s => ({ c: s.c, u: s.u }));
+  const snapD = visual[di].map(s => ({ c: s.c, u: s.u }));
+  await tween(dur, p => {
+    visual[si] = drainSnapshot(snapS, n * p);
+    visual[di] = fillSnapshot(snapD, color, n * p);
+    renderBottle(si, A);
+    renderBottle(di, 0);
+  });
+  stream.remove(); splash.remove();
+  if (!RM) spawnSparkles(slots[di].el, 4, 0.25);
+
+  /* phase 3: return */
+  await tween(RM ? 0 : 340, p => {
+    const q = 1 - p;
+    const ang = A * q;
+    const arc = -Math.sin(p * Math.PI) * lift * 0.5;
+    bottleEl.style.transform = 'translate(' + (dxF * q).toFixed(1) + 'px,' + (dyF * q + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
+    renderBottle(si, ang);
+  });
+  bottleEl.style.transform = '';
+  bottleEl.style.transition = '';
+  slotEl.classList.remove('pouring');
+
+  visual[si] = mergeRuns(state[si]);
+  visual[di] = mergeRuns(state[di]);
+  revealMystery(si);
+  renderBottle(si, 0); renderBottle(di, 0);
+
+  if (window.isBottleComplete(state[di])) {
+    slots[di].el.classList.add('capped');
+    if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
+    AudioFX.cap(); buzz([15, 40, 25]);
+    orbUpdate(true);
+    if (frozen.size) thawAll();
+  }
+
+  locked.delete(si); locked.delete(di); activePours--;
+  updateHUD();
+  if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
+  if (activePours === 0 && window.isSolved(state)) {
+    await wait(RM ? 100 : 550);
+    onWin();
+  }
+}
+
+/* ---------------- sparkles ---------------- */
+function spawnSparkles(host, count, spread) {
+  for (let k = 0; k < count; k++) {
+    const s = document.createElement('span');
+    s.className = 'spark';
+    const ang = Math.random() * Math.PI * 2;
+    const dist = (0.4 + Math.random() * 0.9) * 100 * (spread + 0.4);
+    s.style.setProperty('--dx', (Math.cos(ang) * dist).toFixed(0) + 'px');
+    s.style.setProperty('--dy', (Math.sin(ang) * dist - 30).toFixed(0) + 'px');
+    s.style.animationDelay = (Math.random() * 0.12) + 's';
+    host.appendChild(s);
+    setTimeout(() => s.remove(), 900);
+  }
+}
+
+/* ---------------- undo / restart ---------------- */
+function undo() {
+  if (!history.length || activePours > 0 || undosLeft <= 0) return;
+  const snap = history.pop();
+  state = snap.state; moves = snap.moves;
+  if (undosAllowed !== Infinity) undosLeft--;
+  visual = state.map(mergeRuns);
+  hiddenDepth = hiddenDepth.map((h, i) => Math.min(h, Math.max(0, state[i].length - 1)));
+  setSelected(null);
+  state.forEach((b, i) => renderBottle(i, 0));
+  syncCaps();
+  orbUpdate(false);
+  AudioFX.undo();
+  updateHUD();
+}
+
+/* ---------------- win ---------------- */
+function starsFor(m) { return m <= par ? 3 : m <= Math.ceil(par * 1.5) ? 2 : 1; }
+
+function onWin() {
+  const st = starsFor(moves);
+  const prev = save.progress[difficulty][level];
+  save.progress[difficulty][level] = {
+    stars: Math.max(st, prev ? prev.stars : 0),
+    best: Math.min(moves, prev ? prev.best : Infinity)
+  };
+  persist();
+  $('#win-stars').innerHTML = [1, 2, 3].map(k => '<span class="' + (k <= st ? '' : 'off') + '">★</span>').join('');
+  const best = save.progress[difficulty][level].best;
+  $('#win-meta').textContent = moves + ' moves · par ' + par + (best < moves ? ' · best ' + best : '');
+  $('#btn-next').classList.toggle('hidden', level >= 10);
+  $('#overlay').classList.add('show');
+  const orbHost = $('#orb');
+  if (orbHost && !RM) { orbHost.classList.add('burst'); spawnSparkles(orbHost, 10, 0.7); setTimeout(() => orbHost.classList.remove('burst'), 900); }
+  AudioFX.win(); buzz([20, 50, 20, 50, 60]);
+  if (!RM) confetti();
+}
+
+/* ---------------- confetti ---------------- */
+function confetti() {
+  const cv = $('#confetti');
+  const ctx = cv.getContext && cv.getContext('2d');
+  if (!ctx) return;
+  cv.width = innerWidth; cv.height = innerHeight;
+  const parts = [];
+  for (let i = 0; i < 140; i++) {
+    const c = COLORS[i % COLORS.length];
+    parts.push({
+      x: innerWidth / 2 + (Math.random() - 0.5) * innerWidth * 0.5,
+      y: innerHeight * 0.28 + (Math.random() - 0.5) * 60,
+      vx: (Math.random() - 0.5) * 9,
+      vy: -Math.random() * 11 - 3,
+      s: 5 + Math.random() * 7,
+      r: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.25,
+      col: Math.random() < 0.5 ? c[0] : c[1]
+    });
+  }
+  const t0 = performance.now();
+  (function frame(now) {
+    const t = (now - t0) / 1000;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    for (const p of parts) {
+      p.vy += 0.28; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.vx *= 0.992;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
+      ctx.globalAlpha = Math.max(0, 1 - t / 2.6);
+      ctx.fillStyle = p.col;
+      ctx.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * 0.66);
+      ctx.restore();
+    }
+    if (t < 2.7) requestAnimationFrame(frame);
+    else ctx.clearRect(0, 0, cv.width, cv.height);
+  })(t0);
+}
+
+/* ---------------- ambient dust ---------------- */
+function startAmbient() {
+  if (RM) return;
+  const cv = $('#ambient');
+  const ctx = cv.getContext && cv.getContext('2d');
+  if (!ctx) return;
+  let W, H, parts = [];
+  function size() {
+    W = cv.width = innerWidth; H = cv.height = innerHeight;
+    parts = [];
+    const count = Math.min(44, Math.floor(W * H / 38000));
+    for (let i = 0; i < count; i++) parts.push({
+      x: Math.random() * W, y: Math.random() * H,
+      r: 0.7 + Math.random() * 1.9,
+      vy: -(0.06 + Math.random() * 0.16),
+      vx: (Math.random() - 0.5) * 0.06,
+      ph: Math.random() * Math.PI * 2,
+      hue: Math.random() < 0.7 ? '255,220,170' : '160,200,255'
+    });
+  }
+  size();
+  window.addEventListener('resize', size);
+  (function frame(now) {
+    requestAnimationFrame(frame);
+    if (document.hidden) return;
+    ctx.clearRect(0, 0, W, H);
+    for (const p of parts) {
+      p.y += p.vy; p.x += p.vx + Math.sin(now / 2400 + p.ph) * 0.05;
+      if (p.y < -6) { p.y = H + 6; p.x = Math.random() * W; }
+      const tw = 0.25 + 0.45 * (0.5 + 0.5 * Math.sin(now / 700 + p.ph * 3));
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(' + p.hue + ',' + tw.toFixed(2) + ')';
+      ctx.arc(p.x, p.y, p.r, 0, 7);
+      ctx.fill();
+    }
+  })(0);
+}
+
+/* ---------------- screens / menu ---------------- */
+function showScreen(name) {
+  $('#menu').classList.toggle('hidden', name !== 'menu');
+  $('#game').classList.toggle('hidden', name !== 'game');
+}
+
+function unlockedUpTo() {
+  let u = 1;
+  while (u < 10 && save.progress[difficulty][u]) u++;
+  return u;
+}
+
+function renderMenu() {
+  document.querySelectorAll('#diff-seg button').forEach(b => b.classList.toggle('on', b.dataset.d === difficulty));
+  const grid = $('#level-grid');
+  grid.innerHTML = '';
+  const maxOpen = unlockedUpTo();
+  for (let l = 1; l <= 10; l++) {
+    const t = document.createElement('button');
+    t.className = 'tile';
+    const p = save.progress[difficulty][l];
+    const open = l <= maxOpen;
+    if (!open) t.classList.add('locked');
+    if (p) t.classList.add('done');
+    let starsHTML = '';
+    if (p) starsHTML = [1, 2, 3].map(k => '<span class="' + (k <= p.stars ? '' : 'off') + '">★</span>').join('');
+    t.innerHTML = '<div class="num">' + l + '</div>' +
+      (open ? '<div class="stars">' + starsHTML + '</div>' : '<div class="lock">🔒</div>');
+    if (open) t.addEventListener('click', () => { AudioFX.select(); loadLevel(l); });
+    else t.addEventListener('click', () => { AudioFX.invalid(); });
+    t.setAttribute('aria-label', 'Level ' + l + (open ? '' : ' locked'));
+    grid.appendChild(t);
+  }
+  $('#btn-sound-menu').textContent = save.sound ? '🔊 Sound on' : '🔇 Sound off';
+}
+
+function buildHeroBottles() {
+  const wrap = $('.hero-bottles');
+  const demos = [
+    ['classic', [{ c: 4, u: 4 }]],
+    ['flask', [{ c: 6, u: 2 }, { c: 7, u: 2 }]],
+    ['tall', [{ c: 1, u: 1 }, { c: 2, u: 2 }, { c: 5, u: 1 }]]
+  ];
+  demos.forEach(([shapeName, segs]) => {
+    const sh = SHAPES[shapeName];
+    const svg = buildBottleSVG(shapeName);
+    const g = svg.querySelector('.liquids');
+    let cum = 0;
+    segs.forEach(seg => {
+      const y = sh.B - (cum + seg.u) * sh.unit;
+      g.appendChild(svgEl('rect', { x: -50, y, width: 220, height: seg.u * sh.unit + 1.2, fill: 'url(#liq' + seg.c + ')' }));
+      g.appendChild(svgEl('ellipse', { cx: 50, cy: y + 0.7, rx: sh.surfRx, ry: 4, fill: COLORS[seg.c][0], opacity: 0.5 }));
+      cum += seg.u;
+    });
+    wrap.appendChild(svg);
+  });
+}
+
+/* ---------------- wiring ---------------- */
+function init() {
+  for (const k in SHAPES) SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
+  buildDefs();
+  buildOrb();
+  buildHeroBottles();
+  renderMenu();
+  showScreen('menu');
+  startAmbient();
+
+  document.querySelectorAll('#diff-seg button').forEach(b =>
+    b.addEventListener('click', () => {
+      difficulty = b.dataset.d; save.difficulty = difficulty; persist();
+      AudioFX.select(); renderMenu();
+    }));
+  $('#btn-sound-menu').addEventListener('click', () => {
+    save.sound = !save.sound; persist(); renderMenu(); AudioFX.select();
+  });
+  $('#btn-back').addEventListener('click', () => { AudioFX.swap(); renderMenu(); showScreen('menu'); });
+  $('#btn-undo').addEventListener('click', undo);
+  $('#btn-restart').addEventListener('click', () => { if (activePours === 0) { AudioFX.swap(); loadLevel(level); } });
+  $('#btn-sound').addEventListener('click', () => {
+    save.sound = !save.sound; persist();
+    $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
+    AudioFX.select();
+  });
+  $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
+
+  $('#btn-replay').addEventListener('click', () => { $('#overlay').classList.remove('show'); loadLevel(level); });
+  $('#btn-menu').addEventListener('click', () => { $('#overlay').classList.remove('show'); renderMenu(); showScreen('menu'); });
+  $('#btn-next').addEventListener('click', () => { $('#overlay').classList.remove('show'); if (level < 10) loadLevel(level + 1); });
+
+  let rT;
+  const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (activePours === 0) layoutStage(); else pendingLayout = true; }, 120); };
+  window.addEventListener('resize', relayout);
+  window.addEventListener('orientationchange', relayout);
+  window.addEventListener('pointerdown', () => AudioFX.ensure(), { once: true });
+}
+
+window.__vessel = {
+  loadLevel, onTap, undo,
+  get state() { return state; },
+  get moves() { return moves; },
+  get activePours() { return activePours; },
+  get slots() { return slots; },
+  get hiddenDepth() { return hiddenDepth; },
+  get shapes() { return shapesByBottle; },
+  get veiled() { return veiled; },
+  get frozen() { return frozen; },
+  get orbFrac() { return orbFrac; }
+};
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+else init();
+
+})();
+
+</script>
+</body>
+</html>
