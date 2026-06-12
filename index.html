@@ -1261,8 +1261,8 @@ function buildVolMap(sn, sh) {
 /* ---- liquid element visual effects ---- */
 const ELEM_TYPES = ['frozen', 'electric', 'boiling', 'toxic'];
 function buildElementMap(gen) {
+  /* overlays render under reduced motion too — the CSS freezes their animations */
   ELEMENT_MAP = {};
-  if (RM) return;
   const stateHash = gen.state.reduce((s, b, i) => (s ^ b.reduce((x, c) => (x * 31 + c) | 0, i * 997)) | 0, 0);
   const rng = window.mulberry32(((stateHash >>> 0) ^ (gen.par * 1234567)) >>> 0);
   for (let c = 0; c < gen.colors; c++) {
