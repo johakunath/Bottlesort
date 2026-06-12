@@ -1459,6 +1459,7 @@ function revealMystery(i) {
 function syncCaps() {
   state.forEach((b, i) => {
     const capped = window.isBottleComplete(b);
+    if (capped && hiddenDepth[i]) { hiddenDepth[i] = 0; renderBottle(i, 0); }
     const has = slots[i].el.classList.contains('capped');
     if (capped && !has) slots[i].el.classList.add('capped');
     else if (!capped && has) slots[i].el.classList.remove('capped');
@@ -1940,6 +1941,8 @@ async function doPour(si, di) {
   renderBottle(si, 0); renderBottle(di, 0);
 
   if (window.isBottleComplete(state[di])) {
+    /* a complete bottle holds no secrets — reveal any hidden bands under the cap */
+    if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderBottle(di, 0); AudioFX.reveal(); }
     slots[di].el.classList.add('capped');
     if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
     AudioFX.cap(); buzz([15, 40, 25]);
