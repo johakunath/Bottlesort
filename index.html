@@ -779,6 +779,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
     <div class="set-row"><span>Sound<span class="desc">Pours, chimes and fanfares</span></span><button class="switch" id="sw-sound" role="switch" aria-label="Sound"></button></div>
     <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
     <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
+    <div class="set-row"><span>Liquid motion<span class="desc">Living surface — waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
     <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Unlock new looks by earning stars</span></span></div>
     <div class="theme-grid" id="theme-grid"></div>
     <button class="danger-btn" id="btn-reset">Erase all progress</button>
@@ -1195,7 +1196,7 @@ const store = {
 const DEFAULT_SAVE = {
   progress: { relaxed: {}, normal: {}, expert: {} },
   sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
-  theme: 'apothecary', mode: 'light', symbols: false, haptics: true,
+  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true,
   ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0
 };
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
@@ -1564,6 +1565,123 @@ function appendElemOverlay(g, elem, y, h, px) {
   }
 }
 
+/* ============================================================
+   Liquid simulation — per-bottle 1-D shallow-water surface.
+   Each active bottle keeps a height-field (offsets + velocities)
+   across its width. A single rAF loop integrates every sim with
+   wave propagation + damping so disturbances *settle* instead of
+   looping, then rewrites the top surface <path> for that bottle.
+   The static colour bands below come from renderBottle; this only
+   animates the meniscus/surface. Falls back to a plain ellipse
+   when reduced-motion is on or liquid motion is disabled.
+   ============================================================ */
+const Fluid = {
+  enabled: true,
+  N: 15,                 /* samples across the surface */
+  AMP: 3.1,              /* max wave offset (viewBox units) */
+  MENISCUS: 2.4,         /* wall climb */
+  sims: {},              /* index -> { h, v } */
+  running: false,
+  active() { return this.enabled && !RM; },
+  get(i) {
+    let s = this.sims[i];
+    if (!s) { s = this.sims[i] = { h: new Float32Array(this.N), v: new Float32Array(this.N) }; }
+    return s;
+  },
+  reset(i) { delete this.sims[i]; },
+  resetAll() { this.sims = {}; },
+  /* tilt-style slosh: push one wall up, the other down (dir in [-1,1]) */
+  slosh(i, mag, dir) {
+    if (!this.active()) return;
+    const s = this.get(i), n = this.N;
+    dir = dir == null ? (Math.random() < 0.5 ? -1 : 1) : dir;
+    for (let k = 0; k < n; k++) {
+      const x = (k / (n - 1)) * 2 - 1;     /* -1..1 across width */
+      s.v[k] += mag * dir * x;
+    }
+  },
+  /* a splash dropped into the centre — a dip that ripples outward */
+  drop(i, mag) {
+    if (!this.active()) return;
+    const s = this.get(i), n = this.N, c = (n - 1) / 2;
+    for (let k = 0; k < n; k++) {
+      const d = (k - c) / c;
+      s.v[k] += mag * Math.exp(-d * d * 5);
+    }
+  },
+  step(dt) {
+    const C = 220, DAMP = 2.6, REST = 9, n = this.N, cap = this.AMP;
+    for (const i in this.sims) {
+      const s = this.sims[i], h = s.h, v = s.v;
+      let energy = 0;
+      for (let k = 0; k < n; k++) {
+        const hl = h[k > 0 ? k - 1 : 0], hr = h[k < n - 1 ? k + 1 : n - 1];
+        const lap = hl - 2 * h[k] + hr;
+        v[k] += (C * lap - REST * h[k] - DAMP * v[k]) * dt;
+      }
+      for (let k = 0; k < n; k++) {
+        h[k] += v[k] * dt;
+        if (h[k] > cap) { h[k] = cap; v[k] *= -0.3; }
+        else if (h[k] < -cap) { h[k] = -cap; v[k] *= -0.3; }
+        energy += h[k] * h[k] + v[k] * v[k] * 0.01;
+      }
+      if (energy < 0.002) this.reset(i);   /* settled — drop it from the loop */
+    }
+  },
+  /* build the surface <path> d-string for bottle i at mean surface y */
+  pathFor(i, surfY, halfW, bottomY) {
+    const s = this.get(i), n = this.N;
+    const left = 50 - halfW, right = 50 + halfW, span = right - left;
+    let d = 'M' + left.toFixed(1) + ',' + (bottomY).toFixed(1) +
+            ' L' + left.toFixed(1) + ',' + (surfY + s.h[0]).toFixed(2);
+    for (let k = 0; k < n; k++) {
+      const x = left + (k / (n - 1)) * span;
+      const edge = Math.abs((k / (n - 1)) * 2 - 1);          /* 0 centre → 1 wall */
+      const men = -this.MENISCUS * Math.pow(edge, 2.2);       /* climb up near walls */
+      const y = surfY + s.h[k] + men;
+      d += ' L' + x.toFixed(1) + ',' + y.toFixed(2);
+    }
+    d += ' L' + right.toFixed(1) + ',' + (bottomY).toFixed(1) + ' Z';
+    return d;
+  },
+  start() {
+    if (this.running) return;
+    this.running = true;
+    let last = performance.now();
+    const loop = (now) => {
+      if (!this.running) return;
+      requestAnimationFrame(loop);
+      if (document.hidden) { last = now; return; }
+      let dt = (now - last) / 1000; last = now;
+      if (dt > 0.05) dt = 0.05;                               /* clamp after stalls */
+      /* sub-step for stability */
+      const sub = 2; dt /= sub;
+      for (let s = 0; s < sub; s++) this.step(dt);
+      /* paint: rewrite each registered surface path + crest highlight */
+      for (let i = 0; i < slots.length; i++) {
+        const sl = slots[i]; if (!sl || !sl.surf || !this.sims[i]) continue;
+        const m = sl.surf;
+        const d = this.pathFor(i, m.surfY, m.halfW, m.bottomY);
+        m.path.setAttribute('d', d);
+        if (m.crest) m.crest.setAttribute('d', this.crestFor(i, m.surfY, m.halfW));
+      }
+    };
+    requestAnimationFrame(loop);
+  },
+  crestFor(i, surfY, halfW) {
+    const s = this.get(i), n = this.N;
+    const left = 50 - halfW, span = 2 * halfW;
+    let d = '';
+    for (let k = 0; k < n; k++) {
+      const x = left + (k / (n - 1)) * span;
+      const edge = Math.abs((k / (n - 1)) * 2 - 1);
+      const y = surfY + s.h[k] - this.MENISCUS * Math.pow(edge, 2.2) + 0.4;
+      d += (k ? ' L' : 'M') + x.toFixed(1) + ',' + y.toFixed(2);
+    }
+    return d;
+  }
+};
+
 /* ---------------- liquid rendering (gravity-true) ----------------
    The liquid group is counter-rotated against the bottle's tilt, so
    bands and surfaces stay horizontal in world space; the interior
@@ -1594,6 +1712,12 @@ function renderBottle(i, tiltDeg, wob) {
   const hUnit = sh.unit * (0.55 + 0.45 * Math.cos(a));
   const fade = Math.max(0, 1 - Math.abs(t) / 32);
 
+  const shapeName = shapesByBottle[i];
+  const WAVECUT = Fluid.AMP + Fluid.MENISCUS + 1;
+  const waveMode = !t && Fluid.active() && !locked.has(i);
+  const lastSeg = segs.length ? segs[segs.length - 1] : null;
+  let topWave = null;
+
   let cum = 0;
   const ellipses = [];
   for (const seg of segs) {
@@ -1607,7 +1731,13 @@ function renderBottle(i, tiltDeg, wob) {
       h = seg.u * hUnit;
       y = low - (cum + seg.u) * hUnit;
     }
-    inner.appendChild(svgEl('rect', { x: -160, y: y, width: 420, height: h + 1.4, fill: 'url(#liq' + seg.c + ')' }));
+    let rectY = y, rectH = h;
+    /* the top band's flat lid becomes the animated wave surface */
+    if (seg === lastSeg && waveMode && h > WAVECUT + 6) {
+      rectY = y + WAVECUT; rectH = h - WAVECUT;
+      topWave = { surfY: y, bottomY: rectY, c: seg.c };
+    }
+    inner.appendChild(svgEl('rect', { x: -160, y: rectY, width: 420, height: rectH + 1.4, fill: 'url(#liq' + seg.c + ')' }));
     if (!t && ELEMENT_MAP[seg.c]) appendElemOverlay(inner, ELEMENT_MAP[seg.c], y, h, px);
     if (save.symbols && fade > 0.3 && seg.u >= 0.8) {
       const gl = svgEl('text', {
@@ -1623,6 +1753,7 @@ function renderBottle(i, tiltDeg, wob) {
   }
   ellipses.forEach((e, k) => {
     const isTop = k === ellipses.length - 1;
+    if (isTop && topWave) return;   /* wave surface drawn separately below */
     const wdy = isTop && wob ? wob.dy : 0;
     const wrot = isTop && wob ? wob.rot : 0;
     const surf = svgEl('ellipse', {
@@ -1636,6 +1767,20 @@ function renderBottle(i, tiltDeg, wob) {
       fill: '#ffffff', opacity: 0.5 * fade
     }));
   });
+
+  /* animated wave surface for the top band */
+  if (topWave) {
+    const halfW = Math.max(5, shapeWidthAt(shapeName, topWave.surfY) / 2);
+    const path = svgEl('path', { fill: 'url(#liq' + topWave.c + ')', d: Fluid.pathFor(i, topWave.surfY, halfW, topWave.bottomY) });
+    inner.appendChild(path);
+    const crest = svgEl('path', { d: Fluid.crestFor(i, topWave.surfY, halfW), fill: 'none',
+      stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    inner.appendChild(crest);
+    slot.surf = { path, crest, surfY: topWave.surfY, halfW, bottomY: topWave.bottomY };
+    Fluid.start();
+  } else {
+    slot.surf = null;
+  }
 
   /* idle bubbles in the top liquid (skipped mid-pour: bottle is locked) */
   if (!t && !RM && ellipses.length && !locked.has(i) && cum > 0.5) {
@@ -1794,6 +1939,7 @@ function setupBoard(gen) {
   visual = state.map(mergeRuns);
   moves = 0; history = []; sel = null; locked.clear(); activePours = 0;
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
+  Fluid.resetAll();
   clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
   const specials = applySpecials(gen);
@@ -1994,11 +2140,12 @@ function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function setSelected(i) {
   if (sel !== null && slots[sel]) slots[sel].el.classList.remove('selected');
   sel = i;
-  if (i !== null) slots[i].el.classList.add('selected');
+  if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); }  /* lift sloshes the liquid */
 }
 function shake(i) {
   const el = slots[i].el;
   el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+  Fluid.slosh(i, 3.4);   /* invalid jab rocks the surface */
 }
 function canBeSource(i) { return state[i].length > 0 && !window.isBottleComplete(state[i]); }
 
@@ -2189,7 +2336,8 @@ async function doPour(si, di) {
   }
 
   locked.delete(si); locked.delete(di); activePours--;
-  sloshBottle(di);
+  sloshBottle(di, Math.min(2, n));
+  sloshBottle(si, 0.5);
   updateHUD();
   if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
   if (activePours === 0 && window.isSolved(state)) {
@@ -2215,7 +2363,14 @@ function anyUsefulMove() {
 
 /* ---------------- liquid slosh (settling surface after a pour) ---------------- */
 function sloshBottle(i, amp) {
-  if (RM || !slots[i]) return;
+  if (!slots[i]) return;
+  if (Fluid.active()) {            /* the height-field sim settles it for real */
+    if (!locked.has(i)) renderBottle(i, 0);   /* register the (now upright) wave surface */
+    Fluid.drop(i, -(amp || 1) * 3.2);
+    Fluid.start();
+    return;
+  }
+  if (RM) return;
   const a0 = amp || 1;
   const t0 = performance.now();
   tween(700, p => {
@@ -2434,6 +2589,7 @@ function renderSettings() {
   $('#sw-sound').classList.toggle('on', !!save.sound);
   $('#sw-haptics').classList.toggle('on', !!save.haptics);
   $('#sw-symbols').classList.toggle('on', !!save.symbols);
+  $('#sw-fluid').classList.toggle('on', !!save.fluid);
   renderThemeGrid();
 }
 
@@ -2706,6 +2862,7 @@ function init() {
     SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
     SHAPES[k].volToY = buildVolMap(k, SHAPES[k]);
   }
+  Fluid.enabled = save.fluid !== false;
   applyTheme();
   buildDefs();
   buildOrb();
@@ -2761,6 +2918,10 @@ function init() {
   $('#sw-haptics').addEventListener('click', () => { save.haptics = !save.haptics; persist(); renderSettings(); buzz(15); });
   $('#sw-symbols').addEventListener('click', () => {
     save.symbols = !save.symbols; persist(); renderSettings(); AudioFX.select();
+    if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
+  });
+  $('#sw-fluid').addEventListener('click', () => {
+    save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; persist(); renderSettings(); AudioFX.select();
     if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
   });
   $('#btn-reset').addEventListener('click', () => {
