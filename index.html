@@ -419,7 +419,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 
 /* ── Phase 4: cork-pop, steam, pour-ripple ── */
 /* cork group: always in DOM, CSS controls visibility per skin */
-body[data-skin="neon"] .cork-g { display: none; }
+body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none; }
 body[data-skin="apothecary"] .slot .bottle svg .cork-g {
   transition: transform 0.22s cubic-bezier(.2,.8,.4,1), opacity 0.18s ease;
 }
@@ -1231,6 +1231,10 @@ if (!['relaxed', 'normal', 'expert'].includes(save.difficulty)) save.difficulty 
 /* migrate old colour-theme saves (dusk/ocean/candy/galaxy) to the new skins */
 if (!['apothecary', 'neon'].includes(save.theme)) save.theme = 'apothecary';
 if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
+/* normalise visual toggles to explicit booleans (pre-fluid saves lack the keys:
+   the DEFAULT_SAVE merge already defaults them, this pins the schema) */
+save.fluid = save.fluid !== false;   /* default ON for returning players */
+save.glass = save.glass === true;    /* default OFF (beta) */
 save.seenSpecials = save.seenSpecials || {};
 save.ach = save.ach || {};
 save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
@@ -1403,8 +1407,9 @@ function buildBottleSVG(shapeName, opts) {
     sheenWrap.appendChild(sheen);
     svg.appendChild(sheenWrap);
   }
-  /* parchment label (Apothecary) — sits on the glass, over the liquid */
-  if (opts.label && SKIN === 'apothecary' && sh.label) {
+  /* parchment label — always built when requested; CSS hides it on Neon
+     (so a runtime Apothecary→Neon switch can't leave a stale label behind) */
+  if (opts.label && sh.label) {
     svg.appendChild(buildLabel(sh.label));
   }
   const gloss = svgEl('g', {});
@@ -1434,7 +1439,7 @@ function buildBottleSVG(shapeName, opts) {
 }
 
 function buildLabel(L) {
-  const g = svgEl('g', { opacity: 0.96 });
+  const g = svgEl('g', { opacity: 0.96, class: 'label-g' });
   const cx = L.x + L.w / 2;
   g.appendChild(svgEl('rect', { x: L.x, y: L.y, width: L.w, height: L.h, rx: L.rx,
     fill: 'url(#lblGrad)', stroke: 'rgba(120,90,55,0.35)', 'stroke-width': 0.8 }));
