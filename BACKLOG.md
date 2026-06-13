@@ -15,27 +15,31 @@ renderer; old Dusk/Ocean/Candy/Galaxy themes retired; token-driven chrome; fonts
 palettes, glass tone, corks, parchment labels, backdrops. This renderer is the base
 **and** the fallback for everything below.
 
-### ⏳ Phase 2 — WebGL glass + refraction
-**Goal:** replace SVG glass pixels with a stage-wide WebGL canvas; refractive +
-specular glass shader; per-theme glass tint; neon bloom.
-**Prep work:**
-- Introduce a `Renderer` seam (`init/setBoard/syncLayout/renderFrame/setTilt/setWobble/spawnPour/setTheme/destroy`) with two backends: `SvgRenderer` (current code) and `GlRenderer`. Factory picks GL when available, else SVG. (Phase 0 of the plan — do first.)
-- Keep DOM slot `<div>`s as invisible hit-targets + layout drivers; GL canvas reads `slots[i].slot.getBoundingClientRect()` each frame. One canvas, one context, one rAF.
+### ◑ Phase 2 — WebGL lighting (shipped); refractive-glass renderer (remaining)
+**Shipped:** a stage-wide WebGL canvas (`Glow`) that sums a soft radial glow per
+bottle, coloured by the top liquid and tuned per theme (Neon bloom / Apothecary-dark
+candlelight / Apothecary-light near-zero). Single full-screen-triangle fragment pass,
+≤16 lights, premultiplied-additive, composited (screen) over the scene; reads slot
+rects + `visual[]` live each frame; feature-detected with silent fallback to the CSS
+per-bottle glow; honors reduced-motion.
+**Remaining — replace SVG glass pixels with a true refractive-glass renderer:**
+- Introduce a `Renderer` seam (`init/setBoard/syncLayout/renderFrame/setTilt/setWobble/spawnPour/setTheme/destroy`) with `SvgRenderer` (current) + `GlRenderer` backends; factory picks GL when available, else SVG.
+- Keep DOM slot `<div>`s as invisible hit-targets + layout drivers; the GL renderer reads `slots[i].slot.getBoundingClientRect()` each frame (the `Glow` layer already proves this pattern).
 - Precompute per-shape mask + distance/normal texture (rasterize `interior`/`outline` path once per shape → JS distance transform), reused by every bottle of that shape.
-- WebGL bootstrap: context creation + loss handling → live swap back to `SvgRenderer`.
-- Startup micro-bench → glass quality tiers (A full refraction / B spec+tint / C SVG) + a Settings "Glass quality" toggle; cap DPR ~2; honor reduced-motion (`RM`).
-- Static liquid bands first (from `visual[i]` via existing `buildVolMap`/`volToY`), no sim yet.
+- Refraction + specular glass shader; per-theme tint; context-loss handling → live swap back to `SvgRenderer`.
+- Startup micro-bench → glass quality tiers (A full refraction / B spec+tint / C SVG) + a Settings "Glass quality" toggle; cap DPR ~2.
+- Render the liquid bands + the height-field surface (already simulated in Phase 3) inside the GL glass instead of SVG.
 
-### ⏳ Phase 3 — per-bottle height-field fluid sim
-**Goal:** real meniscus, sloshing with momentum + damping, settling (not a looping
-sine), rising bubbles per liquid type.
-**Prep work:**
-- `sim[i] = { h[], v[], level, targetLevel, tiltDeg, accel, bubbles[], meniscusK, colorTop }`; only the top surface is simulated, bands below stay static.
-- Shallow-water update: `a[k] = c²·(h[k-1]−2h[k]+h[k+1]) − damping·v[k]`; tune `c`/damping for a settle.
-- Track slot screen-position deltas to drive acceleration → slosh injection on lift/carry.
-- Port tilt counter-rotation + lowest-point math from `renderBottle` so the surface stays gravity-level when the glass rotates; meniscus wall-climb bias at edge samples.
-- Port the bubble model from the handoff `files/vessel-bottle.jsx` `Liquid` component.
-- Replace `sloshBottle` with a damped settle driven by the sim.
+### ✅ Phase 3 — per-bottle height-field fluid sim (shipped)
+Per-bottle 1-D shallow-water surface (`Fluid`): one rAF loop integrates wave
+propagation with damping so disturbances settle; `renderBottle` draws the top band's
+lid as an animated wave `<path>` with a wall-climbing meniscus + crest highlight,
+lower bands static. Slosh on select/invalid; splash + settle on pour (source &
+receiver). Gated by the "Liquid motion" setting (default on); tilt/reduced-motion
+fall back to the prior ellipse. Sims reset per board.
+**Remaining polish:** per-liquid bubble density/types ported from the handoff
+`files/vessel-bottle.jsx` `Liquid` component; richer carry-acceleration slosh from
+slot screen-position deltas during the pour arc.
 
 ### ⏳ Phase 4 — pour physics
 **Goal:** cork-pop, gravity-driven arcing stream, droplets, splash + ripple,
