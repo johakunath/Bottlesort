@@ -2540,7 +2540,11 @@ async function doPour(si, di) {
   slotEl.classList.add('pouring');
   bottleEl.style.transition = 'none';
 
-  /* phase 1: lift, travel, tilt */
+  /* phase 1: lift, travel, tilt — carry-acceleration slosh */
+  if (!RM) {
+    setTimeout(() => Fluid.slosh(si, 1.4, -side), 60);  /* initial surge backward */
+    setTimeout(() => Fluid.slosh(si, 0.9, side), 210);   /* arc-peak settles forward */
+  }
   AudioFX.swap();
   await tween(RM ? 0 : 360, p => {
     const ang = A * p;
