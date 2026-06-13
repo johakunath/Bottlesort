@@ -417,6 +417,31 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 @keyframes splashPulse { 0%, 100% { transform: translate(-50%, -50%) scale(1, 1); } 50% { transform: translate(-50%, -50%) scale(1.3, 0.7); } }
 
+/* ── Phase 4: cork-pop, steam, pour-ripple ── */
+/* cork group: always in DOM, CSS controls visibility per skin */
+body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none; }
+body[data-skin="apothecary"] .slot .bottle svg .cork-g {
+  transition: transform 0.22s cubic-bezier(.2,.8,.4,1), opacity 0.18s ease;
+}
+body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
+  transform: translateY(-18px); opacity: 0;
+}
+/* steam wisp rising from an open bottle mouth */
+.steam-wisp {
+  position: absolute; width: 14px; height: 30px; border-radius: 50%;
+  background: radial-gradient(ellipse at bottom, rgba(255,255,255,0.52), transparent 70%);
+  filter: blur(3px); transform-origin: bottom center; pointer-events: none; z-index: 72;
+  animation: steamRise 1.35s ease-out infinite;
+}
+@keyframes steamRise { 0% { transform: translateY(0) scaleX(1); opacity: 0; } 25% { opacity: 0.55; } 100% { transform: translateY(-36px) scaleX(1.6); opacity: 0; } }
+/* landing ripple on receiver */
+.pour-ripple {
+  position: absolute; border-radius: 50%; pointer-events: none; z-index: 73;
+  border-width: 1.5px; border-style: solid;
+  animation: pourRipple 0.65s ease-out forwards;
+}
+@keyframes pourRipple { 0% { transform: translate(-50%,-50%) scale(0.25); opacity: 0.9; } 100% { transform: translate(-50%,-50%) scale(2.6); opacity: 0; } }
+
 .ice {
   position: absolute; left: 2%; right: 2%; bottom: -3%; height: 48%; z-index: 6;
   border-radius: calc(var(--bw) * 0.16);
@@ -779,6 +804,8 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
     <div class="set-row"><span>Sound<span class="desc">Pours, chimes and fanfares</span></span><button class="switch" id="sw-sound" role="switch" aria-label="Sound"></button></div>
     <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
     <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
+    <div class="set-row"><span>Liquid motion<span class="desc">Living surface — waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
+    <div class="set-row"><span>Glass reflections<span class="desc">WebGL specular highlights on the glass — beta</span></span><button class="switch" id="sw-glass" role="switch" aria-label="Glass reflections"></button></div>
     <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Unlock new looks by earning stars</span></span></div>
     <div class="theme-grid" id="theme-grid"></div>
     <button class="danger-btn" id="btn-reset">Erase all progress</button>
@@ -1195,7 +1222,7 @@ const store = {
 const DEFAULT_SAVE = {
   progress: { relaxed: {}, normal: {}, expert: {} },
   sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
-  theme: 'apothecary', mode: 'light', symbols: false, haptics: true,
+  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true, glass: false,
   ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0
 };
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
@@ -1204,6 +1231,10 @@ if (!['relaxed', 'normal', 'expert'].includes(save.difficulty)) save.difficulty 
 /* migrate old colour-theme saves (dusk/ocean/candy/galaxy) to the new skins */
 if (!['apothecary', 'neon'].includes(save.theme)) save.theme = 'apothecary';
 if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
+/* normalise visual toggles to explicit booleans (pre-fluid saves lack the keys:
+   the DEFAULT_SAVE merge already defaults them, this pins the schema) */
+save.fluid = save.fluid !== false;   /* default ON for returning players */
+save.glass = save.glass === true;    /* default OFF (beta) */
 save.seenSpecials = save.seenSpecials || {};
 save.ach = save.ach || {};
 save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
@@ -1376,8 +1407,9 @@ function buildBottleSVG(shapeName, opts) {
     sheenWrap.appendChild(sheen);
     svg.appendChild(sheenWrap);
   }
-  /* parchment label (Apothecary) — sits on the glass, over the liquid */
-  if (opts.label && SKIN === 'apothecary' && sh.label) {
+  /* parchment label — always built when requested; CSS hides it on Neon
+     (so a runtime Apothecary→Neon switch can't leave a stale label behind) */
+  if (opts.label && sh.label) {
     svg.appendChild(buildLabel(sh.label));
   }
   const gloss = svgEl('g', {});
@@ -1398,8 +1430,8 @@ function buildBottleSVG(shapeName, opts) {
     s.setAttribute('class', 'twinkle t' + (k % 3));
     gloss.appendChild(s);
   });
-  /* cork stopper (Apothecary) — drawn last, sits above the mouth */
-  if (opts.cork && SKIN === 'apothecary' && sh.cork) {
+  /* cork stopper — always added when requested; CSS hides it on Neon */
+  if (opts.cork && sh.cork) {
     svg.appendChild(buildCork(sh.cork));
   }
   svg.appendChild(gloss);
@@ -1407,7 +1439,7 @@ function buildBottleSVG(shapeName, opts) {
 }
 
 function buildLabel(L) {
-  const g = svgEl('g', { opacity: 0.96 });
+  const g = svgEl('g', { opacity: 0.96, class: 'label-g' });
   const cx = L.x + L.w / 2;
   g.appendChild(svgEl('rect', { x: L.x, y: L.y, width: L.w, height: L.h, rx: L.rx,
     fill: 'url(#lblGrad)', stroke: 'rgba(120,90,55,0.35)', 'stroke-width': 0.8 }));
@@ -1420,7 +1452,7 @@ function buildLabel(L) {
 }
 
 function buildCork(c) {
-  const g = svgEl('g', {});
+  const g = svgEl('g', { class: 'cork-g' });
   g.appendChild(svgEl('rect', { x: c.x, y: c.y, width: c.w, height: c.h, rx: c.r,
     fill: 'url(#corkGrad)', stroke: 'rgba(90,55,25,0.5)', 'stroke-width': 1 }));
   g.appendChild(svgEl('ellipse', { cx: c.x + c.w / 2, cy: c.y + 2.5, rx: (c.w - 5) / 2, ry: 2.4,
@@ -1564,6 +1596,377 @@ function appendElemOverlay(g, elem, y, h, px) {
   }
 }
 
+/* ============================================================
+   Liquid simulation — per-bottle 1-D shallow-water surface.
+   Each active bottle keeps a height-field (offsets + velocities)
+   across its width. A single rAF loop integrates every sim with
+   wave propagation + damping so disturbances *settle* instead of
+   looping, then rewrites the top surface <path> for that bottle.
+   The static colour bands below come from renderBottle; this only
+   animates the meniscus/surface. Falls back to a plain ellipse
+   when reduced-motion is on or liquid motion is disabled.
+   ============================================================ */
+const Fluid = {
+  enabled: true,
+  N: 15,                 /* samples across the surface */
+  AMP: 3.1,              /* max wave offset (viewBox units) */
+  MENISCUS: 2.4,         /* wall climb */
+  sims: {},              /* index -> { h, v } */
+  running: false,
+  active() { return this.enabled && !RM; },
+  get(i) {
+    let s = this.sims[i];
+    if (!s) { s = this.sims[i] = { h: new Float32Array(this.N), v: new Float32Array(this.N) }; }
+    return s;
+  },
+  reset(i) { delete this.sims[i]; },
+  resetAll() { this.sims = {}; },
+  /* tilt-style slosh: push one wall up, the other down (dir in [-1,1]) */
+  slosh(i, mag, dir) {
+    if (!this.active()) return;
+    const s = this.get(i), n = this.N;
+    dir = dir == null ? (Math.random() < 0.5 ? -1 : 1) : dir;
+    for (let k = 0; k < n; k++) {
+      const x = (k / (n - 1)) * 2 - 1;     /* -1..1 across width */
+      s.v[k] += mag * dir * x;
+    }
+  },
+  /* a splash dropped into the centre — a dip that ripples outward */
+  drop(i, mag) {
+    if (!this.active()) return;
+    const s = this.get(i), n = this.N, c = (n - 1) / 2;
+    for (let k = 0; k < n; k++) {
+      const d = (k - c) / c;
+      s.v[k] += mag * Math.exp(-d * d * 5);
+    }
+  },
+  step(dt) {
+    const C = 220, DAMP = 2.6, REST = 9, n = this.N, cap = this.AMP;
+    for (const i in this.sims) {
+      const s = this.sims[i], h = s.h, v = s.v;
+      let energy = 0;
+      for (let k = 0; k < n; k++) {
+        const hl = h[k > 0 ? k - 1 : 0], hr = h[k < n - 1 ? k + 1 : n - 1];
+        const lap = hl - 2 * h[k] + hr;
+        v[k] += (C * lap - REST * h[k] - DAMP * v[k]) * dt;
+      }
+      for (let k = 0; k < n; k++) {
+        h[k] += v[k] * dt;
+        if (h[k] > cap) { h[k] = cap; v[k] *= -0.3; }
+        else if (h[k] < -cap) { h[k] = -cap; v[k] *= -0.3; }
+        energy += h[k] * h[k] + v[k] * v[k] * 0.01;
+      }
+      if (energy < 0.002) this.reset(i);   /* settled — drop it from the loop */
+    }
+  },
+  /* build the surface <path> d-string for bottle i at mean surface y */
+  pathFor(i, surfY, halfW, bottomY) {
+    const s = this.get(i), n = this.N;
+    const left = 50 - halfW, right = 50 + halfW, span = right - left;
+    let d = 'M' + left.toFixed(1) + ',' + (bottomY).toFixed(1) +
+            ' L' + left.toFixed(1) + ',' + (surfY + s.h[0]).toFixed(2);
+    for (let k = 0; k < n; k++) {
+      const x = left + (k / (n - 1)) * span;
+      const edge = Math.abs((k / (n - 1)) * 2 - 1);          /* 0 centre → 1 wall */
+      const men = -this.MENISCUS * Math.pow(edge, 2.2);       /* climb up near walls */
+      const y = surfY + s.h[k] + men;
+      d += ' L' + x.toFixed(1) + ',' + y.toFixed(2);
+    }
+    d += ' L' + right.toFixed(1) + ',' + (bottomY).toFixed(1) + ' Z';
+    return d;
+  },
+  start() {
+    if (this.running) return;
+    this.running = true;
+    let last = performance.now();
+    const loop = (now) => {
+      if (!this.running) return;
+      requestAnimationFrame(loop);
+      if (document.hidden) { last = now; return; }
+      let dt = (now - last) / 1000; last = now;
+      if (dt > 0.05) dt = 0.05;                               /* clamp after stalls */
+      /* sub-step for stability */
+      const sub = 2; dt /= sub;
+      for (let s = 0; s < sub; s++) this.step(dt);
+      /* paint: rewrite each registered surface path + crest highlight */
+      for (let i = 0; i < slots.length; i++) {
+        const sl = slots[i]; if (!sl || !sl.surf || !this.sims[i]) continue;
+        const m = sl.surf;
+        const d = this.pathFor(i, m.surfY, m.halfW, m.bottomY);
+        m.path.setAttribute('d', d);
+        if (m.crest) m.crest.setAttribute('d', this.crestFor(i, m.surfY, m.halfW));
+      }
+    };
+    requestAnimationFrame(loop);
+  },
+  crestFor(i, surfY, halfW) {
+    const s = this.get(i), n = this.N;
+    const left = 50 - halfW, span = 2 * halfW;
+    let d = '';
+    for (let k = 0; k < n; k++) {
+      const x = left + (k / (n - 1)) * span;
+      const edge = Math.abs((k / (n - 1)) * 2 - 1);
+      const y = surfY + s.h[k] - this.MENISCUS * Math.pow(edge, 2.2) + 0.4;
+      d += (k ? ' L' : 'M') + x.toFixed(1) + ',' + y.toFixed(2);
+    }
+    return d;
+  }
+};
+
+/* ============================================================
+   Glow — a WebGL lighting layer behind the bottles.
+   A stage-wide canvas (mix-blend: screen) sums a soft radial glow
+   per bottle, coloured by its top liquid and tuned per theme: a
+   luminous bloom under Neon, soft candlelight under Apothecary-dark,
+   near-nothing under Apothecary-light. Feature-detected; if WebGL is
+   unavailable or a shader fails to build it silently disables and the
+   CSS per-bottle glow carries on, so nothing breaks.
+   ============================================================ */
+const Glow = {
+  MAX: 16, ok: false, gl: null, cv: null, started: false, gain: 0,
+  loc: {}, count: 0,
+  pos: null, col: null,
+  init() {
+    if (RM) return;
+    const stage = $('#stage'); if (!stage) return;
+    try {
+      const cv = document.createElement('canvas');
+      cv.id = 'glow-fx';
+      cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;mix-blend-mode:screen;';
+      stage.insertBefore(cv, stage.firstChild);
+      const opts = { alpha: true, premultipliedAlpha: true, antialias: false, depth: false };
+      const gl = cv.getContext('webgl', opts) || cv.getContext('experimental-webgl', opts);
+      if (!gl) return;
+      const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
+      const fs = 'precision highp float;uniform vec2 uRes;uniform int uCount;uniform float uGain;' +
+        'uniform vec3 uPos[' + this.MAX + '];uniform vec3 uCol[' + this.MAX + '];' +
+        'void main(){vec2 f=gl_FragCoord.xy;vec3 c=vec3(0.0);' +
+        'for(int i=0;i<' + this.MAX + ';i++){if(i>=uCount)break;vec2 d=f-uPos[i].xy;float r=uPos[i].z;' +
+        'float g=exp(-dot(d,d)/(r*r));c+=uCol[i]*g;}c*=uGain;' +
+        'float a=clamp(max(c.r,max(c.g,c.b)),0.0,1.0);gl_FragColor=vec4(c,a);}';
+      const prog = this._program(gl, vs, fs);
+      if (!prog) return;
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+      const pl = gl.getAttribLocation(prog, 'p');
+      gl.enableVertexAttribArray(pl);
+      gl.vertexAttribPointer(pl, 2, gl.FLOAT, false, 0, 0);
+      gl.useProgram(prog);
+      this.loc = {
+        res: gl.getUniformLocation(prog, 'uRes'),
+        count: gl.getUniformLocation(prog, 'uCount'),
+        gain: gl.getUniformLocation(prog, 'uGain'),
+        pos: gl.getUniformLocation(prog, 'uPos'),
+        col: gl.getUniformLocation(prog, 'uCol')
+      };
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.clearColor(0, 0, 0, 0);
+      this.gl = gl; this.cv = cv; this.prog = prog;
+      this.pos = new Float32Array(this.MAX * 3);
+      this.col = new Float32Array(this.MAX * 3);
+      this.ok = true;
+      this.start();
+    } catch (e) { this.ok = false; }
+  },
+  _program(gl, vsrc, fsrc) {
+    const c = (type, src) => {
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { gl.deleteShader(s); return null; }
+      return s;
+    };
+    const v = c(gl.VERTEX_SHADER, vsrc), f = c(gl.FRAGMENT_SHADER, fsrc);
+    if (!v || !f) return null;
+    const p = gl.createProgram(); gl.attachShader(p, v); gl.attachShader(p, f); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) return null;
+    return p;
+  },
+  setGain(g) { this.gain = g; },
+  start() {
+    if (this.started || !this.ok) return;
+    this.started = true;
+    const draw = () => {
+      if (!this.ok) return;
+      requestAnimationFrame(draw);
+      if (document.hidden || this.gain <= 0.001 || $('#game').classList.contains('hidden')) {
+        if (this.gl && this.cv && this.cv.width) { this.gl.clear(this.gl.COLOR_BUFFER_BIT); }
+        return;
+      }
+      this.frame();
+    };
+    requestAnimationFrame(draw);
+  },
+  frame() {
+    const gl = this.gl, cv = this.cv, stage = $('#stage');
+    if (!gl || !stage || !slots || !slots.length) return;
+    const sr = stage.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = Math.round(sr.width * dpr), H = Math.round(sr.height * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; gl.viewport(0, 0, W, H); }
+    let n = 0;
+    for (let i = 0; i < slots.length && n < this.MAX; i++) {
+      const segs = visual[i]; if (!segs || !segs.length) continue;
+      const cum = segs.reduce((s, x) => s + x.u, 0); if (cum <= 0.01) continue;
+      const top = segs[segs.length - 1];
+      const hid = hiddenDepth[i] || 0;
+      const hex = hid >= cum ? HIDDEN_FILL[0] : COLORS[top.c][0];
+      const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+      const rect = slots[i].btn.getBoundingClientRect();
+      const cx = (rect.left + rect.width / 2 - sr.left) * dpr;
+      const cy = H - (rect.top + rect.height * 0.46 - sr.top) * dpr;   /* flip to GL space */
+      this.pos[n * 3] = cx; this.pos[n * 3 + 1] = cy; this.pos[n * 3 + 2] = Math.max(20, rect.width * 0.95 * dpr);
+      this.col[n * 3] = r; this.col[n * 3 + 1] = g; this.col[n * 3 + 2] = b;
+      n++;
+    }
+    this.count = n;
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (!n) return;
+    gl.uniform2f(this.loc.res, W, H);
+    gl.uniform1i(this.loc.count, n);
+    gl.uniform1f(this.loc.gain, this.gain);
+    gl.uniform3fv(this.loc.pos, this.pos);
+    gl.uniform3fv(this.loc.col, this.col);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+};
+
+/* ============================================================
+   Glass — a WebGL specular / fresnel pass over the bottles.
+   Each shape is rasterised once into a cylindrical normal map
+   (nx,nz + silhouette mask) from its interior path. A per-bottle
+   quad samples that map and adds a Blinn specular glint from a
+   slowly-orbiting light plus a fresnel rim, masked to the glass
+   silhouette and composited (screen) over the SVG bottle — giving
+   the glass live, tracking highlights. Opt-in (Settings ▸ Glass
+   reflections); feature-detected with a silent no-op fallback.
+   ============================================================ */
+const Glass = {
+  enabled: false, ok: false, gl: null, cv: null, started: false,
+  tex: {}, tint: [1, 0.96, 0.9], intensity: 0.6, theta: 0,
+  init() {
+    if (this.cv || RM) return;
+    const stage = $('#stage'); if (!stage) return;
+    try {
+      const cv = document.createElement('canvas');
+      cv.id = 'glass-fx';
+      cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:65;mix-blend-mode:screen;';
+      stage.appendChild(cv);
+      const opts = { alpha: true, premultipliedAlpha: true, antialias: true, depth: false };
+      const gl = cv.getContext('webgl', opts) || cv.getContext('experimental-webgl', opts);
+      if (!gl) return;
+      const vs = 'attribute vec2 a;uniform vec4 uRect;varying vec2 vUv;' +
+        'void main(){vUv=a;gl_Position=vec4(uRect.x+a.x*uRect.z, uRect.y-a.y*uRect.w, 0.0, 1.0);}';
+      const fs = 'precision highp float;varying vec2 vUv;uniform sampler2D uTex;' +
+        'uniform vec2 uLight;uniform vec3 uTint;uniform float uInt;' +
+        'void main(){vec4 t=texture2D(uTex,vUv);if(t.a<0.5)discard;' +
+        'vec3 N=vec3(t.r*2.0-1.0,0.0,t.g);vec3 L=normalize(vec3(uLight,0.85));' +
+        'vec3 H=normalize(L+vec3(0.0,0.0,1.0));float s=pow(max(dot(N,H),0.0),26.0);' +
+        'float rim=pow(1.0-clamp(t.g,0.0,1.0),3.0);' +
+        'float v=(s*1.15+rim*0.22)*uInt;gl_FragColor=vec4(uTint*v, clamp(v,0.0,1.0));}';
+      const prog = Glow._program(gl, vs, fs);
+      if (!prog) return;
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
+      const al = gl.getAttribLocation(prog, 'a');
+      gl.enableVertexAttribArray(al);
+      gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
+      gl.useProgram(prog);
+      this.loc = {
+        rect: gl.getUniformLocation(prog, 'uRect'),
+        light: gl.getUniformLocation(prog, 'uLight'),
+        tint: gl.getUniformLocation(prog, 'uTint'),
+        int: gl.getUniformLocation(prog, 'uInt')
+      };
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.clearColor(0, 0, 0, 0);
+      this.gl = gl; this.cv = cv; this.prog = prog;
+      for (const name in SHAPES) this.buildTex(name, SHAPES[name]);
+      this.ok = true;
+      this.start();
+    } catch (e) { this.ok = false; }
+  },
+  /* rasterise the interior path → cylindrical normal map (nx, nz, mask) */
+  buildTex(name, sh) {
+    const Wt = 80, Ht = Math.round(80 * sh.vbH / 100);
+    const c = document.createElement('canvas'); c.width = Wt; c.height = Ht;
+    const x = c.getContext('2d');
+    x.setTransform(Wt / 100, 0, 0, Ht / sh.vbH, 0, 0);
+    x.fillStyle = '#fff';
+    x.fill(new Path2D(sh.interior));
+    const src = x.getImageData(0, 0, Wt, Ht).data;
+    const out = new Uint8Array(Wt * Ht * 4);
+    for (let yy = 0; yy < Ht; yy++) {
+      let lo = -1, hi = -1;
+      for (let xx = 0; xx < Wt; xx++) if (src[(yy * Wt + xx) * 4 + 3] > 40) { if (lo < 0) lo = xx; hi = xx; }
+      const cxr = (lo + hi) / 2, half = Math.max(1, (hi - lo) / 2);
+      for (let xx = 0; xx < Wt; xx++) {
+        const idx = (yy * Wt + xx) * 4, m = src[idx + 3] > 40 ? 1 : 0;
+        let nx = 0, nz = 1;
+        if (m && hi > lo) { nx = Math.max(-1, Math.min(1, (xx - cxr) / half)); nz = Math.sqrt(Math.max(0.02, 1 - nx * nx)); }
+        out[idx] = Math.round((nx * 0.5 + 0.5) * 255);
+        out[idx + 1] = Math.round(nz * 255);
+        out[idx + 2] = 0;
+        out[idx + 3] = m * 255;
+      }
+    }
+    const gl = this.gl, tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Wt, Ht, 0, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.tex[name] = tex;
+  },
+  setTheme(tint, intensity) { this.tint = tint; this.intensity = intensity; },
+  start() {
+    if (this.started || !this.ok) return;
+    this.started = true;
+    const draw = () => {
+      if (!this.ok) return;
+      requestAnimationFrame(draw);
+      if (document.hidden) return;
+      if (!this.enabled || $('#game').classList.contains('hidden')) {
+        if (this.gl && this.cv.width) this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+        return;
+      }
+      this.frame();
+    };
+    requestAnimationFrame(draw);
+  },
+  frame() {
+    const gl = this.gl, stage = $('#stage');
+    if (!gl || !stage || !slots || !slots.length) return;
+    const sr = stage.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = Math.round(sr.width * dpr), H = Math.round(sr.height * dpr);
+    if (this.cv.width !== W || this.cv.height !== H) { this.cv.width = W; this.cv.height = H; gl.viewport(0, 0, W, H); }
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this.theta += 0.006;
+    const lx = Math.cos(this.theta) * 0.8, ly = 0.3 + Math.sin(this.theta * 0.7) * 0.25;
+    gl.uniform2f(this.loc.light, lx, ly);
+    gl.uniform3f(this.loc.tint, this.tint[0], this.tint[1], this.tint[2]);
+    gl.uniform1f(this.loc.int, this.intensity);
+    for (let i = 0; i < slots.length; i++) {
+      if (locked.has(i)) continue;                 /* skip mid-pour (rotated) bottles */
+      const name = shapesByBottle[i]; const tex = this.tex[name]; if (!tex) continue;
+      const r = slots[i].btn.getBoundingClientRect();
+      const x0 = (r.left - sr.left) / sr.width * 2 - 1;
+      const y0 = 1 - (r.top - sr.top) / sr.height * 2;
+      const w = r.width / sr.width * 2, h = r.height / sr.height * 2;
+      gl.uniform4f(this.loc.rect, x0, y0, w, h);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+  }
+};
+
 /* ---------------- liquid rendering (gravity-true) ----------------
    The liquid group is counter-rotated against the bottle's tilt, so
    bands and surfaces stay horizontal in world space; the interior
@@ -1594,6 +1997,12 @@ function renderBottle(i, tiltDeg, wob) {
   const hUnit = sh.unit * (0.55 + 0.45 * Math.cos(a));
   const fade = Math.max(0, 1 - Math.abs(t) / 32);
 
+  const shapeName = shapesByBottle[i];
+  const WAVECUT = Fluid.AMP + Fluid.MENISCUS + 1;
+  const waveMode = !t && Fluid.active() && !locked.has(i);
+  const lastSeg = segs.length ? segs[segs.length - 1] : null;
+  let topWave = null;
+
   let cum = 0;
   const ellipses = [];
   for (const seg of segs) {
@@ -1607,7 +2016,13 @@ function renderBottle(i, tiltDeg, wob) {
       h = seg.u * hUnit;
       y = low - (cum + seg.u) * hUnit;
     }
-    inner.appendChild(svgEl('rect', { x: -160, y: y, width: 420, height: h + 1.4, fill: 'url(#liq' + seg.c + ')' }));
+    let rectY = y, rectH = h;
+    /* the top band's flat lid becomes the animated wave surface */
+    if (seg === lastSeg && waveMode && h > WAVECUT + 6) {
+      rectY = y + WAVECUT; rectH = h - WAVECUT;
+      topWave = { surfY: y, bottomY: rectY, c: seg.c };
+    }
+    inner.appendChild(svgEl('rect', { x: -160, y: rectY, width: 420, height: rectH + 1.4, fill: 'url(#liq' + seg.c + ')' }));
     if (!t && ELEMENT_MAP[seg.c]) appendElemOverlay(inner, ELEMENT_MAP[seg.c], y, h, px);
     if (save.symbols && fade > 0.3 && seg.u >= 0.8) {
       const gl = svgEl('text', {
@@ -1623,6 +2038,7 @@ function renderBottle(i, tiltDeg, wob) {
   }
   ellipses.forEach((e, k) => {
     const isTop = k === ellipses.length - 1;
+    if (isTop && topWave) return;   /* wave surface drawn separately below */
     const wdy = isTop && wob ? wob.dy : 0;
     const wrot = isTop && wob ? wob.rot : 0;
     const surf = svgEl('ellipse', {
@@ -1637,19 +2053,40 @@ function renderBottle(i, tiltDeg, wob) {
     }));
   });
 
-  /* idle bubbles in the top liquid (skipped mid-pour: bottle is locked) */
+  /* animated wave surface for the top band */
+  if (topWave) {
+    const halfW = Math.max(5, shapeWidthAt(shapeName, topWave.surfY) / 2);
+    const path = svgEl('path', { fill: 'url(#liq' + topWave.c + ')', d: Fluid.pathFor(i, topWave.surfY, halfW, topWave.bottomY) });
+    inner.appendChild(path);
+    const crest = svgEl('path', { d: Fluid.crestFor(i, topWave.surfY, halfW), fill: 'none',
+      stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+    inner.appendChild(crest);
+    slot.surf = { path, crest, surfY: topWave.surfY, halfW, bottomY: topWave.bottomY };
+    Fluid.start();
+  } else {
+    slot.surf = null;
+  }
+
+  /* idle bubbles — count/speed vary by top liquid type */
   if (!t && !RM && ellipses.length && !locked.has(i) && cum > 0.5) {
+    const ci = lastSeg ? lastSeg.c : 0;
+    /* density 0=calm(1 bub), 1=medium(2), 2=fizzy(3); speed 0=slow,1=med,2=fast */
+    const DENSITY = [1, 0, 2, 1, 2, 1, 0, 1, 0];
+    const SPEED   = [1, 0, 2, 1, 1, 1, 0, 1, 0];
+    const count = (DENSITY[ci % DENSITY.length] || 0) + 1;
+    const dur = SPEED[ci % SPEED.length] === 2 ? 2.1 : SPEED[ci % SPEED.length] === 0 ? 5.2 : 3.6;
     const surfY = ellipses[ellipses.length - 1].y;
     const depth = low - surfY;
-    for (let b = 0; b < 2; b++) {
-      const c = svgEl('circle', {
-        cx: px - 9 + b * 17 + Math.random() * 3,
+    for (let b = 0; b < count; b++) {
+      const bub = svgEl('circle', {
+        cx: px - 12 + (count > 1 ? (b / (count - 1)) * 24 : 0) + (Math.random() - 0.5) * 6,
         cy: low - 3 - Math.random() * Math.max(4, depth * 0.35),
-        r: 1.4 + Math.random() * 0.9, fill: 'rgba(255,255,255,0.45)'
+        r: 1.3 + Math.random() * 0.9, fill: 'rgba(255,255,255,0.45)'
       });
-      c.setAttribute('class', 'bub');
-      c.style.animationDelay = (-Math.random() * 3.6).toFixed(2) + 's';
-      inner.appendChild(c);
+      bub.setAttribute('class', 'bub');
+      bub.style.animationDuration = (dur + Math.random() * 0.7).toFixed(2) + 's';
+      bub.style.animationDelay = (-Math.random() * dur).toFixed(2) + 's';
+      inner.appendChild(bub);
     }
   }
 
@@ -1794,6 +2231,7 @@ function setupBoard(gen) {
   visual = state.map(mergeRuns);
   moves = 0; history = []; sel = null; locked.clear(); activePours = 0;
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
+  Fluid.resetAll();
   clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
   const specials = applySpecials(gen);
@@ -1815,7 +2253,7 @@ function setupBoard(gen) {
     const btn = document.createElement('button');
     btn.className = 'bottle';
     btn.setAttribute('aria-label', 'Bottle ' + (i + 1));
-    const svg = buildBottleSVG(shapeName);
+    const svg = buildBottleSVG(shapeName, { cork: true, label: true });
     btn.appendChild(svg);
     const cap = document.createElement('span'); cap.className = 'cap';
     const ring = document.createElement('span'); ring.className = 'ring';
@@ -1994,11 +2432,12 @@ function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function setSelected(i) {
   if (sel !== null && slots[sel]) slots[sel].el.classList.remove('selected');
   sel = i;
-  if (i !== null) slots[i].el.classList.add('selected');
+  if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); }  /* lift sloshes the liquid */
 }
 function shake(i) {
   const el = slots[i].el;
   el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+  Fluid.slosh(i, 3.4);   /* invalid jab rocks the surface */
 }
 function canBeSource(i) { return state[i].length > 0 && !window.isBottleComplete(state[i]); }
 
@@ -2106,7 +2545,11 @@ async function doPour(si, di) {
   slotEl.classList.add('pouring');
   bottleEl.style.transition = 'none';
 
-  /* phase 1: lift, travel, tilt */
+  /* phase 1: lift, travel, tilt — carry-acceleration slosh */
+  if (!RM) {
+    setTimeout(() => Fluid.slosh(si, 1.4, -side), 60);  /* initial surge backward */
+    setTimeout(() => Fluid.slosh(si, 0.9, side), 210);   /* arc-peak settles forward */
+  }
   AudioFX.swap();
   await tween(RM ? 0 : 360, p => {
     const ang = A * p;
@@ -2117,28 +2560,78 @@ async function doPour(si, di) {
   bottleEl.style.transform = 'translate(' + dxF.toFixed(1) + 'px,' + dyF.toFixed(1) + 'px) rotate(' + A.toFixed(2) + 'deg)';
   renderBottle(si, A);
 
-  /* phase 2: stream + drain */
+  /* phase 2: arc stream + drain */
   const dur = RM ? 40 : 300 + 170 * n;
   const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
   const surfaceY = dRect.top + ((shD.B - dstUnits0 * shD.unit) / shD.vbH) * bhD;
   const fx = $('#fx');
-  const stream = document.createElement('span');
-  stream.className = 'stream';
-  stream.style.background = 'linear-gradient(180deg, ' + COLORS[color][0] + ', ' + COLORS[color][1] + ')';
-  stream.style.left = (Q.x - stageRect.left - bwS * 0.055) + 'px';
-  stream.style.top = (Q.y - stageRect.top + bwS * 0.04) + 'px';
-  stream.style.height = Math.max(8, surfaceY - Q.y - bwS * 0.02) + 'px';
-  const splash = document.createElement('span');
-  splash.className = 'splash';
-  splash.style.background = 'radial-gradient(50% 50% at 50% 50%, ' + COLORS[color][0] + 'cc, transparent 75%)';
-  splash.style.left = (Pm.x - stageRect.left) + 'px';
-  splash.style.top = (surfaceY - stageRect.top) + 'px';
-  fx.appendChild(stream); fx.appendChild(splash);
+  const c0 = COLORS[color][0], c1 = COLORS[color][1];
+
+  /* SVG quadratic-bezier arc stream (gravity arc from lip to receiver) */
+  const sx = Q.x - stageRect.left, sy = Q.y - stageRect.top;
+  const tx = Pm.x - stageRect.left, ty = surfaceY - stageRect.top;
+  const cpx = sx + (tx - sx) * 0.35 + side * 8;
+  const cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
+  const arcD = `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)}`;
+  const pourSVG = document.createElementNS(NS, 'svg');
+  pourSVG.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:71';
+  const gid = 'ps_' + si;
+  const pdefs = document.createElementNS(NS, 'defs');
+  const pgrad = document.createElementNS(NS, 'linearGradient');
+  pgrad.setAttribute('id', gid); pgrad.setAttribute('gradientUnits', 'userSpaceOnUse');
+  pgrad.setAttribute('x1', sx); pgrad.setAttribute('y1', sy);
+  pgrad.setAttribute('x2', tx); pgrad.setAttribute('y2', ty);
+  [[0, c0], [1, c1]].forEach(([off, col]) => {
+    const s = document.createElementNS(NS, 'stop');
+    s.setAttribute('offset', off); s.setAttribute('stop-color', col);
+    pgrad.appendChild(s);
+  });
+  pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
+  const mkPath = (stroke, width, opacity, blur) => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', arcD); p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', width);
+    p.setAttribute('stroke-linecap', 'round');
+    if (opacity !== undefined) p.setAttribute('opacity', opacity);
+    if (blur) p.style.filter = 'blur(' + blur + 'px)';
+    return p;
+  };
+  pourSVG.appendChild(mkPath(c0, 9, 0.28, 3));              /* soft glow halo */
+  pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));      /* coloured core */
+  pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6)); /* highlight streak */
+  fx.appendChild(pourSVG);
+
+  /* steam wisp above the open mouth (Apothecary) */
+  let steamEl = null;
+  if (!RM && SKIN === 'apothecary') {
+    steamEl = document.createElement('div');
+    steamEl.className = 'steam-wisp';
+    steamEl.style.left = (Q.x - stageRect.left - 7 + side * 6) + 'px';
+    steamEl.style.top = (Q.y - stageRect.top - 30) + 'px';
+    fx.appendChild(steamEl);
+  }
+
+  /* landing ripple rings on receiver surface */
+  const rippleEls = [];
+  if (!RM) {
+    for (let r = 0; r < 2; r++) {
+      const rip = document.createElement('div');
+      rip.className = 'pour-ripple';
+      rip.style.cssText = `width:${bwD * 0.48}px;height:${bwD * 0.15}px;border-color:${c0};` +
+        `left:${tx}px;top:${ty}px;animation-delay:${r * 0.24}s`;
+      fx.appendChild(rip);
+      rippleEls.push(rip);
+    }
+    /* inject splash impulse into receiver's fluid sim as soon as pour starts */
+    Fluid.drop(di, -1.8);
+    Fluid.start();
+  }
+
   const dropTimer = RM ? null : setInterval(() => {
     const d = document.createElement('span');
     d.className = 'droplet';
-    d.style.background = COLORS[color][0];
-    d.style.boxShadow = '0 0 6px ' + COLORS[color][0] + '88';
+    d.style.background = c0;
+    d.style.boxShadow = '0 0 6px ' + c0 + '88';
     d.style.left = (Pm.x - stageRect.left + (Math.random() * 14 - 7)).toFixed(1) + 'px';
     d.style.top = (surfaceY - stageRect.top).toFixed(1) + 'px';
     d.style.setProperty('--dx', (Math.random() * 44 - 22).toFixed(0) + 'px');
@@ -2158,7 +2651,9 @@ async function doPour(si, di) {
     renderBottle(di, 0);
   });
   if (dropTimer) clearInterval(dropTimer);
-  stream.remove(); splash.remove();
+  pourSVG.remove();
+  if (steamEl) steamEl.remove();
+  rippleEls.forEach(e => e.remove());
   if (!RM) spawnSparkles(slots[di].el, 4, 0.25);
 
   /* phase 3: return */
@@ -2189,7 +2684,8 @@ async function doPour(si, di) {
   }
 
   locked.delete(si); locked.delete(di); activePours--;
-  sloshBottle(di);
+  sloshBottle(di, Math.min(2, n));
+  sloshBottle(si, 0.5);
   updateHUD();
   if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
   if (activePours === 0 && window.isSolved(state)) {
@@ -2215,7 +2711,14 @@ function anyUsefulMove() {
 
 /* ---------------- liquid slosh (settling surface after a pour) ---------------- */
 function sloshBottle(i, amp) {
-  if (RM || !slots[i]) return;
+  if (!slots[i]) return;
+  if (Fluid.active()) {            /* the height-field sim settles it for real */
+    if (!locked.has(i)) renderBottle(i, 0);   /* register the (now upright) wave surface */
+    Fluid.drop(i, -(amp || 1) * 3.2);
+    Fluid.start();
+    return;
+  }
+  if (RM) return;
   const a0 = amp || 1;
   const t0 = performance.now();
   tween(700, p => {
@@ -2397,6 +2900,11 @@ function applyTheme() {
   HIDDEN_FILL = t.hidden;
   RIM_COLOR = t.modes ? t.rim[MODE] : t.rim.light;
   GLASS_SHADOW = t.shadow;
+  Glow.setGain(SKIN === 'neon' ? 1.05 : (MODE === 'dark' ? 0.55 : 0.16));
+  Glass.setTheme(
+    SKIN === 'neon' ? [1.0, 0.86, 1.0] : [1.0, 0.97, 0.9],
+    SKIN === 'neon' ? 0.95 : (MODE === 'dark' ? 0.7 : 0.55)
+  );
   buildDefs();
   const k = $('#brand-kicker'), tg = $('#brand-tag');
   if (k) k.textContent = t.kicker;
@@ -2434,6 +2942,8 @@ function renderSettings() {
   $('#sw-sound').classList.toggle('on', !!save.sound);
   $('#sw-haptics').classList.toggle('on', !!save.haptics);
   $('#sw-symbols').classList.toggle('on', !!save.symbols);
+  $('#sw-fluid').classList.toggle('on', !!save.fluid);
+  $('#sw-glass').classList.toggle('on', !!save.glass);
   renderThemeGrid();
 }
 
@@ -2488,6 +2998,11 @@ function onWin() {
   if (!RM) {
     confetti();
     const fl = $('#flash');
+    fl.style.background = SKIN === 'neon'
+      ? 'radial-gradient(60% 60% at 50% 40%, rgba(255,76,198,0.45), transparent 70%)'
+      : MODE === 'dark'
+        ? 'radial-gradient(60% 60% at 50% 40%, rgba(255,180,90,0.50), transparent 70%)'
+        : 'radial-gradient(60% 60% at 50% 40%, rgba(255,245,224,0.55), transparent 70%)';
     fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
   }
 }
@@ -2706,6 +3221,7 @@ function init() {
     SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
     SHAPES[k].volToY = buildVolMap(k, SHAPES[k]);
   }
+  Fluid.enabled = save.fluid !== false;
   applyTheme();
   buildDefs();
   buildOrb();
@@ -2713,6 +3229,8 @@ function init() {
   renderMenu();
   showScreen('menu');
   startAmbient();
+  Glow.init();
+  if (save.glass) { Glass.enabled = true; Glass.init(); }
 
   document.querySelectorAll('#diff-seg button').forEach(b =>
     b.addEventListener('click', () => {
@@ -2762,6 +3280,14 @@ function init() {
   $('#sw-symbols').addEventListener('click', () => {
     save.symbols = !save.symbols; persist(); renderSettings(); AudioFX.select();
     if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
+  });
+  $('#sw-fluid').addEventListener('click', () => {
+    save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; persist(); renderSettings(); AudioFX.select();
+    if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
+  });
+  $('#sw-glass').addEventListener('click', () => {
+    save.glass = !save.glass; Glass.enabled = !!save.glass; persist(); renderSettings(); AudioFX.select();
+    if (save.glass) Glass.init();
   });
   $('#btn-reset').addEventListener('click', () => {
     if (!confirm('Erase all progress, stars and achievements?')) return;

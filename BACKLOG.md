@@ -2,7 +2,7 @@
 
 ## In Progress — Visual Upgrade (Apothecary & Neon + WebGL fluid)
 
-Tracked in PR #4. The design handoff (`Game Visual Enhancement.zip`) ships two art
+Tracked in PR #5. The design handoff (`Game Visual Enhancement.zip`) ships two art
 directions that coexist as selectable themes, plus a mandate to rebuild the
 liquid/glass/pour motion properly in the engine. The codebase has a clean seam:
 the pure game-logic layer (solver, level generation, pour rules, win detection) is
@@ -15,43 +15,60 @@ renderer; old Dusk/Ocean/Candy/Galaxy themes retired; token-driven chrome; fonts
 palettes, glass tone, corks, parchment labels, backdrops. This renderer is the base
 **and** the fallback for everything below.
 
-### ⏳ Phase 2 — WebGL glass + refraction
-**Goal:** replace SVG glass pixels with a stage-wide WebGL canvas; refractive +
-specular glass shader; per-theme glass tint; neon bloom.
-**Prep work:**
-- Introduce a `Renderer` seam (`init/setBoard/syncLayout/renderFrame/setTilt/setWobble/spawnPour/setTheme/destroy`) with two backends: `SvgRenderer` (current code) and `GlRenderer`. Factory picks GL when available, else SVG. (Phase 0 of the plan — do first.)
-- Keep DOM slot `<div>`s as invisible hit-targets + layout drivers; GL canvas reads `slots[i].slot.getBoundingClientRect()` each frame. One canvas, one context, one rAF.
+### ◑ Phase 2 — WebGL lighting (shipped); refractive-glass renderer (remaining)
+**Shipped:** a stage-wide WebGL canvas (`Glow`) that sums a soft radial glow per
+bottle, coloured by the top liquid and tuned per theme (Neon bloom / Apothecary-dark
+candlelight / Apothecary-light near-zero). Single full-screen-triangle fragment pass,
+≤16 lights, premultiplied-additive, composited (screen) over the scene; reads slot
+rects + `visual[]` live each frame; feature-detected with silent fallback to the CSS
+per-bottle glow; honors reduced-motion.
+**Also shipped (opt-in, Settings ▸ Glass reflections, beta):** a `Glass` WebGL pass
+that rasterises each shape into a cylindrical normal map and adds a Blinn specular
+glint from a slowly-orbiting light + a fresnel rim, masked to the silhouette and
+screen-composited over the SVG bottle — live, tracking glass highlights. Per-bottle
+quads driven by slot rects; default off so the proven look ships by default.
+**Remaining — replace SVG glass pixels with a full refractive-glass renderer:**
+- Introduce a `Renderer` seam (`init/setBoard/syncLayout/renderFrame/setTilt/setWobble/spawnPour/setTheme/destroy`) with `SvgRenderer` (current) + `GlRenderer` backends; factory picks GL when available, else SVG.
+- Keep DOM slot `<div>`s as invisible hit-targets + layout drivers; the GL renderer reads `slots[i].slot.getBoundingClientRect()` each frame (the `Glow` layer already proves this pattern).
 - Precompute per-shape mask + distance/normal texture (rasterize `interior`/`outline` path once per shape → JS distance transform), reused by every bottle of that shape.
-- WebGL bootstrap: context creation + loss handling → live swap back to `SvgRenderer`.
-- Startup micro-bench → glass quality tiers (A full refraction / B spec+tint / C SVG) + a Settings "Glass quality" toggle; cap DPR ~2; honor reduced-motion (`RM`).
-- Static liquid bands first (from `visual[i]` via existing `buildVolMap`/`volToY`), no sim yet.
+- Refraction + specular glass shader; per-theme tint; context-loss handling → live swap back to `SvgRenderer`.
+- Startup micro-bench → glass quality tiers (A full refraction / B spec+tint / C SVG) + a Settings "Glass quality" toggle; cap DPR ~2.
+- Render the liquid bands + the height-field surface (already simulated in Phase 3) inside the GL glass instead of SVG.
 
-### ⏳ Phase 3 — per-bottle height-field fluid sim
-**Goal:** real meniscus, sloshing with momentum + damping, settling (not a looping
-sine), rising bubbles per liquid type.
-**Prep work:**
-- `sim[i] = { h[], v[], level, targetLevel, tiltDeg, accel, bubbles[], meniscusK, colorTop }`; only the top surface is simulated, bands below stay static.
-- Shallow-water update: `a[k] = c²·(h[k-1]−2h[k]+h[k+1]) − damping·v[k]`; tune `c`/damping for a settle.
-- Track slot screen-position deltas to drive acceleration → slosh injection on lift/carry.
-- Port tilt counter-rotation + lowest-point math from `renderBottle` so the surface stays gravity-level when the glass rotates; meniscus wall-climb bias at edge samples.
-- Port the bubble model from the handoff `files/vessel-bottle.jsx` `Liquid` component.
-- Replace `sloshBottle` with a damped settle driven by the sim.
+### ✅ Phase 3 — per-bottle height-field fluid sim (shipped)
+Per-bottle 1-D shallow-water surface (`Fluid`): one rAF loop integrates wave
+propagation with damping so disturbances settle; `renderBottle` draws the top band's
+lid as an animated wave `<path>` with a wall-climbing meniscus + crest highlight,
+lower bands static. Slosh on select/invalid; splash + settle on pour (source &
+receiver). Gated by the "Liquid motion" setting (default on); tilt/reduced-motion
+fall back to the prior ellipse. Sims reset per board.
 
-### ⏳ Phase 4 — pour physics
-**Goal:** cork-pop, gravity-driven arcing stream, droplets, splash + ripple,
-conserved band-by-band transfer.
-**Prep work:**
-- Keep the logic half of `doPour` (legality + `applyPour`); rewrite only the visual half.
-- Mirror the handoff `files/apo-scene.jsx` choreography/timings: cork-pop + steam → lift/carry/tilt (~70°, feeds `sim.accel`) → ballistic GL particle stream (gravity-integrated arc lip→mouth) → band-by-band transfer via existing `drainSnapshot`/`fillSnapshot` → splash impulse injected into the receiver's height-field + droplets + ripple ring → return + re-cork with damped settle.
-- Apothecary game bottles gain animated corks (deferred from Phase 1 to avoid clashing with the completion-cap animation); reconcile the `.cap`/`.ring` "sealed" feedback with real corks.
+### ✅ Phase 4 — pour physics (shipped)
+Cork-pop: gameplay bottles (Apothecary) now include a `.cork-g` SVG group; CSS
+transitions on `.slot.pouring` animate the cork upward on pour start, back on
+return. Arc stream: the old vertical `.stream` div replaced with an inline SVG
+`<path>` quadratic-bezier arc (glow halo + coloured gradient core + highlight
+streak) from the tilted bottle lip to the receiver surface. Steam: a `.steam-wisp`
+div rises from the open mouth during the pour (Apothecary only). Landing: two
+`.pour-ripple` rings expand on the receiver surface; `Fluid.drop()` injects a
+splash impulse at pour-start.
 
-### ⏳ Phase 5 — Neon polish + extras
-**Goal:** finish the Neon direction and harden.
-**Prep work:**
-- 2-pass bloom (glow color = top band's bright face) instead of heavy refraction on Neon.
-- Themed confetti/flash colors; per-skin reduced-motion paths verified.
-- Beat-sync scaffolding for the requested Neon "sort to the beat" mode (quantize pours to a track; pulse glow/grid on the beat; combo feedback).
-- Gameplay parchment labels on Apothecary bottles (Phase 1 kept game bottles clean to avoid obscuring liquid — revisit once the renderer can place them legibly).
+### ◑ Phase 5 — Neon polish + extras (partially shipped)
+**Shipped:**
+- Per-liquid bubble density: citron/aqua bands now spawn 3 fast-rising bubbles;
+  amber/violet/mocha spawn 1 slow bubble; others 2 medium — driven by `DENSITY`/`SPEED`
+  lookup tables on the top liquid colour index.
+- Gameplay parchment labels: Apothecary gameplay bottles now display the decorative
+  parchment label in the lower body, consistent with hero bottles.
+- Themed win flash: `#flash` overlay colour now switches — Neon gets magenta,
+  Apothecary dark gets amber candlelight, Apothecary light keeps the warm cream.
+**Remaining:**
+- 2-pass bloom for Neon (glow = top band bright face; currently using the Gaussian
+  radial Glow pass which already handles this reasonably).
+- Beat-sync scaffolding for the "sort to the beat" Neon mode (quantize pours to a
+  track; pulse grid on the beat; combo feedback).
+- Richer carry-acceleration slosh: track slot screen-position deltas during the
+  pour arc and inject proportional `Fluid.slosh()` impulses.
 
 ---
 
