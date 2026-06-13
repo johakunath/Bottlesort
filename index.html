@@ -213,7 +213,7 @@ body[data-skin="neon"] #vignette { background: radial-gradient(125% 105% at 50% 
   background: var(--glass); border: 1px solid var(--glass-edge); color: var(--ink);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
-body[data-skin="apothecary"] #mode-toggle { display: flex; }
+body[data-skin="apothecary"]:not([data-screen="game"]) #mode-toggle { display: flex; }
 #mode-toggle .mt-track { width: 26px; height: 15px; border-radius: 999px; position: relative; background: rgba(120,78,38,0.2); transition: background .3s; }
 body[data-mode="dark"] #mode-toggle .mt-track { background: rgba(255,210,150,0.25); }
 #mode-toggle .mt-knob { position: absolute; top: 1.5px; left: 1.5px; width: 12px; height: 12px; border-radius: 50%; background: #7a542c; transition: left .3s cubic-bezier(.34,1.4,.5,1), background .3s; }
@@ -2622,6 +2622,7 @@ function startAmbient() {
 function showScreen(name) {
   $('#menu').classList.toggle('hidden', name !== 'menu');
   $('#game').classList.toggle('hidden', name !== 'game');
+  document.body.dataset.screen = name;   /* gates the floating mode toggle off the game HUD */
 }
 
 function unlockedUpTo() {
