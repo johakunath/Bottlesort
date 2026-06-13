@@ -22,7 +22,12 @@ candlelight / Apothecary-light near-zero). Single full-screen-triangle fragment 
 ≤16 lights, premultiplied-additive, composited (screen) over the scene; reads slot
 rects + `visual[]` live each frame; feature-detected with silent fallback to the CSS
 per-bottle glow; honors reduced-motion.
-**Remaining — replace SVG glass pixels with a true refractive-glass renderer:**
+**Also shipped (opt-in, Settings ▸ Glass reflections, beta):** a `Glass` WebGL pass
+that rasterises each shape into a cylindrical normal map and adds a Blinn specular
+glint from a slowly-orbiting light + a fresnel rim, masked to the silhouette and
+screen-composited over the SVG bottle — live, tracking glass highlights. Per-bottle
+quads driven by slot rects; default off so the proven look ships by default.
+**Remaining — replace SVG glass pixels with a full refractive-glass renderer:**
 - Introduce a `Renderer` seam (`init/setBoard/syncLayout/renderFrame/setTilt/setWobble/spawnPour/setTheme/destroy`) with `SvgRenderer` (current) + `GlRenderer` backends; factory picks GL when available, else SVG.
 - Keep DOM slot `<div>`s as invisible hit-targets + layout drivers; the GL renderer reads `slots[i].slot.getBoundingClientRect()` each frame (the `Glow` layer already proves this pattern).
 - Precompute per-shape mask + distance/normal texture (rasterize `interior`/`outline` path once per shape → JS distance transform), reused by every bottle of that shape.

@@ -780,6 +780,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
     <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
     <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
     <div class="set-row"><span>Liquid motion<span class="desc">Living surface — waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
+    <div class="set-row"><span>Glass reflections<span class="desc">WebGL specular highlights on the glass — beta</span></span><button class="switch" id="sw-glass" role="switch" aria-label="Glass reflections"></button></div>
     <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Unlock new looks by earning stars</span></span></div>
     <div class="theme-grid" id="theme-grid"></div>
     <button class="danger-btn" id="btn-reset">Erase all progress</button>
@@ -1196,7 +1197,7 @@ const store = {
 const DEFAULT_SAVE = {
   progress: { relaxed: {}, normal: {}, expert: {} },
   sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
-  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true,
+  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true, glass: false,
   ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0
 };
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
@@ -1798,6 +1799,141 @@ const Glow = {
     gl.uniform3fv(this.loc.pos, this.pos);
     gl.uniform3fv(this.loc.col, this.col);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+};
+
+/* ============================================================
+   Glass — a WebGL specular / fresnel pass over the bottles.
+   Each shape is rasterised once into a cylindrical normal map
+   (nx,nz + silhouette mask) from its interior path. A per-bottle
+   quad samples that map and adds a Blinn specular glint from a
+   slowly-orbiting light plus a fresnel rim, masked to the glass
+   silhouette and composited (screen) over the SVG bottle — giving
+   the glass live, tracking highlights. Opt-in (Settings ▸ Glass
+   reflections); feature-detected with a silent no-op fallback.
+   ============================================================ */
+const Glass = {
+  enabled: false, ok: false, gl: null, cv: null, started: false,
+  tex: {}, tint: [1, 0.96, 0.9], intensity: 0.6, theta: 0,
+  init() {
+    if (this.cv || RM) return;
+    const stage = $('#stage'); if (!stage) return;
+    try {
+      const cv = document.createElement('canvas');
+      cv.id = 'glass-fx';
+      cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:65;mix-blend-mode:screen;';
+      stage.appendChild(cv);
+      const opts = { alpha: true, premultipliedAlpha: true, antialias: true, depth: false };
+      const gl = cv.getContext('webgl', opts) || cv.getContext('experimental-webgl', opts);
+      if (!gl) return;
+      const vs = 'attribute vec2 a;uniform vec4 uRect;varying vec2 vUv;' +
+        'void main(){vUv=a;gl_Position=vec4(uRect.x+a.x*uRect.z, uRect.y-a.y*uRect.w, 0.0, 1.0);}';
+      const fs = 'precision highp float;varying vec2 vUv;uniform sampler2D uTex;' +
+        'uniform vec2 uLight;uniform vec3 uTint;uniform float uInt;' +
+        'void main(){vec4 t=texture2D(uTex,vUv);if(t.a<0.5)discard;' +
+        'vec3 N=vec3(t.r*2.0-1.0,0.0,t.g);vec3 L=normalize(vec3(uLight,0.85));' +
+        'vec3 H=normalize(L+vec3(0.0,0.0,1.0));float s=pow(max(dot(N,H),0.0),26.0);' +
+        'float rim=pow(1.0-clamp(t.g,0.0,1.0),3.0);' +
+        'float v=(s*1.15+rim*0.22)*uInt;gl_FragColor=vec4(uTint*v, clamp(v,0.0,1.0));}';
+      const prog = Glow._program(gl, vs, fs);
+      if (!prog) return;
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
+      const al = gl.getAttribLocation(prog, 'a');
+      gl.enableVertexAttribArray(al);
+      gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
+      gl.useProgram(prog);
+      this.loc = {
+        rect: gl.getUniformLocation(prog, 'uRect'),
+        light: gl.getUniformLocation(prog, 'uLight'),
+        tint: gl.getUniformLocation(prog, 'uTint'),
+        int: gl.getUniformLocation(prog, 'uInt')
+      };
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.clearColor(0, 0, 0, 0);
+      this.gl = gl; this.cv = cv; this.prog = prog;
+      for (const name in SHAPES) this.buildTex(name, SHAPES[name]);
+      this.ok = true;
+      this.start();
+    } catch (e) { this.ok = false; }
+  },
+  /* rasterise the interior path → cylindrical normal map (nx, nz, mask) */
+  buildTex(name, sh) {
+    const Wt = 80, Ht = Math.round(80 * sh.vbH / 100);
+    const c = document.createElement('canvas'); c.width = Wt; c.height = Ht;
+    const x = c.getContext('2d');
+    x.setTransform(Wt / 100, 0, 0, Ht / sh.vbH, 0, 0);
+    x.fillStyle = '#fff';
+    x.fill(new Path2D(sh.interior));
+    const src = x.getImageData(0, 0, Wt, Ht).data;
+    const out = new Uint8Array(Wt * Ht * 4);
+    for (let yy = 0; yy < Ht; yy++) {
+      let lo = -1, hi = -1;
+      for (let xx = 0; xx < Wt; xx++) if (src[(yy * Wt + xx) * 4 + 3] > 40) { if (lo < 0) lo = xx; hi = xx; }
+      const cxr = (lo + hi) / 2, half = Math.max(1, (hi - lo) / 2);
+      for (let xx = 0; xx < Wt; xx++) {
+        const idx = (yy * Wt + xx) * 4, m = src[idx + 3] > 40 ? 1 : 0;
+        let nx = 0, nz = 1;
+        if (m && hi > lo) { nx = Math.max(-1, Math.min(1, (xx - cxr) / half)); nz = Math.sqrt(Math.max(0.02, 1 - nx * nx)); }
+        out[idx] = Math.round((nx * 0.5 + 0.5) * 255);
+        out[idx + 1] = Math.round(nz * 255);
+        out[idx + 2] = 0;
+        out[idx + 3] = m * 255;
+      }
+    }
+    const gl = this.gl, tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Wt, Ht, 0, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.tex[name] = tex;
+  },
+  setTheme(tint, intensity) { this.tint = tint; this.intensity = intensity; },
+  start() {
+    if (this.started || !this.ok) return;
+    this.started = true;
+    const draw = () => {
+      if (!this.ok) return;
+      requestAnimationFrame(draw);
+      if (document.hidden) return;
+      if (!this.enabled || $('#game').classList.contains('hidden')) {
+        if (this.gl && this.cv.width) this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+        return;
+      }
+      this.frame();
+    };
+    requestAnimationFrame(draw);
+  },
+  frame() {
+    const gl = this.gl, stage = $('#stage');
+    if (!gl || !stage || !slots || !slots.length) return;
+    const sr = stage.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = Math.round(sr.width * dpr), H = Math.round(sr.height * dpr);
+    if (this.cv.width !== W || this.cv.height !== H) { this.cv.width = W; this.cv.height = H; gl.viewport(0, 0, W, H); }
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this.theta += 0.006;
+    const lx = Math.cos(this.theta) * 0.8, ly = 0.3 + Math.sin(this.theta * 0.7) * 0.25;
+    gl.uniform2f(this.loc.light, lx, ly);
+    gl.uniform3f(this.loc.tint, this.tint[0], this.tint[1], this.tint[2]);
+    gl.uniform1f(this.loc.int, this.intensity);
+    for (let i = 0; i < slots.length; i++) {
+      if (locked.has(i)) continue;                 /* skip mid-pour (rotated) bottles */
+      const name = shapesByBottle[i]; const tex = this.tex[name]; if (!tex) continue;
+      const r = slots[i].btn.getBoundingClientRect();
+      const x0 = (r.left - sr.left) / sr.width * 2 - 1;
+      const y0 = 1 - (r.top - sr.top) / sr.height * 2;
+      const w = r.width / sr.width * 2, h = r.height / sr.height * 2;
+      gl.uniform4f(this.loc.rect, x0, y0, w, h);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
   }
 };
 
@@ -2672,6 +2808,10 @@ function applyTheme() {
   RIM_COLOR = t.modes ? t.rim[MODE] : t.rim.light;
   GLASS_SHADOW = t.shadow;
   Glow.setGain(SKIN === 'neon' ? 1.05 : (MODE === 'dark' ? 0.55 : 0.16));
+  Glass.setTheme(
+    SKIN === 'neon' ? [1.0, 0.86, 1.0] : [1.0, 0.97, 0.9],
+    SKIN === 'neon' ? 0.95 : (MODE === 'dark' ? 0.7 : 0.55)
+  );
   buildDefs();
   const k = $('#brand-kicker'), tg = $('#brand-tag');
   if (k) k.textContent = t.kicker;
@@ -2710,6 +2850,7 @@ function renderSettings() {
   $('#sw-haptics').classList.toggle('on', !!save.haptics);
   $('#sw-symbols').classList.toggle('on', !!save.symbols);
   $('#sw-fluid').classList.toggle('on', !!save.fluid);
+  $('#sw-glass').classList.toggle('on', !!save.glass);
   renderThemeGrid();
 }
 
@@ -2991,6 +3132,7 @@ function init() {
   showScreen('menu');
   startAmbient();
   Glow.init();
+  if (save.glass) { Glass.enabled = true; Glass.init(); }
 
   document.querySelectorAll('#diff-seg button').forEach(b =>
     b.addEventListener('click', () => {
@@ -3044,6 +3186,10 @@ function init() {
   $('#sw-fluid').addEventListener('click', () => {
     save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; persist(); renderSettings(); AudioFX.select();
     if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
+  });
+  $('#sw-glass').addEventListener('click', () => {
+    save.glass = !save.glass; Glass.enabled = !!save.glass; persist(); renderSettings(); AudioFX.select();
+    if (save.glass) Glass.init();
   });
   $('#btn-reset').addEventListener('click', () => {
     if (!confirm('Erase all progress, stars and achievements?')) return;
