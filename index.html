@@ -1756,11 +1756,12 @@ const Glow = {
       const gl = cv.getContext('webgl', opts) || cv.getContext('experimental-webgl', opts);
       if (!gl) return;
       const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
-      const fs = 'precision highp float;uniform vec2 uRes;uniform int uCount;uniform float uGain;' +
+      const fs = 'precision highp float;uniform vec2 uRes;uniform int uCount;uniform float uGain;uniform float uHalo;' +
         'uniform vec3 uPos[' + this.MAX + '];uniform vec3 uCol[' + this.MAX + '];' +
         'void main(){vec2 f=gl_FragCoord.xy;vec3 c=vec3(0.0);' +
         'for(int i=0;i<' + this.MAX + ';i++){if(i>=uCount)break;vec2 d=f-uPos[i].xy;float r=uPos[i].z;' +
-        'float g=exp(-dot(d,d)/(r*r));c+=uCol[i]*g;}c*=uGain;' +
+        'float dd=dot(d,d);float core=exp(-dd/(r*r));float halo=exp(-dd/(r*r*8.0));' +
+        'c+=uCol[i]*(core+uHalo*halo*0.55);}c*=uGain;' +
         'float a=clamp(max(c.r,max(c.g,c.b)),0.0,1.0);gl_FragColor=vec4(c,a);}';
       const prog = this._program(gl, vs, fs);
       if (!prog) return;
@@ -1775,6 +1776,7 @@ const Glow = {
         res: gl.getUniformLocation(prog, 'uRes'),
         count: gl.getUniformLocation(prog, 'uCount'),
         gain: gl.getUniformLocation(prog, 'uGain'),
+        halo: gl.getUniformLocation(prog, 'uHalo'),
         pos: gl.getUniformLocation(prog, 'uPos'),
         col: gl.getUniformLocation(prog, 'uCol')
       };
@@ -1802,6 +1804,7 @@ const Glow = {
     return p;
   },
   setGain(g) { this.baseGain = g; this.gain = g + (this._pulse || 0); },
+  setHalo(h) { this.halo = h; },   /* wide bloom lobe — strong on Neon, off elsewhere */
   /* transient brightness bump (used by Beat mode on each beat) */
   pulse(amount, ms) {
     if (!this.ok) return;
@@ -1852,6 +1855,7 @@ const Glow = {
     gl.uniform2f(this.loc.res, W, H);
     gl.uniform1i(this.loc.count, n);
     gl.uniform1f(this.loc.gain, this.gain);
+    gl.uniform1f(this.loc.halo, this.halo || 0);
     gl.uniform3fv(this.loc.pos, this.pos);
     gl.uniform3fv(this.loc.col, this.col);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -2992,6 +2996,7 @@ function applyTheme() {
   RIM_COLOR = t.modes ? t.rim[MODE] : t.rim.light;
   GLASS_SHADOW = t.shadow;
   Glow.setGain(SKIN === 'neon' ? 1.05 : (MODE === 'dark' ? 0.55 : 0.16));
+  Glow.setHalo(SKIN === 'neon' ? 1.0 : 0.0);   /* wide bloom lobe only on Neon */
   Glass.setTheme(
     SKIN === 'neon' ? [1.0, 0.86, 1.0] : [1.0, 0.97, 0.9],
     SKIN === 'neon' ? 0.95 : (MODE === 'dark' ? 0.7 : 0.55)
