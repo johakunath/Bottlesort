@@ -120,7 +120,9 @@ body::after { /* pooled light under the stage */
   background: var(--pool-light);
 }
 
-.screen { position: fixed; inset: 0; display: flex; flex-direction: column; z-index: 3; }
+/* height tracks the dynamic viewport so the mobile address bar can't clip the
+   bottom of the menu/board; content inside scrolls (see #menu overflow) */
+.screen { position: fixed; top: 0; left: 0; right: 0; height: 100vh; height: 100dvh; display: flex; flex-direction: column; z-index: 3; }
 #ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 
 /* ============ backdrops (theme furniture) ============ */
@@ -189,26 +191,11 @@ body[data-mode="dark"] .apo.shelf { background: linear-gradient(#7a542c, #4a3018
   border-radius: 50%; filter: blur(2px);
 }
 .neon.scan {
-  position: absolute; inset: 0; opacity: 0.5;
+  position: absolute; inset: 0; opacity: 0.08;   /* whisper-faint static scanline texture */
   background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0 1px, transparent 1px 3px);
 }
 @keyframes vsGrid { to { background-position: 0 40px; } }
 @keyframes vsRay { 0% { transform: translateX(-3%) rotate(-1.5deg); opacity: 0.7 } 100% { transform: translateX(3%) rotate(1.5deg); opacity: 1 } }
-
-/* ── Neon "sort to the beat" rhythm mode ── */
-/* on each beat, #backdrop gets .beat-hit briefly: grid + horizon flare */
-#backdrop.beat-hit .neon.grid { filter: brightness(1.9) saturate(1.3); }
-#backdrop.beat-hit .neon.horizon { box-shadow: 0 0 20px 5px #ff4cc6, 0 0 60px 14px rgba(120,40,200,0.8); }
-#backdrop .neon.grid, #backdrop .neon.horizon { transition: filter 0.12s ease-out, box-shadow 0.12s ease-out; }
-/* combo chip in the HUD */
-#combo {
-  font: 700 13px var(--head-font, system-ui); letter-spacing: 0.04em;
-  padding: 5px 10px; border-radius: 999px; white-space: nowrap;
-  color: #0c0718; background: linear-gradient(90deg, #ff4cc6, #34d6ff);
-  box-shadow: 0 0 14px rgba(255,76,198,0.6);
-}
-#combo.bump { animation: comboBump 0.32s cubic-bezier(.34,1.6,.5,1); }
-@keyframes comboBump { 0% { transform: scale(1); } 45% { transform: scale(1.35); } 100% { transform: scale(1); } }
 
 #vignette { /* filmic edge darkening over the whole scene */
   position: fixed; inset: 0; pointer-events: none; z-index: 2;
@@ -220,23 +207,8 @@ body[data-skin="neon"] #vignette { background: radial-gradient(125% 105% at 50% 
 @keyframes flashPop { 0% { opacity: 0; } 16% { opacity: 1; } 100% { opacity: 0; } }
 .hidden { display: none !important; }
 
-/* ── light/dark mode toggle (Apothecary only) ── */
-#mode-toggle {
-  position: fixed; top: max(14px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right));
-  z-index: 120; display: none; align-items: center; gap: 6px;
-  padding: 8px 12px; border-radius: 999px; line-height: 1; font-size: 15px;
-  background: var(--glass); border: 1px solid var(--glass-edge); color: var(--ink);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-}
-body[data-skin="apothecary"]:not([data-screen="game"]) #mode-toggle { display: flex; }
-#mode-toggle .mt-track { width: 26px; height: 15px; border-radius: 999px; position: relative; background: rgba(120,78,38,0.2); transition: background .3s; }
-body[data-mode="dark"] #mode-toggle .mt-track { background: rgba(255,210,150,0.25); }
-#mode-toggle .mt-knob { position: absolute; top: 1.5px; left: 1.5px; width: 12px; height: 12px; border-radius: 50%; background: #7a542c; transition: left .3s cubic-bezier(.34,1.4,.5,1), background .3s; }
-body[data-mode="dark"] #mode-toggle .mt-knob { left: 12.5px; background: #f0c074; }
-#mode-toggle .mt-sun { opacity: 1; transition: opacity .3s; }
-#mode-toggle .mt-moon { opacity: 0.4; transition: opacity .3s; }
-body[data-mode="dark"] #mode-toggle .mt-sun { opacity: 0.4; }
-body[data-mode="dark"] #mode-toggle .mt-moon { opacity: 1; }
+/* Dark-mode settings row is shown only on the Apothecary theme (Neon is always dark) */
+body[data-skin="neon"] #row-dark { display: none; }
 
 h1, h2, .display { font-family: var(--head-font); }
 
@@ -250,7 +222,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 12px; }
 
 /* ---------------- Menu ---------------- */
-#menu { align-items: center; justify-content: flex-start; gap: clamp(14px, 2.6vh, 26px); padding: 4vh 20px; overflow-y: auto; }
+#menu { align-items: center; justify-content: flex-start; gap: clamp(14px, 2.6vh, 26px); padding: max(4vh, env(safe-area-inset-top)) 20px max(4vh, env(safe-area-inset-bottom)); overflow-y: auto; }
 /* keeps short content centered while letting tall content scroll from the top */
 #menu > :first-child { margin-top: auto; }
 #menu > :last-child { margin-bottom: auto; }
@@ -272,7 +244,8 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 .hero-bottles svg:nth-child(3) { animation-delay: -2.8s; }
 @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 
-.seg { display: flex; gap: 4px; padding: 5px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+/* no backdrop-filter here: it produced horizontal compositing glitch lines on mobile Chrome */
+.seg { display: flex; gap: 4px; padding: 5px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-edge); }
 .seg button {
   padding: 10px 22px; border-radius: 999px; font-weight: 800; font-size: clamp(14px, 2vmin, 16px);
   color: var(--ink-dim); transition: background 0.2s, color 0.2s, transform 0.15s;
@@ -335,7 +308,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 
 /* ---------------- Stage ---------------- */
-#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: 10px 8px calc(var(--bw) * 0.22); min-height: 0; }
+#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: clamp(12px, 2.4vh, 22px) 8px calc(var(--bw) * 0.22); min-height: 0; }
 .row { display: flex; justify-content: center; align-items: flex-end; gap: clamp(6px, calc(var(--bw) * 0.2), 20px); position: relative; padding: 0 calc(var(--bw) * 0.3); }
 .row::after { /* floating glass shelf */
   content: ''; position: absolute; left: 0; right: 0; bottom: calc(var(--bw) * -0.13); height: calc(var(--bw) * 0.09);
@@ -432,15 +405,9 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 @keyframes splashPulse { 0%, 100% { transform: translate(-50%, -50%) scale(1, 1); } 50% { transform: translate(-50%, -50%) scale(1.3, 0.7); } }
 
-/* ── Phase 4: cork-pop, steam, pour-ripple ── */
-/* cork group: always in DOM, CSS controls visibility per skin */
+/* ── steam, pour-ripple ── */
+/* cork/label groups (hero & menu bottles only): CSS hides them on Neon */
 body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none; }
-body[data-skin="apothecary"] .slot .bottle svg .cork-g {
-  transition: transform 0.22s cubic-bezier(.2,.8,.4,1), opacity 0.18s ease;
-}
-body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
-  transform: translateY(-18px); opacity: 0;
-}
 /* steam wisp rising from an open bottle mouth */
 .steam-wisp {
   position: absolute; width: 14px; height: 30px; border-radius: 50%;
@@ -617,15 +584,6 @@ body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.25); }
 }
 
-/* liquid bubbles */
-.bub { animation: bubRise 3.6s linear infinite; }
-@keyframes bubRise {
-  0% { transform: translateY(0); opacity: 0; }
-  18% { opacity: 0.55; }
-  85% { opacity: 0.35; }
-  100% { transform: translateY(-30px); opacity: 0; }
-}
-
 /* ---------------- Modals (settings / achievements) ---------------- */
 .modal {
   position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center;
@@ -711,7 +669,7 @@ body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
   .seg button { padding: 9px 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hero-bottles svg, .stream, .splash, .slot, .sheenmove, .droplet, .bub, #flash,
+  .hero-bottles svg, .stream, .splash, .slot, .sheenmove, .droplet, #flash,
   .apo.rays, .neon.grid,
   .elem-frozen, .elem-electric, .elem-boil, .elem-toxic { animation: none !important; }
   * { transition-duration: 0.01s !important; }
@@ -732,11 +690,6 @@ body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
 </div>
 <div id="vignette"></div>
 <div id="flash"></div>
-<button id="mode-toggle" aria-label="Toggle light or dark">
-  <span class="mt-sun">☀</span>
-  <span class="mt-track"><span class="mt-knob"></span></span>
-  <span class="mt-moon">☾</span>
-</button>
 
 <!-- ============ Menu ============ -->
 <div id="menu" class="screen">
@@ -783,7 +736,6 @@ body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
       <div class="lvl" id="hud-level">Level 1</div>
       <div class="sub" id="hud-sub"></div>
     </div>
-    <div id="combo" class="hidden" aria-hidden="true"></div>
     <div id="orb" aria-hidden="true"></div>
     <button class="icon-btn" id="btn-undo" aria-label="Undo">↩<span class="badge hidden" id="undo-badge"></span></button>
     <button class="icon-btn" id="btn-restart" aria-label="Restart level">⟳</button>
@@ -821,8 +773,7 @@ body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
     <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
     <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
     <div class="set-row"><span>Liquid motion<span class="desc">Living surface — waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
-    <div class="set-row"><span>Glass reflections<span class="desc">WebGL specular + edge refraction on the glass — beta</span></span><button class="switch" id="sw-glass" role="switch" aria-label="Glass reflections"></button></div>
-    <div class="set-row" id="row-beat"><span>Sort to the beat<span class="desc">Neon rhythm mode — the grid pulses; pour on the beat for combos</span></span><button class="switch" id="sw-beat" role="switch" aria-label="Sort to the beat"></button></div>
+    <div class="set-row" id="row-dark"><span>Dark mode<span class="desc">Candlelit palette for the Apothecary theme</span></span><button class="switch" id="sw-dark" role="switch" aria-label="Dark mode"></button></div>
     <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Unlock new looks by earning stars</span></span></div>
     <div class="theme-grid" id="theme-grid"></div>
     <button class="danger-btn" id="btn-reset">Erase all progress</button>
@@ -1138,27 +1089,29 @@ if (typeof module !== 'undefined' && module.exports) module.exports = VesselLogi
 
 /* ---------------- palette ----------------
    Each entry = [bright face, shadow side]; used as a b→a→b across the band. */
+/* palettes retuned for mobile legibility: each colour sits on a distinct hue with
+   varied lightness so neighbours never read as the same colour on a small screen */
 const APO_COLORS = [
-  ['#ff8fa0', '#e23b5d'], // rose elixir
-  ['#ffce7a', '#ef8a1e'], // amber tincture
-  ['#fff39b', '#ecc02c'], // citron cordial
-  ['#9ef0a6', '#37b35a'], // verdant draught
-  ['#8ff0e2', '#19a89a'], // aqua vitae
-  ['#9cc6ff', '#3a7be0'], // azure essence
-  ['#cbb0ff', '#7d49e6'], // violet philtre
-  ['#ffaad8', '#d64790'], // magenta brew
-  ['#d8b48c', '#7d4f28']  // mocha
+  ['#ff7a85', '#d4263d'], // cherry  (red)
+  ['#ffb24d', '#e0710f'], // tangerine (orange)
+  ['#ffe24d', '#d6ad00'], // lemon   (yellow)
+  ['#7fd96a', '#2f9e3f'], // lime    (green)
+  ['#4fd6c4', '#0e9488'], // teal    (cyan)
+  ['#6aa8ff', '#2459d6'], // blue
+  ['#b98cff', '#6a2fd6'], // violet  (purple)
+  ['#ff8fd6', '#d63f97'], // pink    (magenta)
+  ['#c98f5e', '#7c4a26']  // mocha   (brown)
 ];
 const NEON_COLORS = [
-  ['#ff9aa6', '#d4123f'], // cherry
-  ['#ffc371', '#e06a00'], // amber
-  ['#ffef8a', '#e0a800'], // citron
-  ['#86eea0', '#129a48'], // absinthe
-  ['#74efdd', '#067e78'], // verde
-  ['#86bcff', '#1456d6'], // cobalt
-  ['#c4a6ff', '#6a2fd6'], // violet
-  ['#ff9ad0', '#cc1f73'], // rose
-  ['#caa6e0', '#7a4ca0']  // mauve
+  ['#ff5d6c', '#c8102e'], // cherry  (red)
+  ['#ff9f3a', '#d65a00'], // tangerine (orange)
+  ['#ffe23d', '#c9a200'], // lemon   (yellow)
+  ['#5de86a', '#109a2f'], // lime    (green)
+  ['#2fe0d0', '#058a80'], // teal    (cyan)
+  ['#4f9bff', '#1043d6'], // blue
+  ['#b46bff', '#6a1fd6'], // violet  (purple)
+  ['#ff5db8', '#c8127a'], // pink    (magenta)
+  ['#d8a76a', '#8a5a2c']  // sand    (brown)
 ];
 let COLORS = APO_COLORS;
 let HIDDEN_FILL = ['#cbb186', '#8a6a3e']; /* parchment-gray mystery fill (apothecary) */
@@ -1239,7 +1192,7 @@ const store = {
 const DEFAULT_SAVE = {
   progress: { relaxed: {}, normal: {}, expert: {} },
   sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
-  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true, glass: false, beat: false,
+  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true,
   ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0
 };
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
@@ -1248,11 +1201,11 @@ if (!['relaxed', 'normal', 'expert'].includes(save.difficulty)) save.difficulty 
 /* migrate old colour-theme saves (dusk/ocean/candy/galaxy) to the new skins */
 if (!['apothecary', 'neon'].includes(save.theme)) save.theme = 'apothecary';
 if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
-/* normalise visual toggles to explicit booleans (pre-fluid saves lack the keys:
-   the DEFAULT_SAVE merge already defaults them, this pins the schema) */
-save.fluid = save.fluid !== false;   /* default ON for returning players */
-save.glass = save.glass === true;    /* default OFF (beta) */
-save.beat = save.beat === true;      /* default OFF (Neon rhythm mode) */
+/* normalise visual toggles to explicit booleans (pre-fluid saves lack the key:
+   the DEFAULT_SAVE merge already defaults it, this pins the schema) */
+save.fluid = save.fluid !== false;   /* realistic liquid motion — default ON */
+delete save.glass;                   /* removed: WebGL glass reflections */
+delete save.beat;                    /* removed: Neon rhythm mode */
 save.seenSpecials = save.seenSpecials || {};
 save.ach = save.ach || {};
 save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
@@ -1731,339 +1684,6 @@ const Fluid = {
   }
 };
 
-/* ============================================================
-   Glow — a WebGL lighting layer behind the bottles.
-   A stage-wide canvas (mix-blend: screen) sums a soft radial glow
-   per bottle, coloured by its top liquid and tuned per theme: a
-   luminous bloom under Neon, soft candlelight under Apothecary-dark,
-   near-nothing under Apothecary-light. Feature-detected; if WebGL is
-   unavailable or a shader fails to build it silently disables and the
-   CSS per-bottle glow carries on, so nothing breaks.
-   ============================================================ */
-const Glow = {
-  MAX: 16, ok: false, gl: null, cv: null, started: false, gain: 0,
-  loc: {}, count: 0,
-  pos: null, col: null,
-  init() {
-    if (RM) return;
-    const stage = $('#stage'); if (!stage) return;
-    try {
-      const cv = document.createElement('canvas');
-      cv.id = 'glow-fx';
-      cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;mix-blend-mode:screen;';
-      stage.insertBefore(cv, stage.firstChild);
-      const opts = { alpha: true, premultipliedAlpha: true, antialias: false, depth: false };
-      const gl = cv.getContext('webgl', opts) || cv.getContext('experimental-webgl', opts);
-      if (!gl) return;
-      const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
-      const fs = 'precision highp float;uniform vec2 uRes;uniform int uCount;uniform float uGain;uniform float uHalo;' +
-        'uniform vec3 uPos[' + this.MAX + '];uniform vec3 uCol[' + this.MAX + '];' +
-        'void main(){vec2 f=gl_FragCoord.xy;vec3 c=vec3(0.0);' +
-        'for(int i=0;i<' + this.MAX + ';i++){if(i>=uCount)break;vec2 d=f-uPos[i].xy;float r=uPos[i].z;' +
-        'float dd=dot(d,d);float core=exp(-dd/(r*r));float halo=exp(-dd/(r*r*8.0));' +
-        'c+=uCol[i]*(core+uHalo*halo*0.55);}c*=uGain;' +
-        'float a=clamp(max(c.r,max(c.g,c.b)),0.0,1.0);gl_FragColor=vec4(c,a);}';
-      const prog = this._program(gl, vs, fs);
-      if (!prog) return;
-      const buf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-      const pl = gl.getAttribLocation(prog, 'p');
-      gl.enableVertexAttribArray(pl);
-      gl.vertexAttribPointer(pl, 2, gl.FLOAT, false, 0, 0);
-      gl.useProgram(prog);
-      this.loc = {
-        res: gl.getUniformLocation(prog, 'uRes'),
-        count: gl.getUniformLocation(prog, 'uCount'),
-        gain: gl.getUniformLocation(prog, 'uGain'),
-        halo: gl.getUniformLocation(prog, 'uHalo'),
-        pos: gl.getUniformLocation(prog, 'uPos'),
-        col: gl.getUniformLocation(prog, 'uCol')
-      };
-      gl.disable(gl.DEPTH_TEST);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE);
-      gl.clearColor(0, 0, 0, 0);
-      this.gl = gl; this.cv = cv; this.prog = prog;
-      this.pos = new Float32Array(this.MAX * 3);
-      this.col = new Float32Array(this.MAX * 3);
-      this.ok = true;
-      this.start();
-    } catch (e) { this.ok = false; }
-  },
-  _program(gl, vsrc, fsrc) {
-    const c = (type, src) => {
-      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { gl.deleteShader(s); return null; }
-      return s;
-    };
-    const v = c(gl.VERTEX_SHADER, vsrc), f = c(gl.FRAGMENT_SHADER, fsrc);
-    if (!v || !f) return null;
-    const p = gl.createProgram(); gl.attachShader(p, v); gl.attachShader(p, f); gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) return null;
-    return p;
-  },
-  setGain(g) { this.baseGain = g; this.gain = g + (this._pulse || 0); },
-  setHalo(h) { this.halo = h; },   /* wide bloom lobe — strong on Neon, off elsewhere */
-  /* transient brightness bump (used by Beat mode on each beat) */
-  pulse(amount, ms) {
-    if (!this.ok) return;
-    this._pulse = amount;
-    this.gain = (this.baseGain || 0) + amount;
-    clearTimeout(this._pulseT);
-    this._pulseT = setTimeout(() => { this._pulse = 0; this.gain = this.baseGain || 0; }, ms || 130);
-  },
-  start() {
-    if (this.started || !this.ok) return;
-    this.started = true;
-    const draw = () => {
-      if (!this.ok) return;
-      requestAnimationFrame(draw);
-      if (document.hidden || this.gain <= 0.001 || $('#game').classList.contains('hidden')) {
-        if (this.gl && this.cv && this.cv.width) { this.gl.clear(this.gl.COLOR_BUFFER_BIT); }
-        return;
-      }
-      this.frame();
-    };
-    requestAnimationFrame(draw);
-  },
-  frame() {
-    const gl = this.gl, cv = this.cv, stage = $('#stage');
-    if (!gl || !stage || !slots || !slots.length) return;
-    const sr = stage.getBoundingClientRect();
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const W = Math.round(sr.width * dpr), H = Math.round(sr.height * dpr);
-    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; gl.viewport(0, 0, W, H); }
-    let n = 0;
-    for (let i = 0; i < slots.length && n < this.MAX; i++) {
-      const segs = visual[i]; if (!segs || !segs.length) continue;
-      const cum = segs.reduce((s, x) => s + x.u, 0); if (cum <= 0.01) continue;
-      const top = segs[segs.length - 1];
-      const hid = hiddenDepth[i] || 0;
-      const hex = hid >= cum ? HIDDEN_FILL[0] : COLORS[top.c][0];
-      const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
-      const rect = slots[i].btn.getBoundingClientRect();
-      const cx = (rect.left + rect.width / 2 - sr.left) * dpr;
-      const cy = H - (rect.top + rect.height * 0.46 - sr.top) * dpr;   /* flip to GL space */
-      this.pos[n * 3] = cx; this.pos[n * 3 + 1] = cy; this.pos[n * 3 + 2] = Math.max(20, rect.width * 0.95 * dpr);
-      this.col[n * 3] = r; this.col[n * 3 + 1] = g; this.col[n * 3 + 2] = b;
-      n++;
-    }
-    this.count = n;
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    if (!n) return;
-    gl.uniform2f(this.loc.res, W, H);
-    gl.uniform1i(this.loc.count, n);
-    gl.uniform1f(this.loc.gain, this.gain);
-    gl.uniform1f(this.loc.halo, this.halo || 0);
-    gl.uniform3fv(this.loc.pos, this.pos);
-    gl.uniform3fv(this.loc.col, this.col);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
-};
-
-/* ============================================================
-   Glass — a WebGL specular / fresnel pass over the bottles.
-   Each shape is rasterised once into a cylindrical normal map
-   (nx,nz + silhouette mask) from its interior path. A per-bottle
-   quad samples that map and adds a Blinn specular glint from a
-   slowly-orbiting light plus a fresnel rim, masked to the glass
-   silhouette and composited (screen) over the SVG bottle — giving
-   the glass live, tracking highlights. Opt-in (Settings ▸ Glass
-   reflections); feature-detected with a silent no-op fallback.
-   ============================================================ */
-const Glass = {
-  enabled: false, ok: false, gl: null, cv: null, started: false,
-  tex: {}, tint: [1, 0.96, 0.9], intensity: 0.6, theta: 0,
-  init() {
-    if (this.cv || RM) return;
-    const stage = $('#stage'); if (!stage) return;
-    try {
-      const cv = document.createElement('canvas');
-      cv.id = 'glass-fx';
-      cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:65;mix-blend-mode:screen;';
-      stage.appendChild(cv);
-      const opts = { alpha: true, premultipliedAlpha: true, antialias: true, depth: false };
-      const gl = cv.getContext('webgl', opts) || cv.getContext('experimental-webgl', opts);
-      if (!gl) return;
-      const vs = 'attribute vec2 a;uniform vec4 uRect;varying vec2 vUv;' +
-        'void main(){vUv=a;gl_Position=vec4(uRect.x+a.x*uRect.z, uRect.y-a.y*uRect.w, 0.0, 1.0);}';
-      const fs = 'precision highp float;varying vec2 vUv;uniform sampler2D uTex;' +
-        'uniform vec2 uLight;uniform vec3 uTint;uniform float uInt;' +
-        'void main(){vec4 t=texture2D(uTex,vUv);if(t.a<0.5)discard;' +
-        'float nx=t.r*2.0-1.0;vec3 N=vec3(nx,0.0,t.g);vec3 L=normalize(vec3(uLight,0.85));' +
-        'vec3 H=normalize(L+vec3(0.0,0.0,1.0));float s=pow(max(dot(N,H),0.0),26.0);' +
-        'float rim=pow(1.0-clamp(t.g,0.0,1.0),3.0);' +
-        /* chromatic refraction: glass bends wavelengths apart at the silhouette,
-           shifting toward red on one wall and blue on the other (sign of nx) */
-        'vec3 fringe=vec3(rim*(0.55+0.45*nx),rim*0.5,rim*(0.55-0.45*nx));' +
-        'vec3 col=uTint*(s*1.15+rim*0.22)+fringe*0.16;' +
-        'float v=(s*1.15+rim*0.30)*uInt;' +
-        'gl_FragColor=vec4(col*uInt, clamp(v,0.0,1.0));}';
-      const prog = Glow._program(gl, vs, fs);
-      if (!prog) return;
-      const buf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
-      const al = gl.getAttribLocation(prog, 'a');
-      gl.enableVertexAttribArray(al);
-      gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
-      gl.useProgram(prog);
-      this.loc = {
-        rect: gl.getUniformLocation(prog, 'uRect'),
-        light: gl.getUniformLocation(prog, 'uLight'),
-        tint: gl.getUniformLocation(prog, 'uTint'),
-        int: gl.getUniformLocation(prog, 'uInt')
-      };
-      gl.disable(gl.DEPTH_TEST);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE);
-      gl.clearColor(0, 0, 0, 0);
-      this.gl = gl; this.cv = cv; this.prog = prog;
-      for (const name in SHAPES) this.buildTex(name, SHAPES[name]);
-      this.ok = true;
-      this.start();
-    } catch (e) { this.ok = false; }
-  },
-  /* rasterise the interior path → cylindrical normal map (nx, nz, mask) */
-  buildTex(name, sh) {
-    const Wt = 80, Ht = Math.round(80 * sh.vbH / 100);
-    const c = document.createElement('canvas'); c.width = Wt; c.height = Ht;
-    const x = c.getContext('2d');
-    x.setTransform(Wt / 100, 0, 0, Ht / sh.vbH, 0, 0);
-    x.fillStyle = '#fff';
-    x.fill(new Path2D(sh.interior));
-    const src = x.getImageData(0, 0, Wt, Ht).data;
-    const out = new Uint8Array(Wt * Ht * 4);
-    for (let yy = 0; yy < Ht; yy++) {
-      let lo = -1, hi = -1;
-      for (let xx = 0; xx < Wt; xx++) if (src[(yy * Wt + xx) * 4 + 3] > 40) { if (lo < 0) lo = xx; hi = xx; }
-      const cxr = (lo + hi) / 2, half = Math.max(1, (hi - lo) / 2);
-      for (let xx = 0; xx < Wt; xx++) {
-        const idx = (yy * Wt + xx) * 4, m = src[idx + 3] > 40 ? 1 : 0;
-        let nx = 0, nz = 1;
-        if (m && hi > lo) { nx = Math.max(-1, Math.min(1, (xx - cxr) / half)); nz = Math.sqrt(Math.max(0.02, 1 - nx * nx)); }
-        out[idx] = Math.round((nx * 0.5 + 0.5) * 255);
-        out[idx + 1] = Math.round(nz * 255);
-        out[idx + 2] = 0;
-        out[idx + 3] = m * 255;
-      }
-    }
-    const gl = this.gl, tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Wt, Ht, 0, gl.RGBA, gl.UNSIGNED_BYTE, out);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this.tex[name] = tex;
-  },
-  setTheme(tint, intensity) { this.tint = tint; this.intensity = intensity; },
-  start() {
-    if (this.started || !this.ok) return;
-    this.started = true;
-    const draw = () => {
-      if (!this.ok) return;
-      requestAnimationFrame(draw);
-      if (document.hidden) return;
-      if (!this.enabled || $('#game').classList.contains('hidden')) {
-        if (this.gl && this.cv.width) this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-        return;
-      }
-      this.frame();
-    };
-    requestAnimationFrame(draw);
-  },
-  frame() {
-    const gl = this.gl, stage = $('#stage');
-    if (!gl || !stage || !slots || !slots.length) return;
-    const sr = stage.getBoundingClientRect();
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const W = Math.round(sr.width * dpr), H = Math.round(sr.height * dpr);
-    if (this.cv.width !== W || this.cv.height !== H) { this.cv.width = W; this.cv.height = H; gl.viewport(0, 0, W, H); }
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    this.theta += 0.006;
-    const lx = Math.cos(this.theta) * 0.8, ly = 0.3 + Math.sin(this.theta * 0.7) * 0.25;
-    gl.uniform2f(this.loc.light, lx, ly);
-    gl.uniform3f(this.loc.tint, this.tint[0], this.tint[1], this.tint[2]);
-    gl.uniform1f(this.loc.int, this.intensity);
-    for (let i = 0; i < slots.length; i++) {
-      if (locked.has(i)) continue;                 /* skip mid-pour (rotated) bottles */
-      const name = shapesByBottle[i]; const tex = this.tex[name]; if (!tex) continue;
-      const r = slots[i].btn.getBoundingClientRect();
-      const x0 = (r.left - sr.left) / sr.width * 2 - 1;
-      const y0 = 1 - (r.top - sr.top) / sr.height * 2;
-      const w = r.width / sr.width * 2, h = r.height / sr.height * 2;
-      gl.uniform4f(this.loc.rect, x0, y0, w, h);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
-  }
-};
-
-/* ============================================================
-   Beat — Neon "sort to the beat" rhythm scaffolding.
-   A tempo clock pulses the grid + glow on every beat; pours that
-   land near a beat build a combo. Active only on the Neon skin
-   with the setting on; a silent no-op everywhere else, so the
-   puzzle logic is never gated by rhythm.
-   ============================================================ */
-const Beat = {
-  bpm: 96, t0: 0, raf: null, lastBeat: -1,
-  combo: 0, best: 0, WINDOW: 0.18,   /* ± fraction of a beat counted as "on time" */
-  active() { return save.beat && SKIN === 'neon' && !RM; },
-  beatMs() { return 60000 / this.bpm; },
-  start() {
-    if (this.raf || !this.active()) return;
-    this.t0 = performance.now(); this.lastBeat = -1; this.combo = 0;
-    this.update();
-    const tick = () => {
-      if (!this.active()) { this.raf = null; this.clearPulse(); return; }
-      this.raf = requestAnimationFrame(tick);
-      if (document.hidden) return;
-      const b = Math.floor((performance.now() - this.t0) / this.beatMs());
-      if (b !== this.lastBeat) { this.lastBeat = b; this.onBeat(); }
-    };
-    this.raf = requestAnimationFrame(tick);
-  },
-  stop() {
-    if (this.raf) cancelAnimationFrame(this.raf);
-    this.raf = null; this.clearPulse(); this.combo = 0; this.update();
-  },
-  clearPulse() { const bd = $('#backdrop'); if (bd) bd.classList.remove('beat-hit'); },
-  onBeat() {
-    const bd = $('#backdrop');
-    if (bd) { bd.classList.add('beat-hit'); clearTimeout(this._t); this._t = setTimeout(() => bd.classList.remove('beat-hit'), 120); }
-    if (typeof Glow !== 'undefined') Glow.pulse(0.5, 130);
-  },
-  /* 0 at a beat boundary, rising to 0.5 at the midpoint — lower is tighter */
-  offBeat() {
-    const ph = ((performance.now() - this.t0) % this.beatMs()) / this.beatMs();
-    return Math.min(ph, 1 - ph);
-  },
-  /* called when a pour completes; scores timing + updates the combo */
-  onPour() {
-    if (!this.active()) return;
-    if (this.offBeat() <= this.WINDOW) {
-      this.combo++; if (this.combo > this.best) this.best = this.combo;
-      AudioFX.select();   /* on-beat tick */
-    } else {
-      this.combo = 0;
-    }
-    this.update();
-  },
-  update() {
-    const el = $('#combo'); if (!el) return;
-    if (this.active() && this.combo >= 2) {
-      el.textContent = '🎵 ' + this.combo + '× combo';
-      el.classList.remove('hidden');
-      el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
-    } else {
-      el.classList.add('hidden');
-    }
-  }
-};
 
 /* ---------------- liquid rendering (gravity-true) ----------------
    The liquid group is counter-rotated against the bottle's tilt, so
@@ -2134,22 +1754,16 @@ function renderBottle(i, tiltDeg, wob) {
     if (fade > 0.04) ellipses.push({ y, c: seg.c });
     cum += seg.u;
   }
-  ellipses.forEach((e, k) => {
-    const isTop = k === ellipses.length - 1;
-    if (isTop && topWave) return;   /* wave surface drawn separately below */
-    const wdy = isTop && wob ? wob.dy : 0;
-    const wrot = isTop && wob ? wob.rot : 0;
-    const surf = svgEl('ellipse', {
-      cx: px, cy: e.y + 0.8 + wdy, rx: sh.surfRx, ry: 5,
-      fill: COLORS[e.c][0], opacity: (isTop ? 0.75 : 0.42) * fade
-    });
-    if (wrot) surf.setAttribute('transform', 'rotate(' + wrot.toFixed(2) + ' ' + px + ' ' + (e.y + 0.8 + wdy).toFixed(1) + ')');
-    inner.appendChild(surf);
-    if (isTop) inner.appendChild(svgEl('ellipse', {
+  /* No darker surface lines between bands — they made colours ambiguous on small
+     screens. Only the topmost visible liquid gets one faint white gloss sliver. */
+  if (ellipses.length && !topWave) {
+    const e = ellipses[ellipses.length - 1];
+    const wdy = wob ? wob.dy : 0;
+    inner.appendChild(svgEl('ellipse', {
       cx: px - 7 + (wob ? wob.dy * 1.4 : 0), cy: e.y - 0.2 + wdy, rx: 6.5, ry: 1.9,
-      fill: '#ffffff', opacity: 0.5 * fade
+      fill: '#ffffff', opacity: 0.4 * fade
     }));
-  });
+  }
 
   /* animated wave surface for the top band */
   if (topWave) {
@@ -2163,29 +1777,6 @@ function renderBottle(i, tiltDeg, wob) {
     Fluid.start();
   } else {
     slot.surf = null;
-  }
-
-  /* idle bubbles — count/speed vary by top liquid type */
-  if (!t && !RM && ellipses.length && !locked.has(i) && cum > 0.5) {
-    const ci = lastSeg ? lastSeg.c : 0;
-    /* density 0=calm(1 bub), 1=medium(2), 2=fizzy(3); speed 0=slow,1=med,2=fast */
-    const DENSITY = [1, 0, 2, 1, 2, 1, 0, 1, 0];
-    const SPEED   = [1, 0, 2, 1, 1, 1, 0, 1, 0];
-    const count = (DENSITY[ci % DENSITY.length] || 0) + 1;
-    const dur = SPEED[ci % SPEED.length] === 2 ? 2.1 : SPEED[ci % SPEED.length] === 0 ? 5.2 : 3.6;
-    const surfY = ellipses[ellipses.length - 1].y;
-    const depth = low - surfY;
-    for (let b = 0; b < count; b++) {
-      const bub = svgEl('circle', {
-        cx: px - 12 + (count > 1 ? (b / (count - 1)) * 24 : 0) + (Math.random() - 0.5) * 6,
-        cy: low - 3 - Math.random() * Math.max(4, depth * 0.35),
-        r: 1.3 + Math.random() * 0.9, fill: 'rgba(255,255,255,0.45)'
-      });
-      bub.setAttribute('class', 'bub');
-      bub.style.animationDuration = (dur + Math.random() * 0.7).toFixed(2) + 's';
-      bub.style.animationDelay = (-Math.random() * dur).toFixed(2) + 's';
-      inner.appendChild(bub);
-    }
   }
 
   /* mystery overlay: unit bands counted from the bottom */
@@ -2215,8 +1806,10 @@ function renderBottle(i, tiltDeg, wob) {
   g.appendChild(inner);
   const top = segs.length && cum > 0.01 ? segs[segs.length - 1] : null;
   const glowColor = top ? (hid >= cum ? HIDDEN_FILL[1] : COLORS[top.c][1]) : null;
+  /* subtle CSS-only per-bottle glow (WebGL bloom removed) — a touch stronger on Neon */
+  const ga = SKIN === 'neon' ? '66' : '33';
   slot.glow.style.background = glowColor
-    ? 'radial-gradient(50% 60% at 50% 50%, ' + glowColor + 'aa, transparent 70%)'
+    ? 'radial-gradient(50% 60% at 50% 50%, ' + glowColor + ga + ', transparent 70%)'
     : 'none';
 }
 
@@ -2330,7 +1923,6 @@ function setupBoard(gen) {
   moves = 0; history = []; sel = null; locked.clear(); activePours = 0;
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
   Fluid.resetAll();
-  if (Beat.active()) { Beat.combo = 0; Beat.t0 = performance.now(); Beat.lastBeat = -1; Beat.update(); }
   clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
   const specials = applySpecials(gen);
@@ -2352,7 +1944,9 @@ function setupBoard(gen) {
     const btn = document.createElement('button');
     btn.className = 'bottle';
     btn.setAttribute('aria-label', 'Bottle ' + (i + 1));
-    const svg = buildBottleSVG(shapeName, { cork: true, label: true });
+    /* no decorative cork in gameplay — an upright open bottle reads as unsolved;
+       completion is shown by the .cap drop (see syncCaps) */
+    const svg = buildBottleSVG(shapeName, { cork: false, label: true });
     btn.appendChild(svg);
     const cap = document.createElement('span'); cap.className = 'cap';
     const ring = document.createElement('span'); ring.className = 'ring';
@@ -2371,8 +1965,7 @@ function setupBoard(gen) {
     btn.addEventListener('click', () => onTap(i));
     return { slot, el: slot, glow, btn, sh, liquidGroup: svg.querySelector('.liquids'), svg };
   });
-  $('#menu').classList.add('hidden');
-  $('#game').classList.remove('hidden');
+  showScreen('game');
   layoutStage();
   state.forEach((b, i) => renderBottle(i, 0));
   syncCaps();
@@ -2785,7 +2378,6 @@ async function doPour(si, di) {
   locked.delete(si); locked.delete(di); activePours--;
   sloshBottle(di, Math.min(2, n));
   sloshBottle(si, 0.5);
-  Beat.onPour();   /* Neon rhythm: score this pour's timing against the beat */
   updateHUD();
   if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
   if (activePours === 0 && window.isSolved(state)) {
@@ -3000,19 +2592,11 @@ function applyTheme() {
   HIDDEN_FILL = t.hidden;
   RIM_COLOR = t.modes ? t.rim[MODE] : t.rim.light;
   GLASS_SHADOW = t.shadow;
-  Glow.setGain(SKIN === 'neon' ? 1.05 : (MODE === 'dark' ? 0.55 : 0.16));
-  Glow.setHalo(SKIN === 'neon' ? 1.0 : 0.0);   /* wide bloom lobe only on Neon */
-  Glass.setTheme(
-    SKIN === 'neon' ? [1.0, 0.86, 1.0] : [1.0, 0.97, 0.9],
-    SKIN === 'neon' ? 0.95 : (MODE === 'dark' ? 0.7 : 0.55)
-  );
   buildDefs();
   const k = $('#brand-kicker'), tg = $('#brand-tag');
   if (k) k.textContent = t.kicker;
   if (tg) tg.textContent = t.tag;
   refreshBottles();
-  /* Neon rhythm clock follows the skin */
-  if (SKIN === 'neon' && save.beat) Beat.start(); else Beat.stop();
 }
 
 function toggleMode() {
@@ -3034,7 +2618,7 @@ function renderThemeGrid() {
       save.theme = t.id;
       persist();
       applyTheme();
-      renderSettings();   /* refresh switches + Neon-gated rhythm row + theme grid */
+      renderSettings();   /* refresh switches (incl. Neon-gated dark row) + theme grid */
       AudioFX.select();
     });
     grid.appendChild(b);
@@ -3046,10 +2630,7 @@ function renderSettings() {
   $('#sw-haptics').classList.toggle('on', !!save.haptics);
   $('#sw-symbols').classList.toggle('on', !!save.symbols);
   $('#sw-fluid').classList.toggle('on', !!save.fluid);
-  $('#sw-glass').classList.toggle('on', !!save.glass);
-  $('#sw-beat').classList.toggle('on', !!save.beat);
-  /* rhythm mode is a Neon-only feature — hide the row on Apothecary */
-  $('#row-beat').style.display = save.theme === 'neon' ? '' : 'none';
+  $('#sw-dark').classList.toggle('on', save.mode === 'dark');
   renderThemeGrid();
 }
 
@@ -3214,9 +2795,16 @@ function startAmbient() {
   }
   size();
   window.addEventListener('resize', size);
+  let cleared = false;
   (function frame(now) {
     requestAnimationFrame(frame);
     if (document.hidden) return;
+    /* ambient dust is a menu-only flourish — disabled during gameplay to save battery */
+    if (document.body.dataset.screen === 'game') {
+      if (!cleared) { ctx.clearRect(0, 0, W, H); cleared = true; }
+      return;
+    }
+    cleared = false;
     ctx.clearRect(0, 0, W, H);
     for (const p of parts) {
       p.y += p.vy; p.x += p.vx + Math.sin(now / 2400 + p.ph) * 0.05;
@@ -3243,7 +2831,18 @@ function startAmbient() {
 function showScreen(name) {
   $('#menu').classList.toggle('hidden', name !== 'menu');
   $('#game').classList.toggle('hidden', name !== 'game');
-  document.body.dataset.screen = name;   /* gates the floating mode toggle off the game HUD */
+  document.body.dataset.screen = name;
+  /* push one history entry on entering gameplay so the device/browser Back
+     button returns to the menu instead of leaving the page */
+  if (name === 'game' && (!history.state || history.state.screen !== 'game')) {
+    history.pushState({ screen: 'game' }, '');
+  }
+}
+
+/* in-app back: consume the gameplay history entry so the stack stays in sync */
+function exitToMenu() {
+  if (history.state && history.state.screen === 'game') history.back();
+  else goMenu();
 }
 
 function unlockedUpTo() {
@@ -3333,10 +2932,9 @@ function init() {
   buildOrb();
   buildHeroBottles();
   renderMenu();
+  history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling */
   showScreen('menu');
   startAmbient();
-  Glow.init();
-  if (save.glass) { Glass.enabled = true; Glass.init(); }
 
   document.querySelectorAll('#diff-seg button').forEach(b =>
     b.addEventListener('click', () => {
@@ -3346,8 +2944,7 @@ function init() {
   $('#btn-sound-menu').addEventListener('click', () => {
     save.sound = !save.sound; persist(); renderMenu(); AudioFX.select();
   });
-  $('#mode-toggle').addEventListener('click', toggleMode);
-  $('#btn-back').addEventListener('click', () => { AudioFX.swap(); goMenu(); });
+  $('#btn-back').addEventListener('click', () => { AudioFX.swap(); exitToMenu(); });
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-restart').addEventListener('click', () => { if (activePours === 0 && !autoPlaying) { AudioFX.swap(); restartCurrent(); } });
   $('#btn-sound').addEventListener('click', () => {
@@ -3362,7 +2959,7 @@ function init() {
     if (mode === 'rush') startRush();      /* a fresh run after Time's up */
     else restartCurrent();
   });
-  $('#btn-menu').addEventListener('click', () => { goMenu(); });
+  $('#btn-menu').addEventListener('click', () => { exitToMenu(); });
   $('#btn-next').addEventListener('click', () => { $('#overlay').classList.remove('show'); if (level < window.MAX_LEVEL) loadLevel(level + 1); });
 
   /* modes */
@@ -3391,14 +2988,7 @@ function init() {
     save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; persist(); renderSettings(); AudioFX.select();
     if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
   });
-  $('#sw-glass').addEventListener('click', () => {
-    save.glass = !save.glass; Glass.enabled = !!save.glass; persist(); renderSettings(); AudioFX.select();
-    if (save.glass) Glass.init();
-  });
-  $('#sw-beat').addEventListener('click', () => {
-    save.beat = !save.beat; persist(); renderSettings(); AudioFX.select();
-    if (SKIN === 'neon' && save.beat) Beat.start(); else Beat.stop();
-  });
+  $('#sw-dark').addEventListener('click', () => { toggleMode(); renderSettings(); });
   $('#btn-reset').addEventListener('click', () => {
     if (!confirm('Erase all progress, stars and achievements?')) return;
     save = JSON.parse(JSON.stringify(DEFAULT_SAVE));
@@ -3414,6 +3004,10 @@ function init() {
   window.addEventListener('resize', relayout);
   window.addEventListener('orientationchange', relayout);
   window.addEventListener('pointerdown', () => AudioFX.ensure(), { once: true });
+  /* device/browser Back while in a level returns to the menu, never off-page */
+  window.addEventListener('popstate', () => {
+    if (!$('#game').classList.contains('hidden')) goMenu();
+  });
 }
 
 window.__vessel = {
@@ -3431,6 +3025,21 @@ window.__vessel = {
   get veiled() { return veiled; },
   get frozen() { return frozen; },
   get orbFrac() { return orbFrac; }
+};
+
+/* tiny QA surface — one low-power profile, mobile-first (no profiler) */
+window.__vesselPerf = {
+  lowPower: true,
+  glowEnabled: false,    /* WebGL glow removed; per-bottle glow is CSS-only */
+  glassEnabled: false,   /* WebGL glass reflections removed */
+  beatEnabled: false,    /* rhythm mode removed */
+  bubblesEnabled: false, /* random idle bubbles removed */
+  get fluidEnabled() { return !!save.fluid; },
+  get ambientEnabled() { return document.body.dataset.screen !== 'game' && !RM; },
+  get activeAnimations() {
+    return (Fluid.running && Fluid.active() ? 1 : 0) +   /* liquid surface loop */
+           (this.ambientEnabled ? 1 : 0);                /* menu dust loop */
+  }
 };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
