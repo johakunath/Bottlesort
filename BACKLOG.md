@@ -2,7 +2,11 @@
 
 ## In Progress — Visual Upgrade (Apothecary & Neon + WebGL fluid)
 
-Tracked in PR #5. The design handoff (`Game Visual Enhancement.zip`) ships two art
+Phases 1–4 + most of Phase 5 are merged (PRs #4, #5). The remaining Phase 5 items
+(Neon bloom, beat-sync, carry-slosh) and a first refraction pass are tracked in the
+follow-up PR. The one genuinely large piece still open is the full refractive-glass
+**renderer rewrite** (Phase 2, called out below). The design handoff (`Game Visual
+Enhancement.zip`) ships two art
 directions that coexist as selectable themes, plus a mandate to rebuild the
 liquid/glass/pour motion properly in the engine. The codebase has a clean seam:
 the pure game-logic layer (solver, level generation, pour rules, win detection) is
@@ -24,10 +28,13 @@ rects + `visual[]` live each frame; feature-detected with silent fallback to the
 per-bottle glow; honors reduced-motion.
 **Also shipped (opt-in, Settings ▸ Glass reflections, beta):** a `Glass` WebGL pass
 that rasterises each shape into a cylindrical normal map and adds a Blinn specular
-glint from a slowly-orbiting light + a fresnel rim, masked to the silhouette and
-screen-composited over the SVG bottle — live, tracking glass highlights. Per-bottle
-quads driven by slot rects; default off so the proven look ships by default.
-**Remaining — replace SVG glass pixels with a full refractive-glass renderer:**
+glint from a slowly-orbiting light + a fresnel rim + a **chromatic edge-refraction**
+term (wavelengths split by the sign of the surface normal at the silhouette), masked
+to the silhouette and screen-composited over the SVG bottle. Per-bottle quads driven
+by slot rects; default off so the proven look ships by default.
+**Remaining — replace SVG glass pixels with a full refractive-glass renderer**
+(the one large architectural piece still open; the chromatic edge above is a cue
+layered on the SVG, not true light transport through rendered liquid):
 - Introduce a `Renderer` seam (`init/setBoard/syncLayout/renderFrame/setTilt/setWobble/spawnPour/setTheme/destroy`) with `SvgRenderer` (current) + `GlRenderer` backends; factory picks GL when available, else SVG.
 - Keep DOM slot `<div>`s as invisible hit-targets + layout drivers; the GL renderer reads `slots[i].slot.getBoundingClientRect()` each frame (the `Glow` layer already proves this pattern).
 - Precompute per-shape mask + distance/normal texture (rasterize `interior`/`outline` path once per shape → JS distance transform), reused by every bottle of that shape.
@@ -53,22 +60,26 @@ div rises from the open mouth during the pour (Apothecary only). Landing: two
 `.pour-ripple` rings expand on the receiver surface; `Fluid.drop()` injects a
 splash impulse at pour-start.
 
-### ◑ Phase 5 — Neon polish + extras (partially shipped)
-**Shipped:**
-- Per-liquid bubble density: citron/aqua bands now spawn 3 fast-rising bubbles;
+### ✅ Phase 5 — Neon polish + extras (shipped)
+- Per-liquid bubble density: citron/aqua bands spawn 3 fast-rising bubbles;
   amber/violet/mocha spawn 1 slow bubble; others 2 medium — driven by `DENSITY`/`SPEED`
   lookup tables on the top liquid colour index.
-- Gameplay parchment labels: Apothecary gameplay bottles now display the decorative
-  parchment label in the lower body, consistent with hero bottles.
-- Themed win flash: `#flash` overlay colour now switches — Neon gets magenta,
-  Apothecary dark gets amber candlelight, Apothecary light keeps the warm cream.
-**Remaining:**
-- 2-pass bloom for Neon (glow = top band bright face; currently using the Gaussian
-  radial Glow pass which already handles this reasonably).
-- Beat-sync scaffolding for the "sort to the beat" Neon mode (quantize pours to a
-  track; pulse grid on the beat; combo feedback).
-- Richer carry-acceleration slosh: track slot screen-position deltas during the
-  pour arc and inject proportional `Fluid.slosh()` impulses.
+- Gameplay parchment labels: Apothecary gameplay bottles display the decorative
+  parchment label (CSS-hidden on Neon, robust to runtime theme switches).
+- Themed win flash: `#flash` overlay colour switches — Neon magenta, Apothecary-dark
+  amber candlelight, Apothecary-light warm cream.
+- Carry-acceleration slosh: two `Fluid.slosh()` impulses during the pour lift arc.
+- **Neon bloom:** the `Glow` shader now sums a tight core + a wide halo lobe (gated by
+  `uHalo`, on only for Neon) for a soft synthwave bloom around each tube.
+- **Neon "sort to the beat" rhythm mode** (`Beat`): a 96 BPM clock pulses the grid +
+  horizon (`#backdrop.beat-hit`) and the Glow (`Glow.pulse`) on each beat; pours that
+  land within ±0.18 of a beat build a combo shown in a HUD chip. Settings toggle
+  (Neon-only row); save flag default off; combo resets per board. Silent no-op off-Neon
+  so puzzle logic is never gated by rhythm.
+
+**Beat-sync follow-ups (future):** quantise/lock pour availability to the beat as a
+harder "rhythm challenge" variant; load an actual music track and derive BPM from it;
+score/leaderboard for longest combo.
 
 ---
 
