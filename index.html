@@ -417,6 +417,31 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 @keyframes splashPulse { 0%, 100% { transform: translate(-50%, -50%) scale(1, 1); } 50% { transform: translate(-50%, -50%) scale(1.3, 0.7); } }
 
+/* ── Phase 4: cork-pop, steam, pour-ripple ── */
+/* cork group: always in DOM, CSS controls visibility per skin */
+body[data-skin="neon"] .cork-g { display: none; }
+body[data-skin="apothecary"] .slot .bottle svg .cork-g {
+  transition: transform 0.22s cubic-bezier(.2,.8,.4,1), opacity 0.18s ease;
+}
+body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
+  transform: translateY(-18px); opacity: 0;
+}
+/* steam wisp rising from an open bottle mouth */
+.steam-wisp {
+  position: absolute; width: 14px; height: 30px; border-radius: 50%;
+  background: radial-gradient(ellipse at bottom, rgba(255,255,255,0.52), transparent 70%);
+  filter: blur(3px); transform-origin: bottom center; pointer-events: none; z-index: 72;
+  animation: steamRise 1.35s ease-out infinite;
+}
+@keyframes steamRise { 0% { transform: translateY(0) scaleX(1); opacity: 0; } 25% { opacity: 0.55; } 100% { transform: translateY(-36px) scaleX(1.6); opacity: 0; } }
+/* landing ripple on receiver */
+.pour-ripple {
+  position: absolute; border-radius: 50%; pointer-events: none; z-index: 73;
+  border-width: 1.5px; border-style: solid;
+  animation: pourRipple 0.65s ease-out forwards;
+}
+@keyframes pourRipple { 0% { transform: translate(-50%,-50%) scale(0.25); opacity: 0.9; } 100% { transform: translate(-50%,-50%) scale(2.6); opacity: 0; } }
+
 .ice {
   position: absolute; left: 2%; right: 2%; bottom: -3%; height: 48%; z-index: 6;
   border-radius: calc(var(--bw) * 0.16);
@@ -1400,8 +1425,8 @@ function buildBottleSVG(shapeName, opts) {
     s.setAttribute('class', 'twinkle t' + (k % 3));
     gloss.appendChild(s);
   });
-  /* cork stopper (Apothecary) — drawn last, sits above the mouth */
-  if (opts.cork && SKIN === 'apothecary' && sh.cork) {
+  /* cork stopper — always added when requested; CSS hides it on Neon */
+  if (opts.cork && sh.cork) {
     svg.appendChild(buildCork(sh.cork));
   }
   svg.appendChild(gloss);
@@ -1422,7 +1447,7 @@ function buildLabel(L) {
 }
 
 function buildCork(c) {
-  const g = svgEl('g', {});
+  const g = svgEl('g', { class: 'cork-g' });
   g.appendChild(svgEl('rect', { x: c.x, y: c.y, width: c.w, height: c.h, rx: c.r,
     fill: 'url(#corkGrad)', stroke: 'rgba(90,55,25,0.5)', 'stroke-width': 1 }));
   g.appendChild(svgEl('ellipse', { cx: c.x + c.w / 2, cy: c.y + 2.5, rx: (c.w - 5) / 2, ry: 2.4,
@@ -2216,7 +2241,7 @@ function setupBoard(gen) {
     const btn = document.createElement('button');
     btn.className = 'bottle';
     btn.setAttribute('aria-label', 'Bottle ' + (i + 1));
-    const svg = buildBottleSVG(shapeName);
+    const svg = buildBottleSVG(shapeName, { cork: true });
     btn.appendChild(svg);
     const cap = document.createElement('span'); cap.className = 'cap';
     const ring = document.createElement('span'); ring.className = 'ring';
@@ -2519,28 +2544,78 @@ async function doPour(si, di) {
   bottleEl.style.transform = 'translate(' + dxF.toFixed(1) + 'px,' + dyF.toFixed(1) + 'px) rotate(' + A.toFixed(2) + 'deg)';
   renderBottle(si, A);
 
-  /* phase 2: stream + drain */
+  /* phase 2: arc stream + drain */
   const dur = RM ? 40 : 300 + 170 * n;
   const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
   const surfaceY = dRect.top + ((shD.B - dstUnits0 * shD.unit) / shD.vbH) * bhD;
   const fx = $('#fx');
-  const stream = document.createElement('span');
-  stream.className = 'stream';
-  stream.style.background = 'linear-gradient(180deg, ' + COLORS[color][0] + ', ' + COLORS[color][1] + ')';
-  stream.style.left = (Q.x - stageRect.left - bwS * 0.055) + 'px';
-  stream.style.top = (Q.y - stageRect.top + bwS * 0.04) + 'px';
-  stream.style.height = Math.max(8, surfaceY - Q.y - bwS * 0.02) + 'px';
-  const splash = document.createElement('span');
-  splash.className = 'splash';
-  splash.style.background = 'radial-gradient(50% 50% at 50% 50%, ' + COLORS[color][0] + 'cc, transparent 75%)';
-  splash.style.left = (Pm.x - stageRect.left) + 'px';
-  splash.style.top = (surfaceY - stageRect.top) + 'px';
-  fx.appendChild(stream); fx.appendChild(splash);
+  const c0 = COLORS[color][0], c1 = COLORS[color][1];
+
+  /* SVG quadratic-bezier arc stream (gravity arc from lip to receiver) */
+  const sx = Q.x - stageRect.left, sy = Q.y - stageRect.top;
+  const tx = Pm.x - stageRect.left, ty = surfaceY - stageRect.top;
+  const cpx = sx + (tx - sx) * 0.35 + side * 8;
+  const cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
+  const arcD = `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)}`;
+  const pourSVG = document.createElementNS(NS, 'svg');
+  pourSVG.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:71';
+  const gid = 'ps_' + si;
+  const pdefs = document.createElementNS(NS, 'defs');
+  const pgrad = document.createElementNS(NS, 'linearGradient');
+  pgrad.setAttribute('id', gid); pgrad.setAttribute('gradientUnits', 'userSpaceOnUse');
+  pgrad.setAttribute('x1', sx); pgrad.setAttribute('y1', sy);
+  pgrad.setAttribute('x2', tx); pgrad.setAttribute('y2', ty);
+  [[0, c0], [1, c1]].forEach(([off, col]) => {
+    const s = document.createElementNS(NS, 'stop');
+    s.setAttribute('offset', off); s.setAttribute('stop-color', col);
+    pgrad.appendChild(s);
+  });
+  pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
+  const mkPath = (stroke, width, opacity, blur) => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', arcD); p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', width);
+    p.setAttribute('stroke-linecap', 'round');
+    if (opacity !== undefined) p.setAttribute('opacity', opacity);
+    if (blur) p.style.filter = 'blur(' + blur + 'px)';
+    return p;
+  };
+  pourSVG.appendChild(mkPath(c0, 9, 0.28, 3));              /* soft glow halo */
+  pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));      /* coloured core */
+  pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6)); /* highlight streak */
+  fx.appendChild(pourSVG);
+
+  /* steam wisp above the open mouth (Apothecary) */
+  let steamEl = null;
+  if (!RM && SKIN === 'apothecary') {
+    steamEl = document.createElement('div');
+    steamEl.className = 'steam-wisp';
+    steamEl.style.left = (Q.x - stageRect.left - 7 + side * 6) + 'px';
+    steamEl.style.top = (Q.y - stageRect.top - 30) + 'px';
+    fx.appendChild(steamEl);
+  }
+
+  /* landing ripple rings on receiver surface */
+  const rippleEls = [];
+  if (!RM) {
+    for (let r = 0; r < 2; r++) {
+      const rip = document.createElement('div');
+      rip.className = 'pour-ripple';
+      rip.style.cssText = `width:${bwD * 0.48}px;height:${bwD * 0.15}px;border-color:${c0};` +
+        `left:${tx}px;top:${ty}px;animation-delay:${r * 0.24}s`;
+      fx.appendChild(rip);
+      rippleEls.push(rip);
+    }
+    /* inject splash impulse into receiver's fluid sim as soon as pour starts */
+    Fluid.drop(di, -1.8);
+    Fluid.start();
+  }
+
   const dropTimer = RM ? null : setInterval(() => {
     const d = document.createElement('span');
     d.className = 'droplet';
-    d.style.background = COLORS[color][0];
-    d.style.boxShadow = '0 0 6px ' + COLORS[color][0] + '88';
+    d.style.background = c0;
+    d.style.boxShadow = '0 0 6px ' + c0 + '88';
     d.style.left = (Pm.x - stageRect.left + (Math.random() * 14 - 7)).toFixed(1) + 'px';
     d.style.top = (surfaceY - stageRect.top).toFixed(1) + 'px';
     d.style.setProperty('--dx', (Math.random() * 44 - 22).toFixed(0) + 'px');
@@ -2560,7 +2635,9 @@ async function doPour(si, di) {
     renderBottle(di, 0);
   });
   if (dropTimer) clearInterval(dropTimer);
-  stream.remove(); splash.remove();
+  pourSVG.remove();
+  if (steamEl) steamEl.remove();
+  rippleEls.forEach(e => e.remove());
   if (!RM) spawnSparkles(slots[di].el, 4, 0.25);
 
   /* phase 3: return */
