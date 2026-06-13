@@ -195,6 +195,21 @@ body[data-mode="dark"] .apo.shelf { background: linear-gradient(#7a542c, #4a3018
 @keyframes vsGrid { to { background-position: 0 40px; } }
 @keyframes vsRay { 0% { transform: translateX(-3%) rotate(-1.5deg); opacity: 0.7 } 100% { transform: translateX(3%) rotate(1.5deg); opacity: 1 } }
 
+/* ── Neon "sort to the beat" rhythm mode ── */
+/* on each beat, #backdrop gets .beat-hit briefly: grid + horizon flare */
+#backdrop.beat-hit .neon.grid { filter: brightness(1.9) saturate(1.3); }
+#backdrop.beat-hit .neon.horizon { box-shadow: 0 0 20px 5px #ff4cc6, 0 0 60px 14px rgba(120,40,200,0.8); }
+#backdrop .neon.grid, #backdrop .neon.horizon { transition: filter 0.12s ease-out, box-shadow 0.12s ease-out; }
+/* combo chip in the HUD */
+#combo {
+  font: 700 13px var(--head-font, system-ui); letter-spacing: 0.04em;
+  padding: 5px 10px; border-radius: 999px; white-space: nowrap;
+  color: #0c0718; background: linear-gradient(90deg, #ff4cc6, #34d6ff);
+  box-shadow: 0 0 14px rgba(255,76,198,0.6);
+}
+#combo.bump { animation: comboBump 0.32s cubic-bezier(.34,1.6,.5,1); }
+@keyframes comboBump { 0% { transform: scale(1); } 45% { transform: scale(1.35); } 100% { transform: scale(1); } }
+
 #vignette { /* filmic edge darkening over the whole scene */
   position: fixed; inset: 0; pointer-events: none; z-index: 2;
   background: radial-gradient(125% 105% at 50% 45%, transparent 62%, rgba(3, 5, 18, 0.10) 100%);
@@ -768,6 +783,7 @@ body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
       <div class="lvl" id="hud-level">Level 1</div>
       <div class="sub" id="hud-sub"></div>
     </div>
+    <div id="combo" class="hidden" aria-hidden="true"></div>
     <div id="orb" aria-hidden="true"></div>
     <button class="icon-btn" id="btn-undo" aria-label="Undo">↩<span class="badge hidden" id="undo-badge"></span></button>
     <button class="icon-btn" id="btn-restart" aria-label="Restart level">⟳</button>
@@ -806,6 +822,7 @@ body[data-skin="apothecary"] .slot.pouring .bottle svg .cork-g {
     <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
     <div class="set-row"><span>Liquid motion<span class="desc">Living surface — waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
     <div class="set-row"><span>Glass reflections<span class="desc">WebGL specular highlights on the glass — beta</span></span><button class="switch" id="sw-glass" role="switch" aria-label="Glass reflections"></button></div>
+    <div class="set-row" id="row-beat"><span>Sort to the beat<span class="desc">Neon rhythm mode — the grid pulses; pour on the beat for combos</span></span><button class="switch" id="sw-beat" role="switch" aria-label="Sort to the beat"></button></div>
     <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Unlock new looks by earning stars</span></span></div>
     <div class="theme-grid" id="theme-grid"></div>
     <button class="danger-btn" id="btn-reset">Erase all progress</button>
@@ -1222,7 +1239,7 @@ const store = {
 const DEFAULT_SAVE = {
   progress: { relaxed: {}, normal: {}, expert: {} },
   sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
-  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true, glass: false,
+  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true, glass: false, beat: false,
   ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0
 };
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
@@ -1235,6 +1252,7 @@ if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
    the DEFAULT_SAVE merge already defaults them, this pins the schema) */
 save.fluid = save.fluid !== false;   /* default ON for returning players */
 save.glass = save.glass === true;    /* default OFF (beta) */
+save.beat = save.beat === true;      /* default OFF (Neon rhythm mode) */
 save.seenSpecials = save.seenSpecials || {};
 save.ach = save.ach || {};
 save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
@@ -1783,7 +1801,15 @@ const Glow = {
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) return null;
     return p;
   },
-  setGain(g) { this.gain = g; },
+  setGain(g) { this.baseGain = g; this.gain = g + (this._pulse || 0); },
+  /* transient brightness bump (used by Beat mode on each beat) */
+  pulse(amount, ms) {
+    if (!this.ok) return;
+    this._pulse = amount;
+    this.gain = (this.baseGain || 0) + amount;
+    clearTimeout(this._pulseT);
+    this._pulseT = setTimeout(() => { this._pulse = 0; this.gain = this.baseGain || 0; }, ms || 130);
+  },
   start() {
     if (this.started || !this.ok) return;
     this.started = true;
@@ -1963,6 +1989,69 @@ const Glass = {
       gl.uniform4f(this.loc.rect, x0, y0, w, h);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+  }
+};
+
+/* ============================================================
+   Beat — Neon "sort to the beat" rhythm scaffolding.
+   A tempo clock pulses the grid + glow on every beat; pours that
+   land near a beat build a combo. Active only on the Neon skin
+   with the setting on; a silent no-op everywhere else, so the
+   puzzle logic is never gated by rhythm.
+   ============================================================ */
+const Beat = {
+  bpm: 96, t0: 0, raf: null, lastBeat: -1,
+  combo: 0, best: 0, WINDOW: 0.18,   /* ± fraction of a beat counted as "on time" */
+  active() { return save.beat && SKIN === 'neon' && !RM; },
+  beatMs() { return 60000 / this.bpm; },
+  start() {
+    if (this.raf || !this.active()) return;
+    this.t0 = performance.now(); this.lastBeat = -1; this.combo = 0;
+    this.update();
+    const tick = () => {
+      if (!this.active()) { this.raf = null; this.clearPulse(); return; }
+      this.raf = requestAnimationFrame(tick);
+      if (document.hidden) return;
+      const b = Math.floor((performance.now() - this.t0) / this.beatMs());
+      if (b !== this.lastBeat) { this.lastBeat = b; this.onBeat(); }
+    };
+    this.raf = requestAnimationFrame(tick);
+  },
+  stop() {
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = null; this.clearPulse(); this.combo = 0; this.update();
+  },
+  clearPulse() { const bd = $('#backdrop'); if (bd) bd.classList.remove('beat-hit'); },
+  onBeat() {
+    const bd = $('#backdrop');
+    if (bd) { bd.classList.add('beat-hit'); clearTimeout(this._t); this._t = setTimeout(() => bd.classList.remove('beat-hit'), 120); }
+    if (typeof Glow !== 'undefined') Glow.pulse(0.5, 130);
+  },
+  /* 0 at a beat boundary, rising to 0.5 at the midpoint — lower is tighter */
+  offBeat() {
+    const ph = ((performance.now() - this.t0) % this.beatMs()) / this.beatMs();
+    return Math.min(ph, 1 - ph);
+  },
+  /* called when a pour completes; scores timing + updates the combo */
+  onPour() {
+    if (!this.active()) return;
+    if (this.offBeat() <= this.WINDOW) {
+      this.combo++; if (this.combo > this.best) this.best = this.combo;
+      AudioFX.select();   /* on-beat tick */
+    } else {
+      this.combo = 0;
+    }
+    this.update();
+  },
+  update() {
+    const el = $('#combo'); if (!el) return;
+    if (this.active() && this.combo >= 2) {
+      el.textContent = '🎵 ' + this.combo + '× combo';
+      el.classList.remove('hidden');
+      el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+    } else {
+      el.classList.add('hidden');
     }
   }
 };
@@ -2232,6 +2321,7 @@ function setupBoard(gen) {
   moves = 0; history = []; sel = null; locked.clear(); activePours = 0;
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
   Fluid.resetAll();
+  if (Beat.active()) { Beat.combo = 0; Beat.t0 = performance.now(); Beat.lastBeat = -1; Beat.update(); }
   clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
   const specials = applySpecials(gen);
@@ -2686,6 +2776,7 @@ async function doPour(si, di) {
   locked.delete(si); locked.delete(di); activePours--;
   sloshBottle(di, Math.min(2, n));
   sloshBottle(si, 0.5);
+  Beat.onPour();   /* Neon rhythm: score this pour's timing against the beat */
   updateHUD();
   if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
   if (activePours === 0 && window.isSolved(state)) {
@@ -2910,6 +3001,8 @@ function applyTheme() {
   if (k) k.textContent = t.kicker;
   if (tg) tg.textContent = t.tag;
   refreshBottles();
+  /* Neon rhythm clock follows the skin */
+  if (SKIN === 'neon' && save.beat) Beat.start(); else Beat.stop();
 }
 
 function toggleMode() {
@@ -2931,7 +3024,7 @@ function renderThemeGrid() {
       save.theme = t.id;
       persist();
       applyTheme();
-      renderThemeGrid();
+      renderSettings();   /* refresh switches + Neon-gated rhythm row + theme grid */
       AudioFX.select();
     });
     grid.appendChild(b);
@@ -2944,6 +3037,9 @@ function renderSettings() {
   $('#sw-symbols').classList.toggle('on', !!save.symbols);
   $('#sw-fluid').classList.toggle('on', !!save.fluid);
   $('#sw-glass').classList.toggle('on', !!save.glass);
+  $('#sw-beat').classList.toggle('on', !!save.beat);
+  /* rhythm mode is a Neon-only feature — hide the row on Apothecary */
+  $('#row-beat').style.display = save.theme === 'neon' ? '' : 'none';
   renderThemeGrid();
 }
 
@@ -3288,6 +3384,10 @@ function init() {
   $('#sw-glass').addEventListener('click', () => {
     save.glass = !save.glass; Glass.enabled = !!save.glass; persist(); renderSettings(); AudioFX.select();
     if (save.glass) Glass.init();
+  });
+  $('#sw-beat').addEventListener('click', () => {
+    save.beat = !save.beat; persist(); renderSettings(); AudioFX.select();
+    if (SKIN === 'neon' && save.beat) Beat.start(); else Beat.stop();
   });
   $('#btn-reset').addEventListener('click', () => {
     if (!confirm('Erase all progress, stars and achievements?')) return;
