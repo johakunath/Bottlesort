@@ -2062,19 +2062,26 @@ function renderBottle(i, tiltDeg, wob) {
     slot.surf = null;
   }
 
-  /* idle bubbles in the top liquid (skipped mid-pour: bottle is locked) */
+  /* idle bubbles — count/speed vary by top liquid type */
   if (!t && !RM && ellipses.length && !locked.has(i) && cum > 0.5) {
+    const ci = lastSeg ? lastSeg.c : 0;
+    /* density 0=calm(1 bub), 1=medium(2), 2=fizzy(3); speed 0=slow,1=med,2=fast */
+    const DENSITY = [1, 0, 2, 1, 2, 1, 0, 1, 0];
+    const SPEED   = [1, 0, 2, 1, 1, 1, 0, 1, 0];
+    const count = (DENSITY[ci % DENSITY.length] || 0) + 1;
+    const dur = SPEED[ci % SPEED.length] === 2 ? 2.1 : SPEED[ci % SPEED.length] === 0 ? 5.2 : 3.6;
     const surfY = ellipses[ellipses.length - 1].y;
     const depth = low - surfY;
-    for (let b = 0; b < 2; b++) {
-      const c = svgEl('circle', {
-        cx: px - 9 + b * 17 + Math.random() * 3,
+    for (let b = 0; b < count; b++) {
+      const bub = svgEl('circle', {
+        cx: px - 12 + (count > 1 ? (b / (count - 1)) * 24 : 0) + (Math.random() - 0.5) * 6,
         cy: low - 3 - Math.random() * Math.max(4, depth * 0.35),
-        r: 1.4 + Math.random() * 0.9, fill: 'rgba(255,255,255,0.45)'
+        r: 1.3 + Math.random() * 0.9, fill: 'rgba(255,255,255,0.45)'
       });
-      c.setAttribute('class', 'bub');
-      c.style.animationDelay = (-Math.random() * 3.6).toFixed(2) + 's';
-      inner.appendChild(c);
+      bub.setAttribute('class', 'bub');
+      bub.style.animationDuration = (dur + Math.random() * 0.7).toFixed(2) + 's';
+      bub.style.animationDelay = (-Math.random() * dur).toFixed(2) + 's';
+      inner.appendChild(bub);
     }
   }
 
@@ -2241,7 +2248,7 @@ function setupBoard(gen) {
     const btn = document.createElement('button');
     btn.className = 'bottle';
     btn.setAttribute('aria-label', 'Bottle ' + (i + 1));
-    const svg = buildBottleSVG(shapeName, { cork: true });
+    const svg = buildBottleSVG(shapeName, { cork: true, label: true });
     btn.appendChild(svg);
     const cap = document.createElement('span'); cap.className = 'cap';
     const ring = document.createElement('span'); ring.className = 'ring';
@@ -2982,6 +2989,11 @@ function onWin() {
   if (!RM) {
     confetti();
     const fl = $('#flash');
+    fl.style.background = SKIN === 'neon'
+      ? 'radial-gradient(60% 60% at 50% 40%, rgba(255,76,198,0.45), transparent 70%)'
+      : MODE === 'dark'
+        ? 'radial-gradient(60% 60% at 50% 40%, rgba(255,180,90,0.50), transparent 70%)'
+        : 'radial-gradient(60% 60% at 50% 40%, rgba(255,245,224,0.55), transparent 70%)';
     fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
   }
 }
