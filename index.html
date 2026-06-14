@@ -2944,8 +2944,17 @@ function confetti() {
 }
 
 /* ---------------- ambient dust ---------------- */
+let ambientRaf = 0;
+let ambientResize = null;
+
+function clearAmbientCanvas() {
+  const cv = $('#ambient');
+  const ctx = cv && cv.getContext && cv.getContext('2d');
+  if (ctx) ctx.clearRect(0, 0, cv.width, cv.height);
+}
+
 function startAmbient() {
-  if (RM) return;
+  if (RM || ambientRaf || document.hidden || document.body.dataset.screen !== 'menu') return;
   const cv = $('#ambient');
   const ctx = cv.getContext && cv.getContext('2d');
   if (!ctx) return;
@@ -2965,17 +2974,9 @@ function startAmbient() {
     });
   }
   size();
-  window.addEventListener('resize', size);
-  let cleared = false;
-  (function frame(now) {
-    requestAnimationFrame(frame);
-    if (document.hidden) return;
-    /* ambient dust is a menu-only flourish — disabled during gameplay to save battery */
-    if (document.body.dataset.screen === 'game') {
-      if (!cleared) { ctx.clearRect(0, 0, W, H); cleared = true; }
-      return;
-    }
-    cleared = false;
+  ambientResize = size;
+  window.addEventListener('resize', ambientResize);
+  function frame(now) {
     ctx.clearRect(0, 0, W, H);
     for (const p of parts) {
       p.y += p.vy; p.x += p.vx + Math.sin(now / 2400 + p.ph) * 0.05;
@@ -2995,7 +2996,21 @@ function startAmbient() {
         ctx.stroke();
       }
     }
-  })(0);
+    ambientRaf = requestAnimationFrame(frame);
+  }
+  ambientRaf = requestAnimationFrame(frame);
+}
+
+function stopAmbient() {
+  if (ambientRaf) {
+    cancelAnimationFrame(ambientRaf);
+    ambientRaf = 0;
+  }
+  if (ambientResize) {
+    window.removeEventListener('resize', ambientResize);
+    ambientResize = null;
+  }
+  clearAmbientCanvas();
 }
 
 /* ---------------- screens / menu ---------------- */
@@ -3003,6 +3018,8 @@ function showScreen(name) {
   $('#menu').classList.toggle('hidden', name !== 'menu');
   $('#game').classList.toggle('hidden', name !== 'game');
   document.body.dataset.screen = name;
+  if (name === 'menu' && !RM && !document.hidden) startAmbient();
+  else stopAmbient();
   /* push one history entry on entering gameplay so the device/browser Back
      button returns to the menu instead of leaving the page (window.history is
      the browser API; the game's undo stack is the separate `undoHistory`) */
@@ -3010,6 +3027,11 @@ function showScreen(name) {
     window.history.pushState({ screen: 'game' }, '');
   }
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopAmbient();
+  else if (document.body.dataset.screen === 'menu') startAmbient();
+});
 
 /* in-app back: consume the gameplay history entry so the stack stays in sync */
 function exitToMenu() {
@@ -3166,7 +3188,6 @@ function init() {
   renderMenu();
   window.history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling */
   showScreen('menu');
-  startAmbient();
 
   document.querySelectorAll('#diff-seg button').forEach(b =>
     b.addEventListener('click', () => {
@@ -3273,7 +3294,7 @@ window.__vesselPerf = {
   beatEnabled: false,    /* rhythm mode removed */
   bubblesEnabled: false, /* random idle bubbles removed */
   get fluidEnabled() { return !!save.fluid; },
-  get ambientEnabled() { return document.body.dataset.screen !== 'game' && !RM; },
+  get ambientEnabled() { return document.body.dataset.screen === 'menu' && !RM && !document.hidden && !!ambientRaf; },
   get activeAnimations() {
     return (Fluid.running && Fluid.active() && Fluid.hasSims() ? 1 : 0) +   /* liquid surface loop */
            (this.ambientEnabled ? 1 : 0);                /* menu dust loop */
