@@ -1853,17 +1853,19 @@ const SvgRenderer = {
       fx.appendChild(d);
       setTimeout(() => d.remove(), 600);
     }, 120);
-    this.pourFx = { pourSVG, steamEl, rippleEls, dropTimer };
+    if (!this.pourFxMap) this.pourFxMap = new Map();
+    this.pourFxMap.set(si, { pourSVG, steamEl, rippleEls, dropTimer });
   },
   updatePour() {},
-  endPour() {
-    const fx = this.pourFx;
+  endPour(info) {
+    if (!this.pourFxMap) return;
+    const fx = this.pourFxMap.get(info && info.si);
     if (!fx) return;
     if (fx.dropTimer) clearInterval(fx.dropTimer);
     if (fx.pourSVG) fx.pourSVG.remove();
     if (fx.steamEl) fx.steamEl.remove();
     fx.rippleEls.forEach(e => e.remove());
-    this.pourFx = null;
+    this.pourFxMap.delete(info.si);
   },
   renderBottle(i, opts = {}) {
     const tiltDeg = typeof opts === 'number' ? opts : (opts.tiltDeg || 0);
@@ -2081,7 +2083,8 @@ const CanvasRenderer = {
     ctx.restore();
   },
   beginPour(info) {
-    this.pour = Object.assign({ t: 0, particles: [], rippleAge: 0 }, info);
+    if (!this.pourMap) this.pourMap = new Map();
+    this.pourMap.set(info.si, Object.assign({ t: 0, particles: [], rippleAge: 0 }, info));
     if (!RM && this.effectsEnabled()) {
       Fluid.drop(info.di, -1.8);
       Fluid.start();
@@ -2089,12 +2092,13 @@ const CanvasRenderer = {
     this.renderAll();
   },
   updatePour(info = {}) {
-    if (!this.pour) return;
-    Object.assign(this.pour, info);
+    if (!this.pourMap) return;
+    const p = this.pourMap.get(info.si);
+    if (!p) return;
+    Object.assign(p, info);
     const now = performance.now();
-    if (!RM && this.effectsEnabled() && (!this.pour.lastParticle || now - this.pour.lastParticle > 70)) {
-      this.pour.lastParticle = now;
-      const p = this.pour;
+    if (!RM && this.effectsEnabled() && (!p.lastParticle || now - p.lastParticle > 70)) {
+      p.lastParticle = now;
       for (let k = 0; k < 2; k++) p.particles.push({
         x: p.tx + (Math.random() * 14 - 7), y: p.ty,
         vx: Math.random() * 70 - 35, vy: -(35 + Math.random() * 60),
@@ -2103,10 +2107,16 @@ const CanvasRenderer = {
     }
     this.renderAll();
   },
-  endPour() { this.pour = null; this.renderAll(); },
+  endPour(info) {
+    if (this.pourMap) { this.pourMap.delete(info && info.si); }
+    this.renderAll();
+  },
   effectsEnabled() { return this.quality !== 'low' && this.quality !== 'battery'; },
   drawPourEffects(ctx) {
-    const p = this.pour; if (!p) return;
+    if (!this.pourMap || !this.pourMap.size) return;
+    for (const p of this.pourMap.values()) this._drawOnePour(ctx, p);
+  },
+  _drawOnePour(ctx, p) {
     ctx.save();
     const t = Math.max(0, Math.min(1, p.progress == null ? 1 : p.progress));
     const sx = p.sx, sy = p.sy, tx = p.tx, ty = p.ty, cpx = p.cpx, cpy = p.cpy;
@@ -2846,7 +2856,7 @@ async function doPour(si, di) {
   await tween(dur, p => {
     visual[si] = drainSnapshot(snapS, n * p);
     visual[di] = fillSnapshot(snapD, color, n * p);
-    renderer.updatePour({ progress: p, sx, sy, tx, ty, cpx, cpy });
+    renderer.updatePour({ si, progress: p, sx, sy, tx, ty, cpx, cpy });
     renderer.renderBottle(si, A);
     renderer.renderBottle(di, 0);
   });
