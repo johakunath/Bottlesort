@@ -287,9 +287,8 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 
 /* ---------------- Stage ---------------- */
-#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: clamp(12px, 2.4vh, 22px) 8px calc(var(--bw) * 0.22); min-height: 0; overscroll-behavior: contain; touch-action: none; }
-#board-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-#stage .row { z-index: 2; }
+#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: clamp(12px, 2.4vh, 22px) 8px calc(var(--bw) * 0.22); min-height: 0; overscroll-behavior: contain; touch-action: none; isolation: isolate; }
+#board-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 #stage.canvas-active .bottle svg { opacity: 0; }
 .row { display: flex; justify-content: center; align-items: flex-end; gap: clamp(6px, calc(var(--bw) * 0.2), 20px); position: relative; padding: 0 calc(var(--bw) * 0.3); }
 .row::after { /* floating glass shelf */
@@ -1270,7 +1269,7 @@ const PerfMeter = (() => {
   const targetFrameMs = 1000 / targetFps;
   const maxSamples = 180;
   const deltas = [];
-  let lastTs = 0;
+  const lastTsMap = new Map();
   let droppedFrames = 0;
   let renderer = 'idle';
   let overlay = null;
@@ -1324,6 +1323,7 @@ const PerfMeter = (() => {
     mark(frameRenderer, now) {
       const ts = typeof now === 'number' ? now : performance.now();
       renderer = frameRenderer || renderer || 'unknown';
+      const lastTs = lastTsMap.get(renderer) || 0;
       if (lastTs) {
         const delta = ts - lastTs;
         if (delta > 0 && delta < 250) {
@@ -1332,10 +1332,10 @@ const PerfMeter = (() => {
           if (delta > targetFrameMs * 1.5) droppedFrames += Math.max(1, Math.round(delta / targetFrameMs) - 1);
         }
       }
-      lastTs = ts;
+      lastTsMap.set(renderer, ts);
       paintOverlay(api.snapshot());
     },
-    reset() { deltas.length = 0; lastTs = 0; droppedFrames = 0; renderer = 'idle'; paintOverlay(api.snapshot()); },
+    reset() { deltas.length = 0; lastTsMap.clear(); droppedFrames = 0; renderer = 'idle'; paintOverlay(api.snapshot()); },
     enableOverlay(on) {
       overlayEnabled = on !== false;
       if (overlayEnabled) paintOverlay(api.snapshot());
@@ -2551,6 +2551,7 @@ function setSelected(i) {
   sel = i;
   if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start(); }  /* lift sloshes the liquid */
   updateBottleLabels();
+  if (renderer.active === 'canvas2d') renderer.renderAll();
 }
 function shake(i) {
   const el = slots[i].el;
