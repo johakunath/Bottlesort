@@ -1672,139 +1672,179 @@ const Fluid = {
    The liquid group is counter-rotated against the bottle's tilt, so
    bands and surfaces stay horizontal in world space; the interior
    clip (in bottle space) shapes the pool. */
-function renderBottle(i, tiltDeg, wob) {
-  const slot = slots[i];
-  const sh = slot.sh;
-  const segs = visual[i];
-  const g = slot.liquidGroup;
-  while (g.firstChild) g.removeChild(g.firstChild);
-  const t = tiltDeg || 0;
-  const a = t * Math.PI / 180;
-  const px = 50, py = sh.vbH / 2;
-  const inner = svgEl('g', t ? { transform: 'rotate(' + (-t).toFixed(2) + ' ' + px + ' ' + py + ')' } : {});
+const SvgRenderer = {
+  backend: 'svg',
+  renderBottle(i, opts = {}) {
+    const tiltDeg = typeof opts === 'number' ? opts : (opts.tiltDeg || 0);
+    const wob = typeof opts === 'object' ? opts.wob : null;
+    const slot = slots[i];
+    const sh = slot.sh;
+    const segs = visual[i];
+    const g = slot.liquidGroup;
+    while (g.firstChild) g.removeChild(g.firstChild);
+    const t = tiltDeg || 0;
+    const a = t * Math.PI / 180;
+    const px = 50, py = sh.vbH / 2;
+    const inner = svgEl('g', t ? { transform: 'rotate(' + (-t).toFixed(2) + ' ' + px + ' ' + py + ')' } : {});
 
-  /* lowest interior point in world space */
-  let low = sh.B;
-  if (t) {
-    const cs = Math.cos(a), sn = Math.sin(a);
-    low = -1e9;
-    const [xl, xr, yt, yb] = sh.box;
-    [[xl, yt], [xr, yt], [xl, yb], [xr, yb]].forEach(([x, y]) => {
-      const wy = py + sn * (x - px) + cs * (y - py);
-      if (wy > low) low = wy;
-    });
-    low -= 2;
-  }
-  const hUnit = sh.unit * (0.55 + 0.45 * Math.cos(a));
-  const fade = Math.max(0, 1 - Math.abs(t) / 32);
-
-  const shapeName = shapesByBottle[i];
-  const WAVECUT = Fluid.AMP + Fluid.MENISCUS + 1;
-  const waveMode = !t && Fluid.active() && !locked.has(i);
-  const lastSeg = segs.length ? segs[segs.length - 1] : null;
-  let topWave = null;
-
-  let cum = 0;
-  const ellipses = [];
-  for (const seg of segs) {
-    if (seg.u <= 0.01) continue;
-    let y, h;
-    if (!t && sh.volToY) {
-      const yBot = sh.volToY(cum / 4);
-      const yTop = sh.volToY((cum + seg.u) / 4);
-      y = yTop; h = yBot - yTop;
-    } else {
-      h = seg.u * hUnit;
-      y = low - (cum + seg.u) * hUnit;
-    }
-    let rectY = y, rectH = h;
-    /* the top band's flat lid becomes the animated wave surface */
-    if (seg === lastSeg && waveMode && h > WAVECUT + 6) {
-      rectY = y + WAVECUT; rectH = h - WAVECUT;
-      topWave = { surfY: y, bottomY: rectY, c: seg.c };
-    }
-    inner.appendChild(svgEl('rect', { x: -160, y: rectY, width: 420, height: rectH + 1.4, fill: 'url(#liq' + seg.c + ')' }));
-    if (!t && ELEMENT_MAP[seg.c]) appendElemOverlay(inner, ELEMENT_MAP[seg.c], y, h, px);
-    if (save.symbols && fade > 0.3 && seg.u >= 0.8) {
-      const gl = svgEl('text', {
-        x: px, y: y + h / 2 + 5, 'text-anchor': 'middle',
-        'font-size': 13, fill: 'rgba(255,255,255,0.85)', opacity: fade,
-        style: 'paint-order:stroke; stroke:rgba(0,0,0,0.25); stroke-width:2px;'
+    /* lowest interior point in world space */
+    let low = sh.B;
+    if (t) {
+      const cs = Math.cos(a), sn = Math.sin(a);
+      low = -1e9;
+      const [xl, xr, yt, yb] = sh.box;
+      [[xl, yt], [xr, yt], [xl, yb], [xr, yb]].forEach(([x, y]) => {
+        const wy = py + sn * (x - px) + cs * (y - py);
+        if (wy > low) low = wy;
       });
-      gl.textContent = COLOR_GLYPHS[seg.c];
-      inner.appendChild(gl);
+      low -= 2;
     }
-    if (fade > 0.04) ellipses.push({ y, c: seg.c });
-    cum += seg.u;
-  }
-  /* Fake-3D meniscus cue: a single concave-arc highlight on the topmost visible
-     liquid when fluid animation is off. Walls rise, centre dips — matching the
-     settled shape of Fluid.crestFor() so the static and animated states look
-     identical. No dark lines; no per-band cost.
-     Uses shapeWidthAt (same as the fluid code) so the arc never exceeds the
-     interior clip — fixes flask neck / nearly-full bottle cases. */
-  if (ellipses.length && !topWave) {
-    const e = ellipses[ellipses.length - 1];
-    const wdy = wob ? wob.dy : 0;
-    const halfW = Math.max(5, shapeWidthAt(shapeName, e.y) / 2);
-    const MEN = Fluid.MENISCUS;
-    const sy = e.y + wdy + 0.4;          /* +0.4 matches crestFor baseline offset */
-    inner.appendChild(svgEl('path', {
-      d: `M${(px - halfW).toFixed(1)},${(sy - MEN).toFixed(2)} Q${px},${(sy + MEN).toFixed(2)} ${(px + halfW).toFixed(1)},${(sy - MEN).toFixed(2)}`,
-      fill: 'none',
-      stroke: 'rgba(255,255,255,0.7)', 'stroke-width': 2,
-      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-      opacity: fade
-    }));
-  }
+    const hUnit = sh.unit * (0.55 + 0.45 * Math.cos(a));
+    const fade = Math.max(0, 1 - Math.abs(t) / 32);
 
-  /* animated wave surface for the top band */
-  if (topWave) {
-    const halfW = Math.max(5, shapeWidthAt(shapeName, topWave.surfY) / 2);
-    const path = svgEl('path', { fill: 'url(#liq' + topWave.c + ')', d: Fluid.pathFor(i, topWave.surfY, halfW, topWave.bottomY) });
-    inner.appendChild(path);
-    const crest = svgEl('path', { d: Fluid.crestFor(i, topWave.surfY, halfW), fill: 'none',
-      stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
-    inner.appendChild(crest);
-    slot.surf = { path, crest, surfY: topWave.surfY, halfW, bottomY: topWave.bottomY };
-    Fluid.start();
-  } else {
-    slot.surf = null;
-  }
+    const shapeName = shapesByBottle[i];
+    const WAVECUT = Fluid.AMP + Fluid.MENISCUS + 1;
+    const waveMode = !t && Fluid.active() && !locked.has(i);
+    const lastSeg = segs.length ? segs[segs.length - 1] : null;
+    let topWave = null;
 
-  /* mystery overlay: unit bands counted from the bottom */
-  const hid = hiddenDepth[i] || 0;
-  for (let u = 0; u < hid && u < cum; u++) {
-    let hy, hh;
-    if (!t && sh.volToY) {
-      const hBot = sh.volToY(u / 4);
-      const hTop = sh.volToY((u + 1) / 4);
-      hy = hTop; hh = hBot - hTop;
+    let cum = 0;
+    const ellipses = [];
+    for (const seg of segs) {
+      if (seg.u <= 0.01) continue;
+      let y, h;
+      if (!t && sh.volToY) {
+        const yBot = sh.volToY(cum / 4);
+        const yTop = sh.volToY((cum + seg.u) / 4);
+        y = yTop; h = yBot - yTop;
+      } else {
+        h = seg.u * hUnit;
+        y = low - (cum + seg.u) * hUnit;
+      }
+      let rectY = y, rectH = h;
+      /* the top band's flat lid becomes the animated wave surface */
+      if (seg === lastSeg && waveMode && h > WAVECUT + 6) {
+        rectY = y + WAVECUT; rectH = h - WAVECUT;
+        topWave = { surfY: y, bottomY: rectY, c: seg.c };
+      }
+      inner.appendChild(svgEl('rect', { x: -160, y: rectY, width: 420, height: rectH + 1.4, fill: 'url(#liq' + seg.c + ')' }));
+      if (!t && ELEMENT_MAP[seg.c]) appendElemOverlay(inner, ELEMENT_MAP[seg.c], y, h, px);
+      if (save.symbols && fade > 0.3 && seg.u >= 0.8) {
+        const gl = svgEl('text', {
+          x: px, y: y + h / 2 + 5, 'text-anchor': 'middle',
+          'font-size': 13, fill: 'rgba(255,255,255,0.85)', opacity: fade,
+          style: 'paint-order:stroke; stroke:rgba(0,0,0,0.25); stroke-width:2px;'
+        });
+        gl.textContent = COLOR_GLYPHS[seg.c];
+        inner.appendChild(gl);
+      }
+      if (fade > 0.04) ellipses.push({ y, c: seg.c });
+      cum += seg.u;
+    }
+    /* Fake-3D meniscus cue: a single concave-arc highlight on the topmost visible
+       liquid when fluid animation is off. Walls rise, centre dips — matching the
+       settled shape of Fluid.crestFor() so the static and animated states look
+       identical. No dark lines; no per-band cost.
+       Uses shapeWidthAt (same as the fluid code) so the arc never exceeds the
+       interior clip — fixes flask neck / nearly-full bottle cases. */
+    if (ellipses.length && !topWave) {
+      const e = ellipses[ellipses.length - 1];
+      const wdy = wob ? wob.dy : 0;
+      const halfW = Math.max(5, shapeWidthAt(shapeName, e.y) / 2);
+      const MEN = Fluid.MENISCUS;
+      const sy = e.y + wdy + 0.4;          /* +0.4 matches crestFor baseline offset */
+      inner.appendChild(svgEl('path', {
+        d: `M${(px - halfW).toFixed(1)},${(sy - MEN).toFixed(2)} Q${px},${(sy + MEN).toFixed(2)} ${(px + halfW).toFixed(1)},${(sy - MEN).toFixed(2)}`,
+        fill: 'none',
+        stroke: 'rgba(255,255,255,0.7)', 'stroke-width': 2,
+        'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+        opacity: fade
+      }));
+    }
+
+    /* animated wave surface for the top band */
+    if (topWave) {
+      const halfW = Math.max(5, shapeWidthAt(shapeName, topWave.surfY) / 2);
+      const path = svgEl('path', { fill: 'url(#liq' + topWave.c + ')', d: Fluid.pathFor(i, topWave.surfY, halfW, topWave.bottomY) });
+      inner.appendChild(path);
+      const crest = svgEl('path', { d: Fluid.crestFor(i, topWave.surfY, halfW), fill: 'none',
+        stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+      inner.appendChild(crest);
+      slot.surf = { path, crest, surfY: topWave.surfY, halfW, bottomY: topWave.bottomY };
+      Fluid.start();
     } else {
-      hh = hUnit;
-      hy = low - (u + 1) * hUnit;
+      slot.surf = null;
     }
-    inner.appendChild(svgEl('rect', { x: -160, y: hy, width: 420, height: hh + 1.2, fill: 'url(#liqH)' }));
-    if (fade > 0.3) {
-      const txt = svgEl('text', {
-        x: px, y: hy + hh / 2 + 5.5, 'text-anchor': 'middle',
-        'font-size': 15, 'font-weight': 700, fill: '#cdd5f2', opacity: 0.85 * fade
-      });
-      txt.textContent = '?';
-      txt.setAttribute('font-family', "system-ui, sans-serif");
-      inner.appendChild(txt);
-    }
-  }
 
-  g.appendChild(inner);
-  const top = segs.length && cum > 0.01 ? segs[segs.length - 1] : null;
-  const glowColor = top ? (hid >= cum ? HIDDEN_FILL[1] : COLORS[top.c][1]) : null;
-  /* subtle CSS-only per-bottle glow (WebGL bloom removed) — a touch stronger on Neon */
-  const ga = SKIN === 'neon' ? '66' : '33';
-  slot.glow.style.background = glowColor
-    ? 'radial-gradient(50% 60% at 50% 50%, ' + glowColor + ga + ', transparent 70%)'
-    : 'none';
-}
+    /* mystery overlay: unit bands counted from the bottom */
+    const hid = hiddenDepth[i] || 0;
+    for (let u = 0; u < hid && u < cum; u++) {
+      let hy, hh;
+      if (!t && sh.volToY) {
+        const hBot = sh.volToY(u / 4);
+        const hTop = sh.volToY((u + 1) / 4);
+        hy = hTop; hh = hBot - hTop;
+      } else {
+        hh = hUnit;
+        hy = low - (u + 1) * hUnit;
+      }
+      inner.appendChild(svgEl('rect', { x: -160, y: hy, width: 420, height: hh + 1.2, fill: 'url(#liqH)' }));
+      if (fade > 0.3) {
+        const txt = svgEl('text', {
+          x: px, y: hy + hh / 2 + 5.5, 'text-anchor': 'middle',
+          'font-size': 15, 'font-weight': 700, fill: '#cdd5f2', opacity: 0.85 * fade
+        });
+        txt.textContent = '?';
+        txt.setAttribute('font-family', "system-ui, sans-serif");
+        inner.appendChild(txt);
+      }
+    }
+
+    g.appendChild(inner);
+    const top = segs.length && cum > 0.01 ? segs[segs.length - 1] : null;
+    const glowColor = top ? (hid >= cum ? HIDDEN_FILL[1] : COLORS[top.c][1]) : null;
+    /* subtle CSS-only per-bottle glow (WebGL bloom removed) — a touch stronger on Neon */
+    const ga = SKIN === 'neon' ? '66' : '33';
+    slot.glow.style.background = glowColor
+      ? 'radial-gradient(50% 60% at 50% 50%, ' + glowColor + ga + ', transparent 70%)'
+      : 'none';
+  }
+};
+
+const renderer = {
+  active: 'svg',
+  backend: SvgRenderer,
+  quality: 'auto',
+  setBoard(nextSlots) {
+    if (nextSlots) slots = nextSlots;
+    return this;
+  },
+  syncLayout() {
+    layoutStage();
+    return this;
+  },
+  renderBottle(i, opts = {}, wob = null) {
+    const renderOpts = typeof opts === 'number' ? { tiltDeg: opts, wob } : opts;
+    return this.backend.renderBottle(i, renderOpts);
+  },
+  renderAll() {
+    state.forEach((b, i) => this.renderBottle(i, { tiltDeg: 0 }));
+    return this;
+  },
+  setTheme() {
+    if (state.length && slots.length) this.renderAll();
+    return this;
+  },
+  setQuality(q) {
+    this.quality = q || 'auto';
+    if (window.__vesselPerf) window.__vesselPerf.rendererQuality = this.quality;
+    return this;
+  },
+  destroy() {
+    slots.forEach(slot => { if (slot) slot.surf = null; });
+    return this;
+  }
+};
 
 function revealMystery(i) {
   const maxHid = Math.max(0, state[i].length - 1);
@@ -1818,7 +1858,7 @@ function revealMystery(i) {
 function syncCaps() {
   state.forEach((b, i) => {
     const capped = window.isBottleComplete(b);
-    if (capped && hiddenDepth[i]) { hiddenDepth[i] = 0; renderBottle(i, 0); }
+    if (capped && hiddenDepth[i]) { hiddenDepth[i] = 0; renderer.renderBottle(i, 0); }
     const has = slots[i].el.classList.contains('capped');
     if (capped && !has) slots[i].el.classList.add('capped');
     else if (!capped && has) slots[i].el.classList.remove('capped');
@@ -1871,7 +1911,7 @@ function restoreBoardSnapshot(snap) {
   visual = state.map(mergeRuns);
 
   state.forEach((b, i) => rebuildSlotSpecialClasses(i));
-  state.forEach((b, i) => renderBottle(i, 0));
+  renderer.renderAll();
   syncCaps();
   orbUpdate(false);
   updateHUD();
@@ -2073,8 +2113,9 @@ function setupBoard(gen) {
   });
   showScreen('game');
   focusedBottle = Math.min(focusedBottle, Math.max(0, slots.length - 1));
-  layoutStage();
-  state.forEach((b, i) => renderBottle(i, 0));
+  renderer.setBoard(slots);
+  renderer.syncLayout();
+  renderer.renderAll();
   syncCaps();
   applyBottleFocus(focusedBottle, true);
   orbUpdate(false);
@@ -2255,7 +2296,7 @@ function unveil(i) {
   if (seal) { seal.classList.add('off'); setTimeout(() => seal.remove(), 500); }
   if (!RM) spawnSparkles(slot.el, 7, 0.45);
   AudioFX.reveal(); buzz(10);
-  renderBottle(i, 0);
+  renderer.renderBottle(i, 0);
   updateBottleLabels();
 }
 
@@ -2362,10 +2403,10 @@ async function doPour(si, di) {
     const ang = A * p;
     const arc = -Math.sin(p * Math.PI) * lift;
     bottleEl.style.transform = 'translate(' + (dxF * p).toFixed(1) + 'px,' + (dyF * p + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
-    renderBottle(si, ang);
+    renderer.renderBottle(si, ang);
   });
   bottleEl.style.transform = 'translate(' + dxF.toFixed(1) + 'px,' + dyF.toFixed(1) + 'px) rotate(' + A.toFixed(2) + 'deg)';
-  renderBottle(si, A);
+  renderer.renderBottle(si, A);
 
   /* phase 2: arc stream + drain */
   const dur = RM ? 40 : 300 + 170 * n;
@@ -2454,8 +2495,8 @@ async function doPour(si, di) {
   await tween(dur, p => {
     visual[si] = drainSnapshot(snapS, n * p);
     visual[di] = fillSnapshot(snapD, color, n * p);
-    renderBottle(si, A);
-    renderBottle(di, 0);
+    renderer.renderBottle(si, A);
+    renderer.renderBottle(di, 0);
   });
   if (dropTimer) clearInterval(dropTimer);
   pourSVG.remove();
@@ -2469,7 +2510,7 @@ async function doPour(si, di) {
     const ang = A * q;
     const arc = -Math.sin(p * Math.PI) * lift * 0.5;
     bottleEl.style.transform = 'translate(' + (dxF * q).toFixed(1) + 'px,' + (dyF * q + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
-    renderBottle(si, ang);
+    renderer.renderBottle(si, ang);
   });
   bottleEl.style.transform = '';
   bottleEl.style.transition = '';
@@ -2478,11 +2519,11 @@ async function doPour(si, di) {
   visual[si] = mergeRuns(state[si]);
   visual[di] = mergeRuns(state[di]);
   revealMystery(si);
-  renderBottle(si, 0); renderBottle(di, 0);
+  renderer.renderBottle(si, 0); renderer.renderBottle(di, 0);
 
   if (window.isBottleComplete(state[di])) {
     /* a complete bottle holds no secrets — reveal any hidden bands under the cap */
-    if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderBottle(di, 0); AudioFX.reveal(); }
+    if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderer.renderBottle(di, 0); AudioFX.reveal(); }
     slots[di].el.classList.add('capped');
     if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
     AudioFX.cap(); buzz([15, 40, 25]);
@@ -2495,7 +2536,7 @@ async function doPour(si, di) {
   sloshBottle(si, 0.5);
   updateHUD();
   updateBottleLabels();
-  if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
+  if (pendingLayout && activePours === 0) { pendingLayout = false; renderer.syncLayout(); }
   if (activePours === 0 && window.isSolved(state)) {
     await wait(RM ? 100 : 550);
     onWin();
@@ -2521,7 +2562,7 @@ function anyUsefulMove() {
 function sloshBottle(i, amp) {
   if (!slots[i]) return;
   if (Fluid.active()) {            /* the height-field sim settles it for real */
-    if (!locked.has(i)) renderBottle(i, 0);   /* register the (now upright) wave surface */
+    if (!locked.has(i)) renderer.renderBottle(i, 0);   /* register the (now upright) wave surface */
     Fluid.drop(i, -(amp || 1) * 3.2);
     Fluid.start();
     return;
@@ -2533,7 +2574,7 @@ function sloshBottle(i, amp) {
     if (!slots[i] || locked.has(i)) return; /* a new pour owns this bottle now */
     const decay = (1 - p) * a0;
     const t = (performance.now() - t0) / 1000;
-    renderBottle(i, 0, decay > 0.02
+    renderer.renderBottle(i, 0, decay > 0.02
       ? { dy: Math.sin(t * 19) * 2.4 * decay, rot: Math.sin(t * 19 + 1.3) * 4.5 * decay }
       : null);
   });
@@ -2794,7 +2835,7 @@ function refreshBottles() {
   if (hb && hb.children.length) { hb.innerHTML = ''; buildHeroBottles(); }
   if (typeof state !== 'undefined' && state.length && slots && slots.length
       && !$('#game').classList.contains('hidden')) {
-    state.forEach((b, i) => renderBottle(i, 0));
+    renderer.setTheme();
   }
 }
 
@@ -3312,11 +3353,11 @@ function init() {
   $('#sw-haptics').addEventListener('click', () => { save.haptics = !save.haptics; persist(); renderSettings(); buzz(15); });
   $('#sw-symbols').addEventListener('click', () => {
     save.symbols = !save.symbols; persist(); renderSettings(); AudioFX.select();
-    if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
+    if (state.length && slots.length) renderer.renderAll();
   });
   $('#sw-fluid').addEventListener('click', () => {
     save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; persist(); renderSettings(); AudioFX.select();
-    if (state.length && slots.length) state.forEach((b, i) => renderBottle(i, 0));
+    if (state.length && slots.length) renderer.renderAll();
   });
   $('#sw-dark').addEventListener('click', () => { toggleMode(); renderSettings(); });
   $('#btn-reset').addEventListener('click', () => {
@@ -3330,7 +3371,7 @@ function init() {
   });
 
   let rT;
-  const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (activePours === 0) layoutStage(); else pendingLayout = true; }, 120); };
+  const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (activePours === 0) renderer.syncLayout(); else pendingLayout = true; }, 120); };
   window.addEventListener('resize', relayout);
   window.addEventListener('orientationchange', relayout);
   $('#game').addEventListener('keydown', handleGameKey);
@@ -3358,6 +3399,8 @@ window.__vessel = {
   get orbFrac() { return orbFrac; }
 };
 
+window.__vesselRenderer = renderer;
+
 /* tiny QA surface — one low-power profile, mobile-first (no profiler) */
 window.__vesselPerf = {
   selectedCelebrationQuality: null,
@@ -3367,6 +3410,8 @@ window.__vesselPerf = {
   glassEnabled: false,   /* WebGL glass reflections removed */
   beatEnabled: false,    /* rhythm mode removed */
   bubblesEnabled: false, /* random idle bubbles removed */
+  get activeRenderer() { return renderer.active; },
+  get rendererBackend() { return renderer.active; },
   get fluidEnabled() { return !!save.fluid; },
   get ambientEnabled() { return document.body.dataset.screen === 'menu' && !RM && !document.hidden && !!ambientRaf; },
   get activeAnimations() {
