@@ -1751,13 +1751,17 @@ const Fluid = {
       /* sub-step for stability */
       const sub = 2; dt /= sub;
       for (let s = 0; s < sub; s++) this.step(dt);
-      /* paint: rewrite each registered surface path + crest highlight */
-      for (let i = 0; i < slots.length; i++) {
-        const sl = slots[i]; if (!sl || !sl.surf) continue;
-        const m = sl.surf;
-        const d = this.pathFor(i, m.surfY, m.halfW, m.bottomY);
-        m.path.setAttribute('d', d);
-        if (m.crest) m.crest.setAttribute('d', this.crestFor(i, m.surfY, m.halfW));
+      /* paint: SVG rewrites surface paths; Canvas reads samples during render. */
+      if (isCanvasMode()) {
+        renderer.renderAll();
+      } else {
+        for (let i = 0; i < slots.length; i++) {
+          const sl = slots[i]; if (!sl || !sl.surf) continue;
+          const m = sl.surf;
+          const d = this.pathFor(i, m.surfY, m.halfW, m.bottomY);
+          m.path.setAttribute('d', d);
+          if (m.crest) m.crest.setAttribute('d', this.crestFor(i, m.surfY, m.halfW));
+        }
       }
       if (!this.hasSims()) { this.running = false; return; }
       requestAnimationFrame(loop);
@@ -1785,6 +1789,82 @@ const Fluid = {
    clip (in bottle space) shapes the pool. */
 const SvgRenderer = {
   backend: 'svg',
+  beginPour(info) {
+    const fx = $('#fx');
+    const { si, c0, c1, sx, sy, tx, ty, cpx, cpy, side, receiverW } = info;
+    const arcD = `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)}`;
+    const pourSVG = document.createElementNS(NS, 'svg');
+    pourSVG.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:71';
+    const gid = 'ps_' + si;
+    const pdefs = document.createElementNS(NS, 'defs');
+    const pgrad = document.createElementNS(NS, 'linearGradient');
+    pgrad.setAttribute('id', gid); pgrad.setAttribute('gradientUnits', 'userSpaceOnUse');
+    pgrad.setAttribute('x1', sx); pgrad.setAttribute('y1', sy);
+    pgrad.setAttribute('x2', tx); pgrad.setAttribute('y2', ty);
+    [[0, c0], [1, c1]].forEach(([off, col]) => {
+      const stop = document.createElementNS(NS, 'stop');
+      stop.setAttribute('offset', off); stop.setAttribute('stop-color', col);
+      pgrad.appendChild(stop);
+    });
+    pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
+    const mkPath = (stroke, width, opacity, blur) => {
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', arcD); path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', stroke); path.setAttribute('stroke-width', width);
+      path.setAttribute('stroke-linecap', 'round');
+      if (opacity !== undefined) path.setAttribute('opacity', opacity);
+      if (blur) path.style.filter = 'blur(' + blur + 'px)';
+      return path;
+    };
+    pourSVG.appendChild(mkPath(c0, 9, 0.28, 3));
+    pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));
+    pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6));
+    fx.appendChild(pourSVG);
+    let steamEl = null;
+    if (!RM && SKIN === 'apothecary') {
+      steamEl = document.createElement('div');
+      steamEl.className = 'steam-wisp';
+      steamEl.style.left = (sx - 7 + side * 6) + 'px';
+      steamEl.style.top = (sy - 30) + 'px';
+      fx.appendChild(steamEl);
+    }
+    const rippleEls = [];
+    if (!RM) {
+      for (let r = 0; r < 2; r++) {
+        const rip = document.createElement('div');
+        rip.className = 'pour-ripple';
+        rip.style.cssText = `width:${receiverW * 0.48}px;height:${receiverW * 0.15}px;border-color:${c0};` +
+          `left:${tx}px;top:${ty}px;animation-delay:${r * 0.24}s`;
+        fx.appendChild(rip);
+        rippleEls.push(rip);
+      }
+      Fluid.drop(info.di, -1.8);
+      Fluid.start();
+    }
+    const dropTimer = RM ? null : setInterval(() => {
+      const d = document.createElement('span');
+      d.className = 'droplet';
+      d.style.background = c0;
+      d.style.boxShadow = '0 0 6px ' + c0 + '88';
+      d.style.left = (tx + (Math.random() * 14 - 7)).toFixed(1) + 'px';
+      d.style.top = ty.toFixed(1) + 'px';
+      d.style.setProperty('--dx', (Math.random() * 44 - 22).toFixed(0) + 'px');
+      d.style.setProperty('--dy', (-(10 + Math.random() * 30)).toFixed(0) + 'px');
+      fx.appendChild(d);
+      setTimeout(() => d.remove(), 600);
+    }, 120);
+    this.pourFx = { pourSVG, steamEl, rippleEls, dropTimer };
+  },
+  updatePour() {},
+  endPour() {
+    const fx = this.pourFx;
+    if (!fx) return;
+    if (fx.dropTimer) clearInterval(fx.dropTimer);
+    if (fx.pourSVG) fx.pourSVG.remove();
+    if (fx.steamEl) fx.steamEl.remove();
+    fx.rippleEls.forEach(e => e.remove());
+    this.pourFx = null;
+  },
   renderBottle(i, opts = {}) {
     const tiltDeg = typeof opts === 'number' ? opts : (opts.tiltDeg || 0);
     const wob = typeof opts === 'object' ? opts.wob : null;
@@ -1966,6 +2046,7 @@ const CanvasRenderer = {
     if (this.rects.length !== slots.length) this.syncLayout();
     this.clear();
     state.forEach((b, i) => this.drawBottle(i));
+    this.drawPourEffects(this.ctx);
   },
   setTheme() { this.renderAll(); return this; },
   setQuality(q) { this.quality = q || 'auto'; return this; },
@@ -1999,6 +2080,58 @@ const CanvasRenderer = {
     }
     ctx.restore();
   },
+  beginPour(info) {
+    this.pour = Object.assign({ t: 0, particles: [], rippleAge: 0 }, info);
+    if (!RM && this.effectsEnabled()) {
+      Fluid.drop(info.di, -1.8);
+      Fluid.start();
+    }
+    this.renderAll();
+  },
+  updatePour(info = {}) {
+    if (!this.pour) return;
+    Object.assign(this.pour, info);
+    const now = performance.now();
+    if (!RM && this.effectsEnabled() && (!this.pour.lastParticle || now - this.pour.lastParticle > 70)) {
+      this.pour.lastParticle = now;
+      const p = this.pour;
+      for (let k = 0; k < 2; k++) p.particles.push({
+        x: p.tx + (Math.random() * 14 - 7), y: p.ty,
+        vx: Math.random() * 70 - 35, vy: -(35 + Math.random() * 60),
+        age: 0, life: 0.52 + Math.random() * 0.18, r: 2 + Math.random() * 2
+      });
+    }
+    this.renderAll();
+  },
+  endPour() { this.pour = null; this.renderAll(); },
+  effectsEnabled() { return this.quality !== 'low' && this.quality !== 'battery'; },
+  drawPourEffects(ctx) {
+    const p = this.pour; if (!p) return;
+    ctx.save();
+    const t = Math.max(0, Math.min(1, p.progress == null ? 1 : p.progress));
+    const sx = p.sx, sy = p.sy, tx = p.tx, ty = p.ty, cpx = p.cpx, cpy = p.cpy;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const grad = ctx.createLinearGradient(sx, sy, tx, ty); grad.addColorStop(0, p.c0); grad.addColorStop(1, p.c1);
+    const drawArc = (w, stroke, alpha, blur) => {
+      ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = stroke; ctx.lineWidth = w; if (blur) ctx.filter = 'blur(' + blur + 'px)';
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(cpx, cpy, sx + (tx - sx) * t, sy + (ty - sy) * t); ctx.stroke(); ctx.restore();
+    };
+    drawArc(9, p.c0, 0.28, 3); drawArc(5, grad, 1, 0); drawArc(1.6, 'rgba(255,255,255,0.42)', 1, 0);
+    if (!RM && this.effectsEnabled()) {
+      const age = ((performance.now() - (p.started || performance.now())) / 1000);
+      for (let r = 0; r < 2; r++) {
+        const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
+        ctx.globalAlpha = (1 - u) * 0.65; ctx.strokeStyle = p.c0; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(tx, ty, p.receiverW * (0.12 + u * 0.45), p.receiverW * (0.04 + u * 0.12), 0, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (SKIN === 'apothecary') {
+        ctx.globalAlpha = 0.35; ctx.strokeStyle = 'rgba(240,245,255,0.75)'; ctx.lineWidth = 2;
+        for (let k = 0; k < 2; k++) { const u = (age * 0.8 + k * 0.45) % 1; ctx.beginPath(); ctx.moveTo(sx + p.side * 6, sy - 12 - u * 28); ctx.bezierCurveTo(sx + 10, sy - 20 - u * 30, sx - 8, sy - 26 - u * 36, sx + 6, sy - 38 - u * 40); ctx.stroke(); }
+      }
+      const dt = 1 / 60; p.particles = (p.particles || []).filter(d => { d.age += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vy += 190 * dt; const a = 1 - d.age / d.life; if (a <= 0) return false; ctx.globalAlpha = a; ctx.fillStyle = p.c0; ctx.shadowColor = p.c0 + '88'; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); return true; });
+    }
+    ctx.restore();
+  },
   drawBottle(i) {
     const r = this.rects[i], slot = slots[i];
     if (!r || !slot) return;
@@ -2025,7 +2158,21 @@ const CanvasRenderer = {
       const yBot = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
       const yTop = sh.volToY ? sh.volToY((cum + seg.u) / 4) : sh.B - (cum + seg.u) * sh.unit;
       const h = yBot - yTop;
-      ctx.fillStyle = this.liquidGradient(ctx, seg.c); ctx.fillRect(-160, yTop, 420, h + 1.2);
+      const isTop = seg === segs[segs.length - 1] && !rot && Fluid.active() && !locked.has(i) && h > Fluid.AMP + Fluid.MENISCUS + 7;
+      ctx.fillStyle = this.liquidGradient(ctx, seg.c);
+      if (isTop) {
+        const halfW = Math.max(5, shapeWidthAt(shapeName, yTop) / 2);
+        const sample = Fluid.sample(i);
+        const n = Fluid.N, left = 50 - halfW, span = 2 * halfW;
+        ctx.beginPath(); ctx.moveTo(-160, yBot + 1.2); ctx.lineTo(-160, yTop);
+        for (let k = 0; k < n; k++) {
+          const x = left + (k / (n - 1)) * span;
+          const edge = Math.abs((k / (n - 1)) * 2 - 1);
+          const y = yTop + (sample ? sample.h[k] : 0) - Fluid.MENISCUS * Math.pow(edge, 2.2);
+          ctx.lineTo(x, y);
+        }
+        ctx.lineTo(260, yTop); ctx.lineTo(260, yBot + 1.2); ctx.closePath(); ctx.fill();
+      } else ctx.fillRect(-160, yTop, 420, h + 1.2);
       if (ELEMENT_MAP[seg.c]) this.drawElement(ctx, ELEMENT_MAP[seg.c], yTop, h);
       if (save.symbols && seg.u >= 0.8) { ctx.fillStyle = 'rgba(255,255,255,0.86)'; ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.strokeText(COLOR_GLYPHS[seg.c], 50, yTop + h / 2); ctx.fillText(COLOR_GLYPHS[seg.c], 50, yTop + h / 2); }
       cum += seg.u;
@@ -2090,19 +2237,16 @@ const renderer = {
   },
   renderBottle(i, opts = {}, wob = null) {
     const renderOpts = typeof opts === 'number' ? { tiltDeg: opts, wob } : opts;
-    const out = this.backend.renderBottle(i, renderOpts);
-    if (this.active === 'canvas2d') SvgRenderer.renderBottle(i, renderOpts);
-    return out;
+    return this.backend.renderBottle(i, renderOpts);
   },
   renderAll() {
-    if (this.active === 'canvas2d') {
-      this.backend.renderAll();
-      state.forEach((b, i) => SvgRenderer.renderBottle(i, { tiltDeg: 0 }));
-    } else {
-      state.forEach((b, i) => this.renderBottle(i, { tiltDeg: 0 }));
-    }
+    if (this.active === 'canvas2d') this.backend.renderAll();
+    else state.forEach((b, i) => this.renderBottle(i, { tiltDeg: 0 }));
     return this;
   },
+  beginPour(info) { if (this.backend.beginPour) this.backend.beginPour(info); return this; },
+  updatePour(info) { if (this.backend.updatePour) this.backend.updatePour(info); return this; },
+  endPour(info) { if (this.backend.endPour) this.backend.endPour(info); return this; },
   setTheme() {
     if (state.length && slots.length) this.renderAll();
     return this;
@@ -2686,81 +2830,14 @@ async function doPour(si, di) {
   const dur = RM ? 40 : 300 + 170 * n;
   const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
   const surfaceY = dRect.top + ((shD.B - dstUnits0 * shD.unit) / shD.vbH) * bhD;
-  const fx = $('#fx');
   const c0 = COLORS[color][0], c1 = COLORS[color][1];
 
-  /* SVG quadratic-bezier arc stream (gravity arc from lip to receiver) */
+  /* Gravity arc metadata for the active renderer. */
   const sx = Q.x - stageRect.left, sy = Q.y - stageRect.top;
   const tx = Pm.x - stageRect.left, ty = surfaceY - stageRect.top;
   const cpx = sx + (tx - sx) * 0.35 + side * 8;
   const cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
-  const arcD = `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)}`;
-  const pourSVG = document.createElementNS(NS, 'svg');
-  pourSVG.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:71';
-  const gid = 'ps_' + si;
-  const pdefs = document.createElementNS(NS, 'defs');
-  const pgrad = document.createElementNS(NS, 'linearGradient');
-  pgrad.setAttribute('id', gid); pgrad.setAttribute('gradientUnits', 'userSpaceOnUse');
-  pgrad.setAttribute('x1', sx); pgrad.setAttribute('y1', sy);
-  pgrad.setAttribute('x2', tx); pgrad.setAttribute('y2', ty);
-  [[0, c0], [1, c1]].forEach(([off, col]) => {
-    const s = document.createElementNS(NS, 'stop');
-    s.setAttribute('offset', off); s.setAttribute('stop-color', col);
-    pgrad.appendChild(s);
-  });
-  pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
-  const mkPath = (stroke, width, opacity, blur) => {
-    const p = document.createElementNS(NS, 'path');
-    p.setAttribute('d', arcD); p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', width);
-    p.setAttribute('stroke-linecap', 'round');
-    if (opacity !== undefined) p.setAttribute('opacity', opacity);
-    if (blur) p.style.filter = 'blur(' + blur + 'px)';
-    return p;
-  };
-  pourSVG.appendChild(mkPath(c0, 9, 0.28, 3));              /* soft glow halo */
-  pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));      /* coloured core */
-  pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6)); /* highlight streak */
-  fx.appendChild(pourSVG);
-
-  /* steam wisp above the open mouth (Apothecary) */
-  let steamEl = null;
-  if (!RM && SKIN === 'apothecary') {
-    steamEl = document.createElement('div');
-    steamEl.className = 'steam-wisp';
-    steamEl.style.left = (Q.x - stageRect.left - 7 + side * 6) + 'px';
-    steamEl.style.top = (Q.y - stageRect.top - 30) + 'px';
-    fx.appendChild(steamEl);
-  }
-
-  /* landing ripple rings on receiver surface */
-  const rippleEls = [];
-  if (!RM) {
-    for (let r = 0; r < 2; r++) {
-      const rip = document.createElement('div');
-      rip.className = 'pour-ripple';
-      rip.style.cssText = `width:${bwD * 0.48}px;height:${bwD * 0.15}px;border-color:${c0};` +
-        `left:${tx}px;top:${ty}px;animation-delay:${r * 0.24}s`;
-      fx.appendChild(rip);
-      rippleEls.push(rip);
-    }
-    /* inject splash impulse into receiver's fluid sim as soon as pour starts */
-    Fluid.drop(di, -1.8);
-    Fluid.start();
-  }
-
-  const dropTimer = RM ? null : setInterval(() => {
-    const d = document.createElement('span');
-    d.className = 'droplet';
-    d.style.background = c0;
-    d.style.boxShadow = '0 0 6px ' + c0 + '88';
-    d.style.left = (Pm.x - stageRect.left + (Math.random() * 14 - 7)).toFixed(1) + 'px';
-    d.style.top = (surfaceY - stageRect.top).toFixed(1) + 'px';
-    d.style.setProperty('--dx', (Math.random() * 44 - 22).toFixed(0) + 'px');
-    d.style.setProperty('--dy', (-(10 + Math.random() * 30)).toFixed(0) + 'px');
-    fx.appendChild(d);
-    setTimeout(() => d.remove(), 600);
-  }, 120);
+  renderer.beginPour({ si, di, color, c0, c1, sx, sy, tx, ty, cpx, cpy, side, receiverW: bwD, progress: 0, started: performance.now() });
   AudioFX.pour(dur / 1000 + 0.1);
   buzz(12);
 
@@ -2769,13 +2846,11 @@ async function doPour(si, di) {
   await tween(dur, p => {
     visual[si] = drainSnapshot(snapS, n * p);
     visual[di] = fillSnapshot(snapD, color, n * p);
+    renderer.updatePour({ progress: p, sx, sy, tx, ty, cpx, cpy });
     renderer.renderBottle(si, A);
     renderer.renderBottle(di, 0);
   });
-  if (dropTimer) clearInterval(dropTimer);
-  pourSVG.remove();
-  if (steamEl) steamEl.remove();
-  rippleEls.forEach(e => e.remove());
+  renderer.endPour({ si, di });
   if (!RM) spawnSparkles(slots[di].el, 4, 0.25);
 
   /* phase 3: return */
