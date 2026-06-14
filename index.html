@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Vessel — Liquid Sort</title>
 <meta name="description" content="Sort the spill. A liquid sorting puzzle in glass.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
@@ -101,10 +101,7 @@ body[data-skin="neon"] {
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
-  margin: 0; padding: 0; height: 100%;
-  overflow: hidden;
-  overscroll-behavior: none;
-  touch-action: manipulation;
+  margin: 0; padding: 0; min-height: 100%;
 }
 body {
   font-family: var(--body-font);
@@ -125,7 +122,7 @@ body::after { /* pooled light under the stage */
 
 /* height tracks the dynamic viewport so the mobile address bar can't clip the
    bottom of the menu/board; content inside scrolls (see #menu overflow) */
-.screen { position: fixed; top: 0; left: 0; right: 0; height: 100vh; height: 100dvh; display: flex; flex-direction: column; z-index: 3; }
+.screen { position: fixed; top: 0; left: 0; right: 0; height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; display: flex; flex-direction: column; z-index: 3; overflow: hidden; }
 #ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 
 /* ============ backdrops (theme furniture) ============ */
@@ -200,7 +197,7 @@ body[data-skin="neon"] .hero-bottles svg { filter: drop-shadow(0 0 8px rgba(255,
 body[data-skin="neon"] .row::after { background: linear-gradient(180deg, rgba(255,76,198,0.35), rgba(120,60,255,0.05)); box-shadow: 0 6px 22px rgba(255,76,198,0.25), 0 1px 0 rgba(255,255,255,0.2) inset; }
 body[data-skin="apothecary"] .row::after { background: linear-gradient(180deg, rgba(255,240,210,0.5), rgba(180,140,90,0.08)); box-shadow: 0 6px 18px rgba(120,80,40,0.22), 0 1px 0 rgba(255,250,235,0.4) inset; }
 
-button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; touch-action: manipulation; }
 button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 12px; }
 
 /* ---------------- Menu ---------------- */
@@ -257,7 +254,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 .menu-foot button { color: var(--ink-dim); font-weight: 800; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--glass-edge); background: var(--glass); }
 
 /* ---------------- Game HUD ---------------- */
-#game { padding: max(10px, env(safe-area-inset-top)) 0 max(8px, env(safe-area-inset-bottom)); }
+#game { padding: max(10px, env(safe-area-inset-top)) 0 max(8px, env(safe-area-inset-bottom)); overscroll-behavior: none; touch-action: none; }
 .hud {
   display: flex; align-items: center; gap: 10px;
   margin: 4px clamp(10px, 2vw, 24px) 0;
@@ -290,7 +287,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 
 /* ---------------- Stage ---------------- */
-#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: clamp(12px, 2.4vh, 22px) 8px calc(var(--bw) * 0.22); min-height: 0; }
+#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: clamp(12px, 2.4vh, 22px) 8px calc(var(--bw) * 0.22); min-height: 0; overscroll-behavior: contain; touch-action: none; }
 .row { display: flex; justify-content: center; align-items: flex-end; gap: clamp(6px, calc(var(--bw) * 0.2), 20px); position: relative; padding: 0 calc(var(--bw) * 0.3); }
 .row::after { /* floating glass shelf */
   content: ''; position: absolute; left: 0; right: 0; bottom: calc(var(--bw) * -0.13); height: calc(var(--bw) * 0.09);
@@ -567,10 +564,11 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 /* ---------------- Modals (settings / achievements) ---------------- */
 .modal {
   position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center;
+  max-height: 100vh; max-height: 100dvh; overflow: hidden; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
   background: rgba(8, 11, 28, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 .sheet {
-  width: min(460px, 90vw); max-height: 84vh; overflow-y: auto;
+  width: min(460px, 90vw); max-height: min(84vh, calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); overflow-y: auto;
   padding: clamp(20px, 3.6vmin, 30px); border-radius: 26px;
   background: var(--card-bg);
   border: 1px solid var(--card-border); box-shadow: var(--shadow-pop);
