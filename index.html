@@ -1442,7 +1442,7 @@ let usedHint = false, usedAuto = false, autoPlaying = false;
 let undosUsed = 0, perfectStreak = 0;
 let pendingLayout = false;
 let state = [], visual = [], par = 0, undosAllowed = Infinity, undosLeft = Infinity;
-let moves = 0, history = [], sel = null, activePours = 0;
+let moves = 0, undoHistory = [], sel = null, activePours = 0;
 let shapesByBottle = [], hiddenDepth = [], veiled = [];
 let frozen = new Set();
 let needCaps = 0;
@@ -1920,7 +1920,7 @@ function setupBoard(gen) {
   par = gen.par;
   undosAllowed = gen.undos; undosLeft = gen.undos;
   visual = state.map(mergeRuns);
-  moves = 0; history = []; sel = null; locked.clear(); activePours = 0;
+  moves = 0; undoHistory = []; sel = null; locked.clear(); activePours = 0;
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
   Fluid.resetAll();
   clearHintGlow();
@@ -2111,7 +2111,7 @@ function updateHUD() {
   }
   subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
-  undoBtn.disabled = history.length === 0 || activePours > 0 || undosLeft <= 0 || autoPlaying;
+  undoBtn.disabled = undoHistory.length === 0 || activePours > 0 || undosLeft <= 0 || autoPlaying;
   const badge = $('#undo-badge');
   if (undosAllowed !== Infinity) { badge.classList.remove('hidden'); badge.textContent = undosLeft; }
   else badge.classList.add('hidden');
@@ -2203,8 +2203,8 @@ function fillSnapshot(snap, color, q) {
 /* ---------------- pour choreography (rAF-driven) ---------------- */
 async function doPour(si, di) {
   locked.add(si); locked.add(di); activePours++;
-  history.push({ state: window.cloneState(state), moves });
-  if (history.length > 300) history.shift();
+  undoHistory.push({ state: window.cloneState(state), moves });
+  if (undoHistory.length > 300) undoHistory.shift();
   const n = window.pourAmount(state, si, di);
   const color = state[si][state[si].length - 1];
   window.applyPour(state, si, di);
@@ -2440,8 +2440,8 @@ function spawnSparkles(host, count, spread) {
 
 /* ---------------- undo / restart ---------------- */
 function undo() {
-  if (!history.length || activePours > 0 || undosLeft <= 0 || autoPlaying) return;
-  const snap = history.pop();
+  if (!undoHistory.length || activePours > 0 || undosLeft <= 0 || autoPlaying) return;
+  const snap = undoHistory.pop();
   state = snap.state; moves = snap.moves;
   undosUsed++;
   if (undosAllowed !== Infinity) undosLeft--;
@@ -2833,8 +2833,8 @@ function showScreen(name) {
   $('#game').classList.toggle('hidden', name !== 'game');
   document.body.dataset.screen = name;
   /* push one history entry on entering gameplay so the device/browser Back
-     button returns to the menu instead of leaving the page.
-     NB: use window.history explicitly — the module-scoped `history` is the undo stack */
+     button returns to the menu instead of leaving the page (window.history is
+     the browser API; the game's undo stack is the separate `undoHistory`) */
   if (name === 'game' && (!window.history.state || window.history.state.screen !== 'game')) {
     window.history.pushState({ screen: 'game' }, '');
   }
@@ -2933,7 +2933,7 @@ function init() {
   buildOrb();
   buildHeroBottles();
   renderMenu();
-  window.history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling (window.* — `history` is the undo stack) */
+  window.history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling */
   showScreen('menu');
   startAmbient();
 
