@@ -164,11 +164,6 @@ body[data-mode="dark"] .apo.rays { opacity: 0.5; }
   filter: blur(16px);
 }
 body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255,180,90,0.4), transparent 70%); }
-.apo.shelf {
-  position: absolute; left: 0; right: 0; bottom: 14%; height: 26px;
-}
-body[data-mode="light"] .apo.shelf { background: linear-gradient(#caa46a, #a87c44); box-shadow: 0 -2px 0 rgba(255,245,220,0.5), 0 8px 18px rgba(120,80,40,0.28); }
-body[data-mode="dark"] .apo.shelf { background: linear-gradient(#7a542c, #4a3018); box-shadow: 0 -1px 0 rgba(255,210,150,0.35), 0 10px 22px rgba(0,0,0,0.5); }
 
 /* — Neon synth grid — */
 .neon.grid {
@@ -183,19 +178,11 @@ body[data-mode="dark"] .apo.shelf { background: linear-gradient(#7a542c, #4a3018
   -webkit-mask-image: linear-gradient(transparent, #000 60%);
   /* static grid — the scrolling animation forced a full backdrop repaint every frame */
 }
-.neon.horizon {
-  position: absolute; left: 0; right: 0; bottom: 50%; height: 2px;
-  background: #ff4cc6; box-shadow: 0 0 14px 3px #ff4cc6, 0 0 40px 8px rgba(120,40,200,0.6);
-}
 .neon.sun {
   position: absolute; left: 50%; bottom: 50%; width: 180px; height: 180px;
   transform: translate(-50%, 30%);
   background: radial-gradient(circle, rgba(255,170,80,0.55), rgba(255,80,200,0.25) 55%, transparent 70%);
   border-radius: 50%; filter: blur(2px);
-}
-.neon.scan {
-  position: absolute; inset: 0; opacity: 0.08;   /* whisper-faint static scanline texture */
-  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0 1px, transparent 1px 3px);
 }
 
 #vignette { /* filmic edge darkening over the whole scene */
@@ -681,11 +668,8 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
   <div class="apo planks"></div>
   <div class="apo rays"></div>
   <div class="apo glow"></div>
-  <div class="apo shelf"></div>
   <div class="neon sun"></div>
-  <div class="neon horizon"></div>
   <div class="neon grid"></div>
-  <div class="neon scan"></div>
 </div>
 <div id="vignette"></div>
 <div id="flash"></div>
