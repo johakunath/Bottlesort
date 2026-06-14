@@ -1255,11 +1255,114 @@ function svgEl(tag, attrs) {
   return el;
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
+
+
+/* ---------------- renderer-driven performance meter ---------------- */
+const PerfMeter = (() => {
+  const targetFps = 60;
+  const targetFrameMs = 1000 / targetFps;
+  const maxSamples = 180;
+  const deltas = [];
+  let lastTs = 0;
+  let droppedFrames = 0;
+  let renderer = 'idle';
+  let overlay = null;
+  let overlayEnabled = false;
+
+  function rounded(n, digits) {
+    const m = Math.pow(10, digits || 1);
+    return Math.round(n * m) / m;
+  }
+  function stats() {
+    const count = deltas.length;
+    if (!count) return { avgFrameTime: 0, averageFrameTime: 0, averageFps: 0, p95FrameTime: 0 };
+    const sum = deltas.reduce((a, b) => a + b, 0);
+    const avg = sum / count;
+    const sorted = deltas.slice().sort((a, b) => a - b);
+    return {
+      avgFrameTime: rounded(avg, 1),
+      averageFrameTime: rounded(avg, 1),
+      averageFps: rounded(1000 / avg, 1),
+      p95FrameTime: rounded(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))], 1)
+    };
+  }
+  function qualityProfile() {
+    try { return celebrationQuality().quality; }
+    catch (e) { return 'unknown'; }
+  }
+  function ensureOverlay() {
+    if (overlay || !document.body) return overlay;
+    overlay = document.createElement('pre');
+    overlay.id = 'perf-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:9999;margin:0;padding:8px 10px;border-radius:10px;background:rgba(8,12,20,.82);color:#dff;font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.28);white-space:pre;text-align:left';
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+  function paintOverlay(snapshot) {
+    if (!overlayEnabled) return;
+    const el = ensureOverlay();
+    if (!el) return;
+    el.textContent = [
+      'Vessel perf',
+      'renderer: ' + snapshot.currentRenderer,
+      'fps: ' + snapshot.averageFps + ' / ' + snapshot.targetFps,
+      'frame avg/p95: ' + snapshot.averageFrameTime + ' / ' + snapshot.p95FrameTime + ' ms',
+      'dropped: ' + snapshot.droppedFrames,
+      'dpr: ' + snapshot.dpr,
+      'quality: ' + snapshot.qualityProfile
+    ].join('\n');
+  }
+  const api = {
+    mark(frameRenderer, now) {
+      const ts = typeof now === 'number' ? now : performance.now();
+      renderer = frameRenderer || renderer || 'unknown';
+      if (lastTs) {
+        const delta = ts - lastTs;
+        if (delta > 0 && delta < 250) {
+          deltas.push(delta);
+          if (deltas.length > maxSamples) deltas.shift();
+          if (delta > targetFrameMs * 1.5) droppedFrames += Math.max(1, Math.round(delta / targetFrameMs) - 1);
+        }
+      }
+      lastTs = ts;
+      paintOverlay(api.snapshot());
+    },
+    reset() { deltas.length = 0; lastTs = 0; droppedFrames = 0; renderer = 'idle'; paintOverlay(api.snapshot()); },
+    enableOverlay(on) {
+      overlayEnabled = on !== false;
+      if (overlayEnabled) paintOverlay(api.snapshot());
+      else if (overlay) overlay.remove(), overlay = null;
+    },
+    snapshot() {
+      const s = stats();
+      return {
+        averageFps: s.averageFps,
+        avgFrameTime: s.avgFrameTime,
+        averageFrameTime: s.averageFrameTime,
+        p95FrameTime: s.p95FrameTime,
+        droppedFrames,
+        currentRenderer: renderer,
+        targetFps,
+        dpr: rounded(window.devicePixelRatio || 1, 2),
+        qualityProfile: qualityProfile(),
+        sampleCount: deltas.length,
+        overlayEnabled
+      };
+    }
+  };
+  if (/[?&]perf=1(?:&|$)/.test(location.search)) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => api.enableOverlay(true), { once: true });
+    else api.enableOverlay(true);
+  }
+  return api;
+})();
 function tween(dur, fn) {
   return new Promise(res => {
     if (RM || dur <= 0) { fn(1); return res(); }
     const t0 = performance.now();
     (function step(now) {
+      PerfMeter.mark('dom-tween', now);
       const p = Math.min(1, (now - t0) / dur);
       const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
       fn(e);
@@ -1635,6 +1738,7 @@ const Fluid = {
     const loop = (now) => {
       if (!this.running) return;
       if (document.hidden) { last = now; requestAnimationFrame(loop); return; }
+      PerfMeter.mark('svg-fluid', now);
       let dt = (now - last) / 1000; last = now;
       if (dt > 0.05) dt = 0.05;                               /* clamp after stalls */
       /* sub-step for stability */
@@ -3021,6 +3125,7 @@ function confetti() {
   }
   const t0 = performance.now();
   (function frame(now) {
+    PerfMeter.mark('canvas-confetti', now);
     const t = (now - t0) / 1000;
     ctx.clearRect(0, 0, cv.width, cv.height);
     bursts.forEach(b => { if (!b.done && t >= b.at) { b.done = true; explode(b); } });
@@ -3091,6 +3196,7 @@ function startAmbient() {
   ambientResize = size;
   window.addEventListener('resize', ambientResize);
   function frame(now) {
+    PerfMeter.mark('canvas-ambient', now);
     ctx.clearRect(0, 0, W, H);
     for (const p of parts) {
       p.y += p.vy; p.x += p.vx + Math.sin(now / 2400 + p.ph) * 0.05;
@@ -3417,7 +3523,21 @@ window.__vesselPerf = {
   get activeAnimations() {
     return (Fluid.running && Fluid.active() && Fluid.hasSims() ? 1 : 0) +   /* liquid surface loop */
            (this.ambientEnabled ? 1 : 0);                /* menu dust loop */
-  }
+  },
+  get metrics() { return PerfMeter.snapshot(); },
+  get averageFps() { return PerfMeter.snapshot().averageFps; },
+  get avgFrameTime() { return PerfMeter.snapshot().avgFrameTime; },
+  get averageFrameTime() { return PerfMeter.snapshot().averageFrameTime; },
+  get p95FrameTime() { return PerfMeter.snapshot().p95FrameTime; },
+  get droppedFrames() { return PerfMeter.snapshot().droppedFrames; },
+  get currentRenderer() { return PerfMeter.snapshot().currentRenderer; },
+  get targetFps() { return PerfMeter.snapshot().targetFps; },
+  get dpr() { return PerfMeter.snapshot().dpr; },
+  get qualityProfile() { return PerfMeter.snapshot().qualityProfile; },
+  get perfSampleCount() { return PerfMeter.snapshot().sampleCount; },
+  get perfOverlayEnabled() { return PerfMeter.snapshot().overlayEnabled; },
+  resetPerf() { PerfMeter.reset(); },
+  setPerfOverlay(on) { PerfMeter.enableOverlay(on); }
 };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
