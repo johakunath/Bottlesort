@@ -178,12 +178,6 @@ body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255
   -webkit-mask-image: linear-gradient(transparent, #000 60%);
   /* static grid — the scrolling animation forced a full backdrop repaint every frame */
 }
-.neon.sun {
-  position: absolute; left: 50%; bottom: 50%; width: 180px; height: 180px;
-  transform: translate(-50%, 30%);
-  background: radial-gradient(circle, rgba(255,170,80,0.55), rgba(255,80,200,0.25) 55%, transparent 70%);
-  border-radius: 50%; filter: blur(2px);
-}
 
 #vignette { /* filmic edge darkening over the whole scene */
   position: fixed; inset: 0; pointer-events: none; z-index: 2;
@@ -668,7 +662,6 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
   <div class="apo planks"></div>
   <div class="apo rays"></div>
   <div class="apo glow"></div>
-  <div class="neon sun"></div>
   <div class="neon grid"></div>
 </div>
 <div id="vignette"></div>
@@ -1136,7 +1129,7 @@ const SHAPES = {
     outline: 'M39,22 L39,129 A43,43 0 1,0 61,129 L61,22',
     lip: { x: 35, y: 14, w: 30, h: 12, rx: 6, mouthRx: 11, mouthRy: 3, mouthCy: 20 },
     B: 208, T: 32, box: [10, 90, 26, 210],
-    cork: { x: 36, y: 8, w: 28, h: 16, r: 5 },
+    cork: { x: 35, y: 12, w: 30, h: 16, r: 5 },
     label: { x: 30, y: 150, w: 40, h: 42, rx: 18 },
     gloss: [
       { x: 26, y: 150, w: 10, h: 44, rx: 5, o: 0.5 },
@@ -1146,9 +1139,9 @@ const SHAPES = {
   }
 };
 /* cork + parchment-label furniture per shape (Apothecary skin) */
-SHAPES.classic.cork = { x: 34, y: 8, w: 32, h: 18, r: 6 };
+SHAPES.classic.cork = { x: 33, y: 13, w: 34, h: 18, r: 6 };
 SHAPES.classic.label = { x: 29, y: 150, w: 42, h: 54, rx: 4 };
-SHAPES.tall.cork = { x: 35, y: 7, w: 30, h: 16, r: 5 };
+SHAPES.tall.cork = { x: 34, y: 11, w: 32, h: 16, r: 5 };
 SHAPES.tall.label = { x: 34, y: 196, w: 32, h: 76, rx: 4 };
 
 /* live theme-visual state, updated by applyTheme() */
@@ -1384,11 +1377,12 @@ function buildBottleSVG(shapeName, opts) {
     s.setAttribute('class', 'twinkle t' + (k % 3));
     gloss.appendChild(s);
   });
-  /* cork stopper — always added when requested; CSS hides it on Neon */
+  svg.appendChild(gloss);
+  /* cork stopper — drawn last so it plugs the mouth opening (over the lip + the
+     dark mouth ellipse) instead of floating above a visible hole. Hidden on Neon via CSS. */
   if (opts.cork && sh.cork) {
     svg.appendChild(buildCork(sh.cork));
   }
-  svg.appendChild(gloss);
   return svg;
 }
 
