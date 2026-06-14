@@ -218,7 +218,7 @@ body[data-skin="neon"] .brand h1 { letter-spacing: 0.01em; text-shadow: 0 0 14px
 body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 500; }
 
 .hero-bottles { display: flex; gap: 8px; align-items: flex-end; height: clamp(96px, 16vh, 150px); }
-.hero-bottles svg { width: clamp(40px, 7vh, 62px); height: auto; filter: drop-shadow(0 14px 22px var(--shelf-shadow)); animation: bob 4.2s ease-in-out infinite; }
+.hero-bottles svg { width: clamp(40px, 7vh, 62px); height: auto; max-height: 100%; filter: drop-shadow(0 14px 22px var(--shelf-shadow)); animation: bob 4.2s ease-in-out infinite; }
 .hero-bottles svg:nth-child(2) { width: clamp(50px, 9vh, 80px); animation-delay: -1.4s; }
 .hero-bottles svg:nth-child(3) { animation-delay: -2.8s; }
 @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
@@ -700,7 +700,7 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
     <button id="btn-settings">⚙️ Settings</button>
     <button id="btn-sound-menu">🔊 Sound on</button>
   </div>
-  <p class="credit">Crafted &amp; solved by Claude — every puzzle is AI-verified solvable</p>
+  <p class="credit">Every puzzle is verified solvable</p>
 </div>
 
 <!-- ============ Game ============ -->
@@ -720,7 +720,7 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
     <div id="fx"></div>
     <div id="hint">Tap a bottle, then tap where to pour</div>
     <div class="fabs">
-      <button class="fab" id="btn-hint" aria-label="Ask Claude for a hint"><span class="fi">💡</span></button>
+      <button class="fab" id="btn-hint" aria-label="Hint"><span class="fi">💡</span></button>
     </div>
   </div>
 </div>
@@ -2673,13 +2673,13 @@ async function showHint() {
   try {
     res = await requestSolution({ state, frozen, budget: 250000 });
   } catch (err) {
-    toastMsg((err && err.message === 'timeout') ? 'Claude is still thinking — try a smaller board or undo ↩' : 'Claude lost focus — try again', 3000);
+    toastMsg((err && err.message === 'timeout') ? 'Still thinking — try a smaller board or undo ↩' : 'Search interrupted — try again', 3000);
     AudioFX.invalid();
     return;
   }
-  if (res.aborted) { toastMsg('Claude ran out of search budget — undo ↩ a little', 3000); AudioFX.invalid(); return; }
+  if (res.aborted) { toastMsg('Ran out of search budget — undo ↩ a little', 3000); AudioFX.invalid(); return; }
   const sol = res.solution && res.solution.length ? res.solution : null;
-  if (!sol) { toastMsg('Claude sees no way out from here — undo ↩ a little', 3000); AudioFX.invalid(); return; }
+  if (!sol) { toastMsg('No solution found from here — undo ↩ a little', 3000); AudioFX.invalid(); return; }
   const [i, j] = sol[0];
   clearHintGlow();
   slots[i].el.classList.add('hint-src');
@@ -2688,7 +2688,7 @@ async function showHint() {
   hintGlowT = setTimeout(clearHintGlow, 2400);
   const c = state[i][state[i].length - 1];
   const what = veiled[i] || (hiddenDepth[i] || 0) >= state[i].length ? 'that bottle' : 'the ' + COLOR_NAMES[c];
-  toastMsg('Claude: pour ' + what + ' into the glowing bottle — ' + sol.length + ' to go');
+  toastMsg('Hint: pour ' + what + ' into the glowing bottle — ' + sol.length + ' to go');
   usedHint = true;
   unlockAch('oracle');
   AudioFX.reveal(); buzz(8);
@@ -2703,17 +2703,17 @@ async function autoSolve() {
   try {
     res = await requestSolution({ state, frozen, budget: 350000 });
   } catch (err) {
-    toastMsg((err && err.message === 'timeout') ? 'Claude timed out searching — control is back' : 'Claude lost focus — try again', 3200);
+    toastMsg((err && err.message === 'timeout') ? 'Timed out searching — control is back' : 'Search interrupted — try again', 3200);
     AudioFX.invalid();
     return;
   }
-  if (res.aborted) { toastMsg('Claude hit the search budget — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
+  if (res.aborted) { toastMsg('Hit the search budget — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
   const sol = res.solution && res.solution.length ? res.solution : null;
-  if (!sol) { toastMsg('Even Claude is stuck here — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
+  if (!sol) { toastMsg('No solution found from here — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
   autoPlaying = true; usedAuto = true;
   setSelected(null); clearHintGlow();
   updateHUD();
-  toastMsg('Claude takes over — watch the ' + sol.length + '-move solve ✨', 2400);
+  toastMsg('Auto-solving — watch the ' + sol.length + '-move solve ✨', 2400);
   for (const [i, j] of sol) {
     if (!autoPlaying) break;
     if (veiled[i]) unveil(i);
@@ -2737,7 +2737,7 @@ const ACHIEVEMENTS = [
   { id: 'daily',    icon: '📅', name: 'Fresh squeeze',    desc: 'Complete a Daily Challenge' },
   { id: 'streak3',  icon: '🔥', name: 'On a roll',        desc: 'Reach a 3-day Daily streak' },
   { id: 'rush5',    icon: '⚡', name: 'Quicksilver',      desc: 'Clear stage 5 in Rush' },
-  { id: 'oracle',   icon: '💡', name: 'Ask the oracle',   desc: 'Use one of Claude’s hints' }
+  { id: ‘oracle’,   icon: ‘💡’, name: ‘Ask the oracle’,   desc: ‘Use one of your hints’ }
 ];
 
 let achToastT = null;
@@ -2774,7 +2774,7 @@ const THEMES = [
     rim: { light: 'rgba(255,255,255,0.95)', dark: 'rgba(225,240,255,0.82)' }, shadow: '#3a2410',
     preview: 'radial-gradient(125% 85% at 50% -10%, #fff8ea, #e7cf9f 68%, #caa46a)' },
   { id: 'neon', name: 'Neon Arcade', palette: NEON_COLORS, hidden: ['#5a4b86', '#2e2550'],
-    modes: false, kicker: 'Arcade Mode', tag: 'Sort to the beat.',
+    modes: false, kicker: 'Arcade', tag: 'Sort to the beat.',
     rim: { light: 'rgba(190,240,255,0.9)', dark: 'rgba(190,240,255,0.9)' }, shadow: '#06021a',
     preview: 'radial-gradient(circle at 50% 78%, rgba(255,76,198,0.85), transparent 58%), linear-gradient(#160a28, #1d0c33)' }
 ];
@@ -2897,7 +2897,7 @@ function onWin() {
     $('#btn-next').classList.toggle('hidden', level >= window.MAX_LEVEL);
   }
 
-  if (usedAuto) meta += ' · solved by Claude ✨';
+  if (usedAuto) meta += ' · auto-solved ✨';
   $('#win-stars').innerHTML = [1, 2, 3].map(k => '<span class="' + (k <= st ? '' : 'off') + '">★</span>').join('');
   $('#win-meta').textContent = meta;
   $('#overlay').classList.add('show');
