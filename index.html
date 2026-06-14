@@ -32,6 +32,7 @@
   --accent-deep: #d18b34;
   --on-accent: #3a2410;
   --glass: rgba(120, 78, 38, 0.07);
+  --glass-solid: rgba(252, 244, 230, 0.62);   /* frosted-card fill — no backdrop-filter needed */
   --glass-edge: rgba(120, 78, 38, 0.22);
   --cta: linear-gradient(#f3c97f, #d18b34);
   --cta-fg: #3a2410;
@@ -59,6 +60,7 @@ body[data-skin="apothecary"][data-mode="dark"] {
   --accent-deep: #d18b34;
   --on-accent: #3a2410;
   --glass: rgba(255, 226, 180, 0.08);
+  --glass-solid: rgba(52, 35, 18, 0.5);
   --glass-edge: rgba(255, 214, 156, 0.30);
   --cta: linear-gradient(#f3c97f, #d18b34);
   --card-bg: linear-gradient(180deg, rgba(70, 46, 24, 0.95), rgba(40, 26, 14, 0.97));
@@ -83,6 +85,7 @@ body[data-skin="neon"] {
   --accent-deep: #7a3cff;
   --on-accent: #0c0718;
   --glass: rgba(120, 40, 200, 0.20);
+  --glass-solid: rgba(42, 20, 68, 0.5);
   --glass-edge: rgba(255, 80, 200, 0.40);
   --cta: linear-gradient(90deg, #ff4cc6, #7a3cff 55%, #34d6ff);
   --cta-fg: #0c0718;
@@ -151,7 +154,7 @@ body[data-skin="apothecary"][data-mode="dark"] .apo.planks {
     transparent 0deg, rgba(255,240,200,0.16) 18deg, transparent 34deg,
     transparent 48deg, rgba(255,240,200,0.10) 60deg, transparent 76deg);
   mix-blend-mode: screen; opacity: 0.9;
-  animation: vsRay 14s ease-in-out infinite alternate;
+  /* static rays — the slow sweep kept the blended backdrop repainting */
 }
 body[data-mode="dark"] .apo.rays { opacity: 0.5; }
 .apo.glow {
@@ -161,11 +164,6 @@ body[data-mode="dark"] .apo.rays { opacity: 0.5; }
   filter: blur(16px);
 }
 body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255,180,90,0.4), transparent 70%); }
-.apo.shelf {
-  position: absolute; left: 0; right: 0; bottom: 14%; height: 26px;
-}
-body[data-mode="light"] .apo.shelf { background: linear-gradient(#caa46a, #a87c44); box-shadow: 0 -2px 0 rgba(255,245,220,0.5), 0 8px 18px rgba(120,80,40,0.28); }
-body[data-mode="dark"] .apo.shelf { background: linear-gradient(#7a542c, #4a3018); box-shadow: 0 -1px 0 rgba(255,210,150,0.35), 0 10px 22px rgba(0,0,0,0.5); }
 
 /* — Neon synth grid — */
 .neon.grid {
@@ -178,11 +176,7 @@ body[data-mode="dark"] .apo.shelf { background: linear-gradient(#7a542c, #4a3018
   transform-origin: 50% 100%;
   mask-image: linear-gradient(transparent, #000 60%);
   -webkit-mask-image: linear-gradient(transparent, #000 60%);
-  animation: vsGrid 4s linear infinite;
-}
-.neon.horizon {
-  position: absolute; left: 0; right: 0; bottom: 50%; height: 2px;
-  background: #ff4cc6; box-shadow: 0 0 14px 3px #ff4cc6, 0 0 40px 8px rgba(120,40,200,0.6);
+  /* static grid — the scrolling animation forced a full backdrop repaint every frame */
 }
 .neon.sun {
   position: absolute; left: 50%; bottom: 50%; width: 180px; height: 180px;
@@ -190,12 +184,6 @@ body[data-mode="dark"] .apo.shelf { background: linear-gradient(#7a542c, #4a3018
   background: radial-gradient(circle, rgba(255,170,80,0.55), rgba(255,80,200,0.25) 55%, transparent 70%);
   border-radius: 50%; filter: blur(2px);
 }
-.neon.scan {
-  position: absolute; inset: 0; opacity: 0.08;   /* whisper-faint static scanline texture */
-  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0 1px, transparent 1px 3px);
-}
-@keyframes vsGrid { to { background-position: 0 40px; } }
-@keyframes vsRay { 0% { transform: translateX(-3%) rotate(-1.5deg); opacity: 0.7 } 100% { transform: translateX(3%) rotate(1.5deg); opacity: 1 } }
 
 #vignette { /* filmic edge darkening over the whole scene */
   position: fixed; inset: 0; pointer-events: none; z-index: 2;
@@ -256,8 +244,8 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 .level-grid { display: grid; grid-template-columns: repeat(5, minmax(74px, 110px)); gap: clamp(10px, 1.6vmin, 16px); }
 .tile {
   position: relative; aspect-ratio: 1 / 1.04; border-radius: var(--r-lg);
-  background: var(--glass); border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  /* solid fill instead of backdrop-filter: blurring ~30 scrolling tiles tanked menu FPS */
+  background: var(--glass-solid); border: 1px solid var(--glass-edge);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   transition: transform 0.16s, background 0.2s, border-color 0.2s;
 }
@@ -267,7 +255,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 .tile .stars { font-size: clamp(12px, 1.9vmin, 15px); letter-spacing: 2px; color: var(--accent); min-height: 1.2em; }
 .tile .stars .off { color: rgba(255, 255, 255, 0.18); }
 .tile.done { border-color: rgba(255, 180, 94, 0.45); box-shadow: inset 0 0 24px rgba(255, 180, 94, 0.08); }
-.tile.locked { filter: grayscale(0.5) brightness(0.52); cursor: default; }
+.tile.locked { opacity: 0.5; cursor: default; }   /* opacity, not filter — cheaper to scroll */
 .tile.locked .num { color: rgba(155,166,203,0.55); }
 .tile .lock { font-size: 14px; color: var(--ink-dim); }
 
@@ -517,15 +505,13 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 .stat-chips { display: flex; gap: 10px; }
 .chip {
   padding: 7px 16px; border-radius: 999px; font-weight: 900; font-size: clamp(13px, 2vmin, 15px);
-  background: var(--glass); border: 1px solid var(--glass-edge); color: var(--accent);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  background: var(--glass-solid); border: 1px solid var(--glass-edge); color: var(--accent);
 }
 .modes { display: flex; gap: 12px; width: min(560px, 92vw); }
 .mode-card {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
   padding: 14px 10px 12px; border-radius: var(--r-lg);
-  background: var(--glass); border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  background: var(--glass-solid); border: 1px solid var(--glass-edge);
   transition: transform 0.15s, background 0.2s, border-color 0.2s;
 }
 .mode-card:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.25); }
@@ -682,11 +668,8 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
   <div class="apo planks"></div>
   <div class="apo rays"></div>
   <div class="apo glow"></div>
-  <div class="apo shelf"></div>
   <div class="neon sun"></div>
-  <div class="neon horizon"></div>
   <div class="neon grid"></div>
-  <div class="neon scan"></div>
 </div>
 <div id="vignette"></div>
 <div id="flash"></div>
@@ -1153,7 +1136,7 @@ const SHAPES = {
     outline: 'M39,22 L39,129 A43,43 0 1,0 61,129 L61,22',
     lip: { x: 35, y: 14, w: 30, h: 12, rx: 6, mouthRx: 11, mouthRy: 3, mouthCy: 20 },
     B: 208, T: 32, box: [10, 90, 26, 210],
-    cork: { x: 36, y: 0, w: 28, h: 16, r: 5 },
+    cork: { x: 36, y: 8, w: 28, h: 16, r: 5 },
     label: { x: 30, y: 150, w: 40, h: 42, rx: 18 },
     gloss: [
       { x: 26, y: 150, w: 10, h: 44, rx: 5, o: 0.5 },
@@ -1163,9 +1146,9 @@ const SHAPES = {
   }
 };
 /* cork + parchment-label furniture per shape (Apothecary skin) */
-SHAPES.classic.cork = { x: 34, y: 0, w: 32, h: 18, r: 6 };
+SHAPES.classic.cork = { x: 34, y: 8, w: 32, h: 18, r: 6 };
 SHAPES.classic.label = { x: 29, y: 150, w: 42, h: 54, rx: 4 };
-SHAPES.tall.cork = { x: 35, y: 0, w: 30, h: 16, r: 5 };
+SHAPES.tall.cork = { x: 35, y: 7, w: 30, h: 16, r: 5 };
 SHAPES.tall.label = { x: 34, y: 196, w: 32, h: 76, rx: 4 };
 
 /* live theme-visual state, updated by applyTheme() */

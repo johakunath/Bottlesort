@@ -1,5 +1,31 @@
 # Vessel — Backlog
 
+## Top — single "fake 3D" liquid top (meniscus cue)
+
+Deferred from the mobile-stabilization pass. We removed the per-band dark
+surface ellipses for colour readability, so static (fluid-off) liquids now read
+flat. Add back **exactly one** cheap fake-3D cue: a subtle curved **meniscus /
+"curdle" at the top of the topmost visible band** — a thin convex cap that hints
+at a rounded surface, without the dark line that made colours ambiguous.
+
+Scope / constraints:
+- One effect only. No per-band lines, no gradients that darken the colour, no
+  extra DOM churn per frame.
+- Static bottles only: when liquid flow is ON, the `Fluid` wave crest already
+  provides the 3D top, so skip the static meniscus there (mutually exclusive).
+- Keep it readable: light/translucent highlight, not a dark band. Should survive
+  on small mobile screens and in both themes.
+
+Where: `renderBottle()` in `index.html` — the top-band highlight block that
+currently appends a single faint white ellipse on `ellipses[last]` (guarded by
+`!topWave`). Replace/augment that one ellipse with a slightly convex meniscus
+(e.g. a shallow arc/clipped ellipse following `sh.surfRx`) rather than a flat
+sliver. Reuse `sh.surfRx` and the existing `wob` offset; do not reintroduce the
+removed `COLORS[c][0]` dark surface ellipses.
+
+Acceptance: top of the liquid looks gently rounded (3D) in both themes; colours
+stay unambiguous; no flicker; no measurable perf cost; fluid-ON path unchanged.
+
 ## In Progress — Visual Upgrade (Apothecary & Neon + WebGL fluid)
 
 Phases 1–4 + most of Phase 5 are merged (PRs #4, #5). The remaining Phase 5 items
