@@ -2833,15 +2833,16 @@ function showScreen(name) {
   $('#game').classList.toggle('hidden', name !== 'game');
   document.body.dataset.screen = name;
   /* push one history entry on entering gameplay so the device/browser Back
-     button returns to the menu instead of leaving the page */
-  if (name === 'game' && (!history.state || history.state.screen !== 'game')) {
-    history.pushState({ screen: 'game' }, '');
+     button returns to the menu instead of leaving the page.
+     NB: use window.history explicitly — the module-scoped `history` is the undo stack */
+  if (name === 'game' && (!window.history.state || window.history.state.screen !== 'game')) {
+    window.history.pushState({ screen: 'game' }, '');
   }
 }
 
 /* in-app back: consume the gameplay history entry so the stack stays in sync */
 function exitToMenu() {
-  if (history.state && history.state.screen === 'game') history.back();
+  if (window.history.state && window.history.state.screen === 'game') window.history.back();
   else goMenu();
 }
 
@@ -2932,7 +2933,7 @@ function init() {
   buildOrb();
   buildHeroBottles();
   renderMenu();
-  history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling */
+  window.history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling (window.* — `history` is the undo stack) */
   showScreen('menu');
   startAmbient();
 
