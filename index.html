@@ -1731,14 +1731,24 @@ function renderBottle(i, tiltDeg, wob) {
     if (fade > 0.04) ellipses.push({ y, c: seg.c });
     cum += seg.u;
   }
-  /* No darker surface lines between bands — they made colours ambiguous on small
-     screens. Only the topmost visible liquid gets one faint white gloss sliver. */
+  /* Fake-3D meniscus cue: a single concave-arc highlight on the topmost visible
+     liquid when fluid animation is off. Walls rise, centre dips — matching the
+     settled shape of Fluid.crestFor() so the static and animated states look
+     identical. No dark lines; no per-band cost.
+     Uses shapeWidthAt (same as the fluid code) so the arc never exceeds the
+     interior clip — fixes flask neck / nearly-full bottle cases. */
   if (ellipses.length && !topWave) {
     const e = ellipses[ellipses.length - 1];
     const wdy = wob ? wob.dy : 0;
-    inner.appendChild(svgEl('ellipse', {
-      cx: px - 7 + (wob ? wob.dy * 1.4 : 0), cy: e.y - 0.2 + wdy, rx: 6.5, ry: 1.9,
-      fill: '#ffffff', opacity: 0.4 * fade
+    const halfW = Math.max(5, shapeWidthAt(shapeName, e.y) / 2);
+    const MEN = Fluid.MENISCUS;
+    const sy = e.y + wdy + 0.4;          /* +0.4 matches crestFor baseline offset */
+    inner.appendChild(svgEl('path', {
+      d: `M${(px - halfW).toFixed(1)},${(sy - MEN).toFixed(2)} Q${px},${(sy + MEN).toFixed(2)} ${(px + halfW).toFixed(1)},${(sy - MEN).toFixed(2)}`,
+      fill: 'none',
+      stroke: 'rgba(255,255,255,0.7)', 'stroke-width': 2,
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      opacity: fade
     }));
   }
 
