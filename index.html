@@ -331,6 +331,9 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
   will-change: transform; border-radius: 16px;
 }
 .bottle svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 calc(var(--bw) * 0.09) calc(var(--bw) * 0.12) rgba(4, 8, 26, 0.45)); }
+/* Canvas gameplay keeps the DOM buttons/slots as an input and accessibility
+   proxy only; the canvas backend owns visible bottle pixels in #stage. */
+.slot.canvas-dom-proxy .bottle svg { opacity: 0; filter: none; }
 .slot.selected .bottle { transform: translateY(calc(var(--bw) * -0.22)); }
 .slot.selected .shadow { opacity: 0.55; transform: scale(0.88); }
 .slot.pouring { z-index: 60; }
@@ -2056,6 +2059,10 @@ function preferredRendererMode() {
   return raw === 'canvas' ? 'canvas2d' : raw;
 }
 
+function isCanvasMode() {
+  return typeof renderer !== 'undefined' && (renderer.active === 'canvas' || renderer.active === 'canvas2d' || (renderer.backend && (renderer.backend.backend === 'canvas' || renderer.backend.backend === 'canvas2d')));
+}
+
 const renderer = {
   active: 'svg',
   backend: SvgRenderer,
@@ -2349,6 +2356,7 @@ function setupBoard(gen) {
     const sh = SHAPES[shapeName];
     const slot = document.createElement('div');
     slot.className = 'slot s-' + shapeName + (shapeName === 'tall' ? ' tall' : '');
+    slot.classList.toggle('canvas-dom-proxy', isCanvasMode());
     slot.style.setProperty('--d', (i * 45) + 'ms');
     const glow = document.createElement('span'); glow.className = 'glow';
     const shadow = document.createElement('span'); shadow.className = 'shadow';
