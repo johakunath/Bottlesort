@@ -1562,13 +1562,14 @@ const Fluid = {
   sims: {},              /* index -> { h, v } */
   running: false,
   active() { return this.enabled && !RM; },
-  hasSims() { return Object.keys(this.sims).length > 0; },
+  hasSims() { for (const i in this.sims) return true; return false; },
   get(i) {
     let s = this.sims[i];
     if (!s) { s = this.sims[i] = { h: new Float32Array(this.N), v: new Float32Array(this.N) }; }
     return s;
   },
   reset(i) { delete this.sims[i]; },
+  sample(i) { return this.sims[i] || null; },
   resetAll() { this.sims = {}; },
   /* tilt-style slosh: push one wall up, the other down (dir in [-1,1]) */
   slosh(i, mag, dir) {
@@ -1612,22 +1613,22 @@ const Fluid = {
   },
   /* build the surface <path> d-string for bottle i at mean surface y */
   pathFor(i, surfY, halfW, bottomY) {
-    const s = this.get(i), n = this.N;
+    const s = this.sample(i), n = this.N;
     const left = 50 - halfW, right = 50 + halfW, span = right - left;
     let d = 'M' + left.toFixed(1) + ',' + (bottomY).toFixed(1) +
-            ' L' + left.toFixed(1) + ',' + (surfY + s.h[0]).toFixed(2);
+            ' L' + left.toFixed(1) + ',' + (surfY + (s ? s.h[0] : 0)).toFixed(2);
     for (let k = 0; k < n; k++) {
       const x = left + (k / (n - 1)) * span;
       const edge = Math.abs((k / (n - 1)) * 2 - 1);          /* 0 centre → 1 wall */
       const men = -this.MENISCUS * Math.pow(edge, 2.2);       /* climb up near walls */
-      const y = surfY + s.h[k] + men;
+      const y = surfY + (s ? s.h[k] : 0) + men;
       d += ' L' + x.toFixed(1) + ',' + y.toFixed(2);
     }
     d += ' L' + right.toFixed(1) + ',' + (bottomY).toFixed(1) + ' Z';
     return d;
   },
   start() {
-    if (this.running) return;
+    if (this.running || !this.hasSims()) return;
     this.running = true;
     let last = performance.now();
     const loop = (now) => {
@@ -1640,7 +1641,7 @@ const Fluid = {
       for (let s = 0; s < sub; s++) this.step(dt);
       /* paint: rewrite each registered surface path + crest highlight */
       for (let i = 0; i < slots.length; i++) {
-        const sl = slots[i]; if (!sl || !sl.surf || !this.sims[i]) continue;
+        const sl = slots[i]; if (!sl || !sl.surf) continue;
         const m = sl.surf;
         const d = this.pathFor(i, m.surfY, m.halfW, m.bottomY);
         m.path.setAttribute('d', d);
@@ -1652,13 +1653,13 @@ const Fluid = {
     requestAnimationFrame(loop);
   },
   crestFor(i, surfY, halfW) {
-    const s = this.get(i), n = this.N;
+    const s = this.sample(i), n = this.N;
     const left = 50 - halfW, span = 2 * halfW;
     let d = '';
     for (let k = 0; k < n; k++) {
       const x = left + (k / (n - 1)) * span;
       const edge = Math.abs((k / (n - 1)) * 2 - 1);
-      const y = surfY + s.h[k] - this.MENISCUS * Math.pow(edge, 2.2) + 0.4;
+      const y = surfY + (s ? s.h[k] : 0) - this.MENISCUS * Math.pow(edge, 2.2) + 0.4;
       d += (k ? ' L' : 'M') + x.toFixed(1) + ',' + y.toFixed(2);
     }
     return d;
@@ -2115,12 +2116,13 @@ function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function setSelected(i) {
   if (sel !== null && slots[sel]) slots[sel].el.classList.remove('selected');
   sel = i;
-  if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); }  /* lift sloshes the liquid */
+  if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start(); }  /* lift sloshes the liquid */
 }
 function shake(i) {
   const el = slots[i].el;
   el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
   Fluid.slosh(i, 3.4);   /* invalid jab rocks the surface */
+  Fluid.start();
 }
 function canBeSource(i) { return state[i].length > 0 && !window.isBottleComplete(state[i]); }
 
@@ -2230,8 +2232,8 @@ async function doPour(si, di) {
 
   /* phase 1: lift, travel, tilt — carry-acceleration slosh */
   if (!RM) {
-    setTimeout(() => Fluid.slosh(si, 1.4, -side), 60);  /* initial surge backward */
-    setTimeout(() => Fluid.slosh(si, 0.9, side), 210);   /* arc-peak settles forward */
+    setTimeout(() => { Fluid.slosh(si, 1.4, -side); Fluid.start(); }, 60);  /* initial surge backward */
+    setTimeout(() => { Fluid.slosh(si, 0.9, side); Fluid.start(); }, 210);   /* arc-peak settles forward */
   }
   AudioFX.swap();
   await tween(RM ? 0 : 360, p => {
@@ -3029,7 +3031,7 @@ window.__vesselPerf = {
   get fluidEnabled() { return !!save.fluid; },
   get ambientEnabled() { return document.body.dataset.screen !== 'game' && !RM; },
   get activeAnimations() {
-    return (Fluid.running && Fluid.active() && Object.keys(Fluid.sims).length > 0 ? 1 : 0) +   /* liquid surface loop */
+    return (Fluid.running && Fluid.active() && Fluid.hasSims() ? 1 : 0) +   /* liquid surface loop */
            (this.ambientEnabled ? 1 : 0);                /* menu dust loop */
   }
 };
