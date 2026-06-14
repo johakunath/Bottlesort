@@ -321,6 +321,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
   pointer-events: none;
 }
 .slot.selected .glow { opacity: 0.95; transform: scale(1.3); }
+.slot.keyboard-focus .bottle { outline: 3px solid var(--accent); outline-offset: 6px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 20%, transparent); }
 .bottle {
   position: absolute; inset: 0; display: block; width: 100%; height: 100%;
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.5, 1);
@@ -1425,6 +1426,7 @@ let needCaps = 0;
 const locked = new Set();
 let ELEMENT_MAP = {};
 let slots = [];
+let focusedBottle = 0;
 
 function mergeRuns(bottle) {
   const out = [];
@@ -1957,6 +1959,67 @@ function toastMsg(msg, ms) {
   toastT = setTimeout(() => { h.style.opacity = 0; }, ms || 2600);
 }
 
+
+function visibleLayerCount(i) {
+  return Math.max(0, state[i].length - (hiddenDepth[i] || 0));
+}
+function layerWord(n) { return n === 1 ? 'one layer' : n === 2 ? 'two layers' : n === 3 ? 'three layers' : n === 4 ? 'four layers' : n + ' layers'; }
+function bottleAriaLabel(i) {
+  const parts = ['Bottle ' + (i + 1)];
+  if (frozen.has(i)) parts.push('frozen');
+  if (veiled[i]) parts.push('sealed');
+  if (!state[i] || state[i].length === 0) parts.push('empty');
+  else {
+    parts.push(layerWord(visibleLayerCount(i)));
+    if (hiddenDepth[i] >= state[i].length) parts.push('contents hidden');
+    else parts.push('top ' + COLOR_NAMES[state[i][state[i].length - 1]]);
+  }
+  if (window.isBottleComplete(state[i])) parts.push('complete');
+  if (sel === i) parts.push('selected');
+  return parts.join(', ');
+}
+function updateBottleLabels() {
+  slots.forEach((slot, i) => slot.btn.setAttribute('aria-label', bottleAriaLabel(i)));
+}
+function applyBottleFocus(i, moveDomFocus) {
+  if (!slots.length) return;
+  focusedBottle = Math.max(0, Math.min(i, slots.length - 1));
+  slots.forEach((slot, idx) => {
+    slot.el.classList.toggle('keyboard-focus', idx === focusedBottle);
+    slot.btn.tabIndex = idx === focusedBottle ? 0 : -1;
+  });
+  if (moveDomFocus) slots[focusedBottle].btn.focus({ preventScroll: true });
+}
+function closeTopLayer() {
+  const modal = document.querySelector('.modal:not(.hidden)');
+  if (modal) { modal.classList.add('hidden'); renderMenu(); return true; }
+  const overlay = $('#overlay');
+  if (overlay.classList.contains('show')) { overlay.classList.remove('show'); return true; }
+  return false;
+}
+function handleGameKey(e) {
+  if ($('#game').classList.contains('hidden')) return;
+  const k = e.key;
+  if (k === 'Escape') {
+    e.preventDefault();
+    if (!closeTopLayer()) exitToMenu();
+    return;
+  }
+  if (closeTopLayer && (document.querySelector('.modal:not(.hidden)') || $('#overlay').classList.contains('show'))) return;
+  if (!slots.length) return;
+  const onBottleBtn = (k === 'Enter' || k === ' ') && slots.some(s => s.btn === e.target);
+  if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(k) || onBottleBtn) e.preventDefault();
+  else if (k === 'Enter' || k === ' ') return;
+  if (k === 'ArrowLeft' || k === 'ArrowUp') applyBottleFocus(focusedBottle - 1, true);
+  else if (k === 'ArrowRight' || k === 'ArrowDown') applyBottleFocus(focusedBottle + 1, true);
+  else if (k === 'Enter' || k === ' ') onTap(focusedBottle);
+  else if (k.toLowerCase() === 'u') { e.preventDefault(); undo(); }
+  else if (k.toLowerCase() === 'r') {
+    e.preventDefault();
+    if (activePours === 0 && !autoPlaying && confirm('Restart this level?')) restartCurrent();
+  } else if (k.toLowerCase() === 'h') { e.preventDefault(); showHint(); }
+}
+
 function setupBoard(gen) {
   /* boards can come from a cache — never mutate the generated original */
   state = gen.state.map(b => b.slice());
@@ -1986,7 +2049,7 @@ function setupBoard(gen) {
     const shadow = document.createElement('span'); shadow.className = 'shadow';
     const btn = document.createElement('button');
     btn.className = 'bottle';
-    btn.setAttribute('aria-label', 'Bottle ' + (i + 1));
+    btn.type = 'button';
     /* no decorative cork in gameplay — an upright open bottle reads as unsolved;
        completion is shown by the .cap drop (see syncCaps) */
     const svg = buildBottleSVG(shapeName, { cork: false, label: true });
@@ -2009,13 +2072,17 @@ function setupBoard(gen) {
     return { slot, el: slot, glow, btn, sh, liquidGroup: svg.querySelector('.liquids'), svg };
   });
   showScreen('game');
+  focusedBottle = Math.min(focusedBottle, Math.max(0, slots.length - 1));
   layoutStage();
   state.forEach((b, i) => renderBottle(i, 0));
   syncCaps();
+  applyBottleFocus(focusedBottle, true);
   orbUpdate(false);
   updateHUD();
   $('#overlay').classList.remove('show');
+  updateBottleLabels();
 }
+
 
 function loadLevel(lvl) {
   mode = 'classic';
@@ -2160,6 +2227,7 @@ function updateHUD() {
   else badge.classList.add('hidden');
   $('#btn-restart').disabled = activePours > 0 || autoPlaying;
   $('#btn-hint').disabled = autoPlaying || solutionPending;
+  updateBottleLabels();
 }
 function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
@@ -2168,6 +2236,7 @@ function setSelected(i) {
   if (sel !== null && slots[sel]) slots[sel].el.classList.remove('selected');
   sel = i;
   if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start(); }  /* lift sloshes the liquid */
+  updateBottleLabels();
 }
 function shake(i) {
   const el = slots[i].el;
@@ -2187,6 +2256,7 @@ function unveil(i) {
   if (!RM) spawnSparkles(slot.el, 7, 0.45);
   AudioFX.reveal(); buzz(10);
   renderBottle(i, 0);
+  updateBottleLabels();
 }
 
 function thawAll() {
@@ -2200,6 +2270,7 @@ function thawAll() {
     if (ice) { ice.classList.add('shatter'); setTimeout(() => ice.remove(), 600); }
     if (!RM) spawnSparkles(s.el, 8, 0.5);
   }, RM ? 0 : 160 + k * 140));
+  updateBottleLabels();
 }
 
 function onTap(i) {
@@ -2423,6 +2494,7 @@ async function doPour(si, di) {
   sloshBottle(di, Math.min(2, n));
   sloshBottle(si, 0.5);
   updateHUD();
+  updateBottleLabels();
   if (pendingLayout && activePours === 0) { pendingLayout = false; layoutStage(); }
   if (activePours === 0 && window.isSolved(state)) {
     await wait(RM ? 100 : 550);
@@ -2491,6 +2563,7 @@ function undo() {
   setSelected(null);
   restoreBoardSnapshot(snap);
   AudioFX.undo();
+  updateBottleLabels();
 }
 
 /* ---------------- AI assistant (hints & autoplay) ----------------
@@ -3260,6 +3333,7 @@ function init() {
   const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (activePours === 0) layoutStage(); else pendingLayout = true; }, 120); };
   window.addEventListener('resize', relayout);
   window.addEventListener('orientationchange', relayout);
+  $('#game').addEventListener('keydown', handleGameKey);
   window.addEventListener('pointerdown', () => AudioFX.ensure(), { once: true });
   /* device/browser Back while in a level returns to the menu, never off-page */
   window.addEventListener('popstate', () => {
