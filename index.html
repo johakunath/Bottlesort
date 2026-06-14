@@ -742,9 +742,9 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 <canvas id="confetti"></canvas>
 
 <!-- ============ Settings ============ -->
-<div class="modal hidden" id="settings-modal">
+<div class="modal hidden" id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
   <div class="sheet">
-    <h2>Settings</h2>
+    <h2 id="settings-title">Settings</h2>
     <div class="set-row"><span>Sound<span class="desc">Pours, chimes and fanfares</span></span><button class="switch" id="sw-sound" role="switch" aria-label="Sound"></button></div>
     <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
     <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
@@ -758,9 +758,9 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 </div>
 
 <!-- ============ Achievements ============ -->
-<div class="modal hidden" id="ach-modal">
+<div class="modal hidden" id="ach-modal" role="dialog" aria-modal="true" aria-labelledby="ach-title">
   <div class="sheet">
-    <h2>Achievements</h2>
+    <h2 id="ach-title">Achievements</h2>
     <div id="ach-list"></div>
     <button class="btn primary" id="ach-close">Done</button>
   </div>
@@ -2651,6 +2651,7 @@ function renderThemeGrid() {
   THEMES.forEach(t => {
     const b = document.createElement('button');
     b.className = 'theme-card' + (save.theme === t.id ? ' on' : '');
+    b.setAttribute('aria-pressed', save.theme === t.id ? 'true' : 'false');
     b.style.background = t.preview;
     b.innerHTML = '<span>' + t.name + '</span>';
     b.addEventListener('click', () => {
@@ -2665,11 +2666,16 @@ function renderThemeGrid() {
 }
 
 function renderSettings() {
-  $('#sw-sound').classList.toggle('on', !!save.sound);
-  $('#sw-haptics').classList.toggle('on', !!save.haptics);
-  $('#sw-symbols').classList.toggle('on', !!save.symbols);
-  $('#sw-fluid').classList.toggle('on', !!save.fluid);
-  $('#sw-dark').classList.toggle('on', save.mode === 'dark');
+  const setSwitch = (sel, on) => {
+    const sw = $(sel);
+    sw.classList.toggle('on', on);
+    sw.setAttribute('aria-checked', on ? 'true' : 'false');
+  };
+  setSwitch('#sw-sound', !!save.sound);
+  setSwitch('#sw-haptics', !!save.haptics);
+  setSwitch('#sw-symbols', !!save.symbols);
+  setSwitch('#sw-fluid', !!save.fluid);
+  setSwitch('#sw-dark', save.mode === 'dark');
   renderThemeGrid();
 }
 
@@ -2961,6 +2967,66 @@ function restartCurrent() {
   else loadLevel(level);
 }
 
+const modalState = new WeakMap();
+const FOCUSABLE = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])'
+].join(',');
+
+function actionableControls(modalEl) {
+  return Array.from(modalEl.querySelectorAll(FOCUSABLE))
+    .filter(el => el.offsetParent !== null || el === document.activeElement);
+}
+
+function openModal(modalEl, initialFocusEl) {
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const onKeyDown = e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal(modalEl);
+      if (modalEl.id === 'settings-modal') renderMenu();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const controls = actionableControls(modalEl);
+    if (!controls.length) {
+      e.preventDefault();
+      modalEl.focus();
+      return;
+    }
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
+  modalEl.classList.remove('hidden');
+  modalEl.setAttribute('tabindex', '-1');
+  modalState.set(modalEl, { previousFocus, onKeyDown });
+  modalEl.addEventListener('keydown', onKeyDown);
+  const target = initialFocusEl || actionableControls(modalEl)[0] || modalEl;
+  target.focus();
+}
+
+function closeModal(modalEl) {
+  const state = modalState.get(modalEl);
+  if (state && state.onKeyDown) modalEl.removeEventListener('keydown', state.onKeyDown);
+  modalEl.classList.add('hidden');
+  modalState.delete(modalEl);
+  if (state && state.previousFocus && typeof state.previousFocus.focus === 'function') {
+    state.previousFocus.focus();
+  }
+}
+
 function init() {
   for (const k in SHAPES) {
     SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
@@ -3010,13 +3076,17 @@ function init() {
   $('#btn-hint').addEventListener('click', showHint);
 
   /* settings & achievements */
-  $('#btn-settings').addEventListener('click', () => { AudioFX.select(); renderSettings(); $('#settings-modal').classList.remove('hidden'); });
-  $('#settings-close').addEventListener('click', () => { AudioFX.swap(); $('#settings-modal').classList.add('hidden'); renderMenu(); });
-  $('#btn-ach').addEventListener('click', () => { AudioFX.select(); renderAchList(); $('#ach-modal').classList.remove('hidden'); });
-  $('#ach-close').addEventListener('click', () => { AudioFX.swap(); $('#ach-modal').classList.add('hidden'); });
+  $('#btn-settings').addEventListener('click', () => { AudioFX.select(); renderSettings(); openModal($('#settings-modal'), $('#sw-sound')); });
+  $('#settings-close').addEventListener('click', () => { AudioFX.swap(); closeModal($('#settings-modal')); renderMenu(); });
+  $('#btn-ach').addEventListener('click', () => { AudioFX.select(); renderAchList(); openModal($('#ach-modal'), $('#ach-close')); });
+  $('#ach-close').addEventListener('click', () => { AudioFX.swap(); closeModal($('#ach-modal')); });
   [['#settings-modal'], ['#ach-modal']].forEach(([sel2]) => {
     const m = $(sel2);
-    m.addEventListener('click', e => { if (e.target === m) m.classList.add('hidden'); });
+    m.addEventListener('click', e => {
+      if (e.target !== m) return;
+      closeModal(m);
+      if (m.id === 'settings-modal') renderMenu();
+    });
   });
   $('#sw-sound').addEventListener('click', () => { save.sound = !save.sound; persist(); renderSettings(); AudioFX.select(); });
   $('#sw-haptics').addEventListener('click', () => { save.haptics = !save.haptics; persist(); renderSettings(); buzz(15); });
