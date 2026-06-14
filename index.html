@@ -1819,6 +1819,58 @@ function syncCaps() {
   });
 }
 
+function snapshotBoard() {
+  return {
+    state: window.cloneState(state),
+    moves,
+    hiddenDepth: hiddenDepth.slice(),
+    veiled: veiled.slice(),
+    frozen: [...frozen]
+  };
+}
+
+function ensureSlotMarker(slotEl, className, text) {
+  let marker = slotEl.querySelector('.' + className);
+  if (!marker) {
+    marker = document.createElement('span');
+    marker.className = className;
+    marker.textContent = text;
+    slotEl.appendChild(marker);
+  } else {
+    marker.classList.remove('off', 'shatter');
+  }
+}
+
+function rebuildSlotSpecialClasses(i) {
+  if (!slots[i]) return;
+  const slotEl = slots[i].el;
+
+  slotEl.classList.toggle('veiled', !!veiled[i]);
+  if (veiled[i]) ensureSlotMarker(slotEl, 'seal', '✦');
+  else slotEl.querySelectorAll('.seal').forEach(seal => seal.remove());
+
+  slotEl.classList.toggle('frozen', frozen.has(i));
+  if (frozen.has(i)) ensureSlotMarker(slotEl, 'ice', '❄');
+  else slotEl.querySelectorAll('.ice').forEach(ice => ice.remove());
+
+  slotEl.classList.toggle('capped', window.isBottleComplete(state[i]));
+}
+
+function restoreBoardSnapshot(snap) {
+  state = window.cloneState(snap.state);
+  moves = snap.moves;
+  hiddenDepth = snap.hiddenDepth.slice();
+  veiled = snap.veiled.slice();
+  frozen = new Set(snap.frozen);
+  visual = state.map(mergeRuns);
+
+  state.forEach((b, i) => rebuildSlotSpecialClasses(i));
+  state.forEach((b, i) => renderBottle(i, 0));
+  syncCaps();
+  orbUpdate(false);
+  updateHUD();
+}
+
 /* ---------------- layout (1-3 rows + shelves) ---------------- */
 function layoutStage() {
   const stage = $('#stage');
@@ -2190,7 +2242,7 @@ function fillSnapshot(snap, color, q) {
 /* ---------------- pour choreography (rAF-driven) ---------------- */
 async function doPour(si, di) {
   locked.add(si); locked.add(di); activePours++;
-  undoHistory.push({ state: window.cloneState(state), moves });
+  undoHistory.push(snapshotBoard());
   if (undoHistory.length > 300) undoHistory.shift();
   const n = window.pourAmount(state, si, di);
   const color = state[si][state[si].length - 1];
@@ -2429,17 +2481,11 @@ function spawnSparkles(host, count, spread) {
 function undo() {
   if (!undoHistory.length || activePours > 0 || undosLeft <= 0 || autoPlaying) return;
   const snap = undoHistory.pop();
-  state = snap.state; moves = snap.moves;
   undosUsed++;
   if (undosAllowed !== Infinity) undosLeft--;
-  visual = state.map(mergeRuns);
-  hiddenDepth = hiddenDepth.map((h, i) => Math.min(h, Math.max(0, state[i].length - 1)));
   setSelected(null);
-  state.forEach((b, i) => renderBottle(i, 0));
-  syncCaps();
-  orbUpdate(false);
+  restoreBoardSnapshot(snap);
   AudioFX.undo();
-  updateHUD();
 }
 
 /* ---------------- AI assistant (hints & autoplay) ----------------
