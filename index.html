@@ -1562,6 +1562,7 @@ const Fluid = {
   sims: {},              /* index -> { h, v } */
   running: false,
   active() { return this.enabled && !RM; },
+  hasSims() { return Object.keys(this.sims).length > 0; },
   get(i) {
     let s = this.sims[i];
     if (!s) { s = this.sims[i] = { h: new Float32Array(this.N), v: new Float32Array(this.N) }; }
@@ -1590,6 +1591,7 @@ const Fluid = {
   },
   step(dt) {
     const C = 220, DAMP = 2.6, REST = 9, n = this.N, cap = this.AMP;
+    const settled = [];
     for (const i in this.sims) {
       const s = this.sims[i], h = s.h, v = s.v;
       let energy = 0;
@@ -1604,8 +1606,9 @@ const Fluid = {
         else if (h[k] < -cap) { h[k] = -cap; v[k] *= -0.3; }
         energy += h[k] * h[k] + v[k] * v[k] * 0.01;
       }
-      if (energy < 0.002) this.reset(i);   /* settled — drop it from the loop */
+      if (energy < 0.002) settled.push(i);   /* settled — drop it from the loop */
     }
+    for (const i of settled) this.reset(i);
   },
   /* build the surface <path> d-string for bottle i at mean surface y */
   pathFor(i, surfY, halfW, bottomY) {
@@ -1629,8 +1632,7 @@ const Fluid = {
     let last = performance.now();
     const loop = (now) => {
       if (!this.running) return;
-      requestAnimationFrame(loop);
-      if (document.hidden) { last = now; return; }
+      if (document.hidden) { last = now; requestAnimationFrame(loop); return; }
       let dt = (now - last) / 1000; last = now;
       if (dt > 0.05) dt = 0.05;                               /* clamp after stalls */
       /* sub-step for stability */
@@ -1644,6 +1646,8 @@ const Fluid = {
         m.path.setAttribute('d', d);
         if (m.crest) m.crest.setAttribute('d', this.crestFor(i, m.surfY, m.halfW));
       }
+      if (!this.hasSims()) { this.running = false; return; }
+      requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
   },
@@ -3025,7 +3029,7 @@ window.__vesselPerf = {
   get fluidEnabled() { return !!save.fluid; },
   get ambientEnabled() { return document.body.dataset.screen !== 'game' && !RM; },
   get activeAnimations() {
-    return (Fluid.running && Fluid.active() ? 1 : 0) +   /* liquid surface loop */
+    return (Fluid.running && Fluid.active() && Object.keys(Fluid.sims).length > 0 ? 1 : 0) +   /* liquid surface loop */
            (this.ambientEnabled ? 1 : 0);                /* menu dust loop */
   }
 };
