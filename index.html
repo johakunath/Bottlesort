@@ -287,7 +287,9 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 
 /* ---------------- Stage ---------------- */
-#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: clamp(12px, 2.4vh, 22px) 8px calc(var(--bw) * 0.22); min-height: 0; overscroll-behavior: contain; touch-action: none; }
+#stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--bw) * 0.5); position: relative; padding: clamp(12px, 2.4vh, 22px) 8px calc(var(--bw) * 0.22); min-height: 0; overscroll-behavior: contain; touch-action: none; isolation: isolate; }
+#board-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+#stage.canvas-active .bottle svg { opacity: 0; }
 .row { display: flex; justify-content: center; align-items: flex-end; gap: clamp(6px, calc(var(--bw) * 0.2), 20px); position: relative; padding: 0 calc(var(--bw) * 0.3); }
 .row::after { /* floating glass shelf */
   content: ''; position: absolute; left: 0; right: 0; bottom: calc(var(--bw) * -0.13); height: calc(var(--bw) * 0.09);
@@ -720,6 +722,7 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
     <button class="icon-btn" id="btn-sound" aria-label="Toggle sound">🔊</button>
   </div>
   <div id="stage">
+    <canvas id="board-canvas" aria-hidden="true"></canvas>
     <div id="fx"></div>
     <div id="hint">Tap a bottle, then tap where to pour</div>
     <div class="fabs">
@@ -1266,7 +1269,7 @@ const PerfMeter = (() => {
   const targetFrameMs = 1000 / targetFps;
   const maxSamples = 180;
   const deltas = [];
-  let lastTs = 0;
+  const lastTsMap = new Map();
   let droppedFrames = 0;
   let renderer = 'idle';
   let overlay = null;
@@ -1320,6 +1323,7 @@ const PerfMeter = (() => {
     mark(frameRenderer, now) {
       const ts = typeof now === 'number' ? now : performance.now();
       renderer = frameRenderer || renderer || 'unknown';
+      const lastTs = lastTsMap.get(renderer) || 0;
       if (lastTs) {
         const delta = ts - lastTs;
         if (delta > 0 && delta < 250) {
@@ -1328,10 +1332,10 @@ const PerfMeter = (() => {
           if (delta > targetFrameMs * 1.5) droppedFrames += Math.max(1, Math.round(delta / targetFrameMs) - 1);
         }
       }
-      lastTs = ts;
+      lastTsMap.set(renderer, ts);
       paintOverlay(api.snapshot());
     },
-    reset() { deltas.length = 0; lastTs = 0; droppedFrames = 0; renderer = 'idle'; paintOverlay(api.snapshot()); },
+    reset() { deltas.length = 0; lastTsMap.clear(); droppedFrames = 0; renderer = 'idle'; paintOverlay(api.snapshot()); },
     enableOverlay(on) {
       overlayEnabled = on !== false;
       if (overlayEnabled) paintOverlay(api.snapshot());
@@ -1918,8 +1922,145 @@ const SvgRenderer = {
   }
 };
 
+
+const CanvasRenderer = {
+  backend: 'canvas2d',
+  canvas: null,
+  ctx: null,
+  dpr: 1,
+  rects: [],
+  ok: false,
+  ensure() {
+    this.canvas = this.canvas || document.getElementById('board-canvas');
+    if (!this.canvas) return false;
+    if (!this.ctx) this.ctx = this.canvas.getContext('2d');
+    this.ok = !!this.ctx;
+    return this.ok;
+  },
+  syncLayout() {
+    if (!this.ensure()) return false;
+    const stage = $('#stage');
+    const sr = stage.getBoundingClientRect();
+    this.dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const w = Math.max(1, Math.round(sr.width * this.dpr));
+    const h = Math.max(1, Math.round(sr.height * this.dpr));
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w; this.canvas.height = h;
+    }
+    this.canvas.style.width = sr.width + 'px';
+    this.canvas.style.height = sr.height + 'px';
+    this.rects = slots.map((slot, i) => {
+      const r = slot.btn.getBoundingClientRect();
+      return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height, shapeName: shapesByBottle[i] };
+    });
+    return true;
+  },
+  clear() {
+    if (!this.ensure()) return;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ctx.clearRect(0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
+  },
+  renderBottle() { this.renderAll(); },
+  renderAll() {
+    if (!this.ensure()) return;
+    if (this.rects.length !== slots.length) this.syncLayout();
+    this.clear();
+    state.forEach((b, i) => this.drawBottle(i));
+  },
+  setTheme() { this.renderAll(); return this; },
+  setQuality(q) { this.quality = q || 'auto'; return this; },
+  destroy() { this.clear(); return this; },
+  roundRect(ctx, x, y, w, h, r) {
+    r = Math.min(r || 0, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  },
+  liquidGradient(ctx, c) {
+    const g = ctx.createLinearGradient(0, 0, 100, 0);
+    const pair = c === 'hidden' ? HIDDEN_FILL : COLORS[c];
+    g.addColorStop(0, pair[1]); g.addColorStop(0.3, pair[0]); g.addColorStop(0.7, pair[0]); g.addColorStop(1, pair[1]);
+    return g;
+  },
+  drawElement(ctx, elem, y, h) {
+    ctx.save();
+    if (elem === 'frozen') {
+      ctx.fillStyle = 'rgba(190,235,255,0.30)'; ctx.fillRect(-160, y, 420, h);
+      ctx.strokeStyle = 'rgba(220,250,255,0.95)'; ctx.lineWidth = 1.2;
+      for (let k = 0; k < 3; k++) { const x = 34 + k * 16, cy = y + h * (0.2 + k * 0.3); ctx.beginPath(); ctx.moveTo(x, cy - 5); ctx.lineTo(x, cy + 5); ctx.moveTo(x - 5, cy); ctx.lineTo(x + 5, cy); ctx.moveTo(x - 3.5, cy - 3.5); ctx.lineTo(x + 3.5, cy + 3.5); ctx.moveTo(x + 3.5, cy - 3.5); ctx.lineTo(x - 3.5, cy + 3.5); ctx.stroke(); }
+    } else if (elem === 'electric') {
+      ctx.fillStyle = 'rgba(140,255,248,0.20)'; ctx.fillRect(-160, y, 420, h); ctx.strokeStyle = 'rgba(220,255,255,0.95)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(45, y + 3); for (let k = 0; k < 6; k++) ctx.lineTo(45 + (k % 2 === 0 ? 10 : -10), y + 3 + (k + 1) * (h - 6) / 6); ctx.stroke();
+    } else if (elem === 'boiling') {
+      ctx.fillStyle = 'rgba(255,255,255,0.65)'; for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(35 + k * 10, y + h - 8 - k * 2, 3.2 - k * 0.4, 0, Math.PI * 2); ctx.fill(); }
+    } else if (elem === 'toxic') {
+      ctx.fillStyle = 'rgba(80,255,120,0.26)'; ctx.fillRect(-160, y, 420, h); ctx.fillStyle = 'rgba(180,255,200,0.9)'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('☠', 64, y + h / 2 + 4);
+    }
+    ctx.restore();
+  },
+  drawBottle(i) {
+    const r = this.rects[i], slot = slots[i];
+    if (!r || !slot) return;
+    const ctx = this.ctx, shapeName = r.shapeName, sh = SHAPES[shapeName];
+    const sx = r.w / 100, sy = r.h / sh.vbH;
+    const inline = slot.btn.style.transform || '';
+    const tMatch = inline.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
+    const rMatch = inline.match(/rotate\((-?[\d.]+)deg\)/);
+    const tx = tMatch ? parseFloat(tMatch[1]) : 0;
+    const selectedLift = !tMatch && slot.el.classList.contains('selected') ? -r.w * 0.22 : 0;
+    const ty = (tMatch ? parseFloat(tMatch[2]) : 0) + selectedLift;
+    const rot = rMatch ? parseFloat(rMatch[1]) * Math.PI / 180 : 0;
+    ctx.save();
+    ctx.translate(r.x + tx, r.y + ty);
+    if (rot) { ctx.translate(r.w / 2, r.h / 2); ctx.rotate(rot); ctx.translate(-r.w / 2, -r.h / 2); }
+    ctx.scale(sx, sy);
+    ctx.shadowColor = 'rgba(4,8,26,0.45)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 7;
+    const interior = new Path2D(sh.interior), outline = new Path2D(sh.outline);
+    ctx.fillStyle = SKIN === 'neon' ? 'rgba(127,208,255,0.10)' : 'rgba(255,233,200,0.12)'; ctx.fill(interior); ctx.shadowColor = 'transparent';
+    ctx.save(); ctx.clip(interior);
+    let cum = 0;
+    const segs = visual[i] || [];
+    for (const seg of segs) {
+      const yBot = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
+      const yTop = sh.volToY ? sh.volToY((cum + seg.u) / 4) : sh.B - (cum + seg.u) * sh.unit;
+      const h = yBot - yTop;
+      ctx.fillStyle = this.liquidGradient(ctx, seg.c); ctx.fillRect(-160, yTop, 420, h + 1.2);
+      if (ELEMENT_MAP[seg.c]) this.drawElement(ctx, ELEMENT_MAP[seg.c], yTop, h);
+      if (save.symbols && seg.u >= 0.8) { ctx.fillStyle = 'rgba(255,255,255,0.86)'; ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.strokeText(COLOR_GLYPHS[seg.c], 50, yTop + h / 2); ctx.fillText(COLOR_GLYPHS[seg.c], 50, yTop + h / 2); }
+      cum += seg.u;
+    }
+    if (segs.length) {
+      const topY = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
+      const halfW = Math.max(5, shapeWidthAt(shapeName, topY) / 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(50 - halfW, topY - Fluid.MENISCUS + 0.4); ctx.quadraticCurveTo(50, topY + Fluid.MENISCUS + 0.4, 50 + halfW, topY - Fluid.MENISCUS + 0.4); ctx.stroke();
+    }
+    const hid = hiddenDepth[i] || 0;
+    for (let u = 0; u < hid && u < cum; u++) {
+      const yBot = sh.volToY ? sh.volToY(u / 4) : sh.B - u * sh.unit;
+      const yTop = sh.volToY ? sh.volToY((u + 1) / 4) : sh.B - (u + 1) * sh.unit;
+      ctx.fillStyle = this.liquidGradient(ctx, 'hidden'); ctx.fillRect(-160, yTop, 420, yBot - yTop + 1.2);
+      ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 50, (yTop + yBot) / 2);
+    }
+    ctx.restore();
+    const shade = ctx.createLinearGradient(0, 0, 100, 0); shade.addColorStop(0, 'rgba(58,36,16,0.32)'); shade.addColorStop(0.5, 'rgba(255,255,255,0)'); shade.addColorStop(1, 'rgba(58,36,16,0.34)'); ctx.fillStyle = shade; ctx.fill(interior);
+    ctx.fillStyle = 'rgba(255,255,255,0.34)'; (sh.gloss || []).forEach(g => { this.roundRect(ctx, g.x, g.y, g.w, g.h, g.rx); ctx.globalAlpha = g.o; ctx.fill(); ctx.globalAlpha = 1; });
+    ctx.strokeStyle = RIM_COLOR; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.stroke(outline);
+    const lip = sh.lip; ctx.fillStyle = 'rgba(255,255,255,0.22)'; this.roundRect(ctx, lip.x, lip.y, lip.w, lip.h, lip.rx); ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.4; ctx.stroke(); ctx.fillStyle = 'rgba(10,14,36,0.55)'; ctx.beginPath(); ctx.ellipse(50, lip.mouthCy, lip.mouthRx, lip.mouthRy, 0, 0, Math.PI * 2); ctx.fill();
+    if (window.isBottleComplete(state[i]) && sh.cork) { const c = sh.cork; ctx.fillStyle = '#a9763f'; this.roundRect(ctx, c.x, c.y, c.w, c.h, c.r); ctx.fill(); }
+    if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✦', 50, sh.vbH * 0.38); }
+    if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('❄', 50, sh.vbH * 0.72); }
+    ctx.restore();
+  }
+};
+
+function preferredRendererMode() {
+  const raw = (new URLSearchParams(location.search).get('renderer') || localStorage.getItem('vessel_renderer') || window.__vesselRendererMode || 'svg').toLowerCase();
+  return raw === 'canvas' ? 'canvas2d' : raw;
+}
+
 function isCanvasMode() {
-  return typeof renderer !== 'undefined' && (renderer.active === 'canvas' || (renderer.backend && renderer.backend.backend === 'canvas'));
+  return typeof renderer !== 'undefined' && (renderer.active === 'canvas' || renderer.active === 'canvas2d' || (renderer.backend && (renderer.backend.backend === 'canvas' || renderer.backend.backend === 'canvas2d')));
 }
 
 const renderer = {
@@ -1930,17 +2071,36 @@ const renderer = {
     if (nextSlots) slots = nextSlots;
     return this;
   },
+  chooseBackend() {
+    const mode = preferredRendererMode();
+    const stage = $('#stage');
+    if (mode === 'canvas2d' && CanvasRenderer.ensure()) {
+      this.active = 'canvas2d'; this.backend = CanvasRenderer; stage.classList.add('canvas-active');
+    } else {
+      this.active = 'svg'; this.backend = SvgRenderer; stage.classList.remove('canvas-active');
+      if (mode === 'canvas2d') console.warn('Canvas 2D renderer unavailable; falling back to SVG.');
+    }
+    return this;
+  },
   syncLayout() {
     layoutStage();
-    if (isCanvasMode()) this.renderAll();
+    this.chooseBackend();
+    if (this.backend.syncLayout) this.backend.syncLayout();
     return this;
   },
   renderBottle(i, opts = {}, wob = null) {
     const renderOpts = typeof opts === 'number' ? { tiltDeg: opts, wob } : opts;
-    return this.backend.renderBottle(i, renderOpts);
+    const out = this.backend.renderBottle(i, renderOpts);
+    if (this.active === 'canvas2d') SvgRenderer.renderBottle(i, renderOpts);
+    return out;
   },
   renderAll() {
-    state.forEach((b, i) => this.renderBottle(i, { tiltDeg: 0 }));
+    if (this.active === 'canvas2d') {
+      this.backend.renderAll();
+      state.forEach((b, i) => SvgRenderer.renderBottle(i, { tiltDeg: 0 }));
+    } else {
+      state.forEach((b, i) => this.renderBottle(i, { tiltDeg: 0 }));
+    }
     return this;
   },
   setTheme() {
@@ -2391,6 +2551,7 @@ function setSelected(i) {
   sel = i;
   if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start(); }  /* lift sloshes the liquid */
   updateBottleLabels();
+  if (renderer.active === 'canvas2d') renderer.renderAll();
 }
 function shake(i) {
   const el = slots[i].el;
