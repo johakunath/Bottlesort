@@ -1318,7 +1318,10 @@ function applyRenderQuality(reason) {
   Fluid.resetAll();
   document.documentElement.style.setProperty('--render-glow', String(p.glowStrength));
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
+  if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
+  if (!p.idleAnimations) stopAmbient();
+  else if (document.body && document.body.dataset.screen === 'menu') startAmbient();
 }
 function demoteRenderQuality(reason) {
   const idx = QUALITY_ORDER.indexOf(renderQualityEffective);
@@ -1331,7 +1334,9 @@ function demoteRenderQuality(reason) {
   Fluid.resetAll();
   document.documentElement.style.setProperty('--render-glow', String(p.glowStrength));
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
+  if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
+  if (!p.idleAnimations) stopAmbient();
   return true;
 }
 
