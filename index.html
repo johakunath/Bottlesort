@@ -2160,7 +2160,7 @@ function updateHUD() {
   if (undosAllowed !== Infinity) { badge.classList.remove('hidden'); badge.textContent = undosLeft; }
   else badge.classList.add('hidden');
   $('#btn-restart').disabled = activePours > 0 || autoPlaying;
-  $('#btn-hint').disabled = autoPlaying;
+  $('#btn-hint').disabled = autoPlaying || solutionPending;
 }
 function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
@@ -2498,10 +2498,93 @@ function undo() {
    The same solver that verifies every level also plays it: hints show
    the first move of a fresh optimal-ish solution from the current
    position; autoplay performs the whole line with real pours. */
-function aiSolution(budget) {
-  if (!state.length || window.isSolved(state)) return null;
-  const res = window.solve(window.cloneState(state), budget || 250000, frozen.size ? new Set(frozen) : null);
-  return res.solution && res.solution.length ? res.solution : null;
+const SOLVER_WORKER_TIMEOUT = 4500;
+let solverWorker = null;
+let solverRequestId = 0;
+let solverReject = null;
+let solverTimer = null;
+let solutionPending = false;
+
+function solverWorkerSource() {
+  return `'use strict';
+const CAP = ${window.CAP};
+const cloneState = ${window.cloneState.toString()};
+const stateKey = ${window.stateKey.toString()};
+const topRun = ${window.topRun.toString()};
+const isBottleComplete = ${window.isBottleComplete.toString()};
+const isBottleClear = ${window.isBottleClear.toString()};
+const isSolved = ${window.isSolved.toString()};
+const pourAmount = ${window.pourAmount.toString()};
+const applyPour = ${window.applyPour.toString()};
+const solve = ${window.solve.toString()};
+self.onmessage = e => {
+  const { id, state, frozen, budget } = e.data || {};
+  try {
+    const frozenSet = frozen && frozen.length ? new Set(frozen) : null;
+    const res = solve(cloneState(state || []), budget || 250000, frozenSet);
+    self.postMessage({ id, solution: res.solution || null, nodes: res.nodes || 0, aborted: !!res.aborted });
+  } catch (err) {
+    self.postMessage({ id, error: err && err.message ? err.message : String(err) });
+  }
+};`;
+}
+
+function getSolverWorker() {
+  if (solverWorker) return solverWorker;
+  const blob = new Blob([solverWorkerSource()], { type: 'application/javascript' });
+  solverWorker = new Worker(URL.createObjectURL(blob));
+  return solverWorker;
+}
+
+function cancelSolution(reason) {
+  if (solverReject) solverReject(new Error(reason || 'cancelled'));
+  solverReject = null;
+  clearTimeout(solverTimer);
+  solverTimer = null;
+  if (solverWorker) {
+    solverWorker.terminate();
+    solverWorker = null;
+  }
+  solutionPending = false;
+  updateHUD();
+}
+
+function requestSolution({ state: requestedState, frozen: requestedFrozen, budget }) {
+  cancelSolution('cancelled');
+  solutionPending = true;
+  updateHUD();
+  const id = ++solverRequestId;
+  const worker = getSolverWorker();
+  return new Promise((resolve, reject) => {
+    solverReject = reject;
+    solverTimer = setTimeout(() => {
+      if (id === solverRequestId) cancelSolution('timeout');
+    }, SOLVER_WORKER_TIMEOUT);
+    worker.onmessage = e => {
+      if (!e.data || e.data.id !== id) return;
+      clearTimeout(solverTimer);
+      solverTimer = null;
+      solverReject = null;
+      solutionPending = false;
+      updateHUD();
+      if (e.data.error) reject(new Error(e.data.error));
+      else resolve(e.data);
+    };
+    worker.onerror = e => {
+      clearTimeout(solverTimer);
+      solverTimer = null;
+      solverReject = null;
+      solutionPending = false;
+      updateHUD();
+      reject(new Error(e.message || 'worker error'));
+    };
+    worker.postMessage({
+      id,
+      state: window.cloneState(requestedState),
+      frozen: requestedFrozen ? Array.from(requestedFrozen) : [],
+      budget: budget || 250000
+    });
+  });
 }
 
 function clearHintGlow() {
@@ -2509,10 +2592,21 @@ function clearHintGlow() {
 }
 
 let hintGlowT = null;
-function showHint() {
-  if (activePours > 0 || autoPlaying || !state.length || window.isSolved(state)) return;
+async function showHint() {
+  if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
+  if (mode === 'rush') { toastMsg('Hints are paused in Rush for timer fairness ⚡', 2200); AudioFX.invalid(); return; }
   AudioFX.ensure();
-  const sol = aiSolution();
+  toastMsg('Thinking…', 1200);
+  let res;
+  try {
+    res = await requestSolution({ state, frozen, budget: 250000 });
+  } catch (err) {
+    toastMsg((err && err.message === 'timeout') ? 'Claude is still thinking — try a smaller board or undo ↩' : 'Claude lost focus — try again', 3000);
+    AudioFX.invalid();
+    return;
+  }
+  if (res.aborted) { toastMsg('Claude ran out of search budget — undo ↩ a little', 3000); AudioFX.invalid(); return; }
+  const sol = res.solution && res.solution.length ? res.solution : null;
   if (!sol) { toastMsg('Claude sees no way out from here — undo ↩ a little', 3000); AudioFX.invalid(); return; }
   const [i, j] = sol[0];
   clearHintGlow();
@@ -2529,9 +2623,20 @@ function showHint() {
 }
 
 async function autoSolve() {
-  if (activePours > 0 || autoPlaying || !state.length || window.isSolved(state)) return;
+  if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
+  if (mode === 'rush') { toastMsg('Auto-solve is paused in Rush for timer fairness ⚡', 2400); AudioFX.invalid(); return; }
   AudioFX.ensure();
-  const sol = aiSolution(350000);
+  toastMsg('Thinking…', 1200);
+  let res;
+  try {
+    res = await requestSolution({ state, frozen, budget: 350000 });
+  } catch (err) {
+    toastMsg((err && err.message === 'timeout') ? 'Claude timed out searching — control is back' : 'Claude lost focus — try again', 3200);
+    AudioFX.invalid();
+    return;
+  }
+  if (res.aborted) { toastMsg('Claude hit the search budget — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
+  const sol = res.solution && res.solution.length ? res.solution : null;
   if (!sol) { toastMsg('Even Claude is stuck here — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
   autoPlaying = true; usedAuto = true;
   setSelected(null); clearHintGlow();
@@ -3121,7 +3226,7 @@ function init() {
 }
 
 window.__vessel = {
-  loadLevel, onTap, undo, loadDaily, startRush, showHint, autoSolve, totalStars,
+  loadLevel, onTap, undo, loadDaily, startRush, showHint, autoSolve, requestSolution, cancelSolution, totalStars,
   get mode() { return mode; },
   get rushStage() { return rushStage; },
   get rushTimeLeft() { return rushTimeLeft; },
