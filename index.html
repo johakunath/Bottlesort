@@ -1167,7 +1167,7 @@ const DEFAULT_SAVE = {
   progress: { relaxed: {}, normal: {}, expert: {} },
   sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
   theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true,
-  ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0
+  ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0, lowPowerEffects: false
 };
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
 save.progress = Object.assign({}, DEFAULT_SAVE.progress, save.progress || {});
@@ -1183,6 +1183,7 @@ delete save.beat;                    /* removed: Neon rhythm mode */
 save.seenSpecials = save.seenSpecials || {};
 save.ach = save.ach || {};
 save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
+save.lowPowerEffects = save.lowPowerEffects === true;
 function persist() { store.save(save); }
 
 /* ---------------- audio ---------------- */
@@ -2843,15 +2844,36 @@ function onWin() {
 }
 
 /* ---------------- celebration: confetti + firework bursts ---------------- */
+function celebrationQuality() {
+  const area = innerWidth * innerHeight;
+  const cores = navigator.hardwareConcurrency || 4;
+  const savedLowPower = !!(save && save.lowPowerEffects);
+  const lowPower = savedLowPower || cores <= 4 || area < 520000;
+  const small = area < 420000 || Math.min(innerWidth, innerHeight) < 420;
+  const quality = lowPower ? 'low' : (area < 850000 || cores <= 6 ? 'medium' : 'high');
+  return {
+    quality, lowPower, savedLowPower, cores, area,
+    confettiCount: lowPower ? (small ? 50 : 70) : (quality === 'medium' ? 95 : 110),
+    fireworkCount: lowPower ? 18 : (quality === 'medium' ? 28 : 38)
+  };
+}
+
 function confetti() {
   const cv = $('#confetti');
   const ctx = cv.getContext && cv.getContext('2d');
   if (!ctx) return;
   cv.width = innerWidth; cv.height = innerHeight;
-  const parts = [];
-  for (let i = 0; i < 130; i++) {
+  const q = celebrationQuality();
+  if (window.__vesselPerf) window.__vesselPerf.selectedCelebrationQuality = q;
+  const maxParts = q.confettiCount + q.fireworkCount * 3;
+  const parts = new Array(maxParts);
+  let partCount = 0;
+  function alloc(part) {
+    if (partCount < maxParts) parts[partCount++] = part;
+  }
+  for (let i = 0; i < q.confettiCount; i++) {
     const c = COLORS[i % COLORS.length];
-    parts.push({
+    alloc({
       kind: 'c',
       x: innerWidth / 2 + (Math.random() - 0.5) * innerWidth * 0.5,
       y: innerHeight * 0.28 + (Math.random() - 0.5) * 60,
@@ -2871,11 +2893,11 @@ function confetti() {
   ];
   function explode(b) {
     const c = COLORS[Math.floor(Math.random() * COLORS.length)];
-    const n = 38;
+    const n = q.fireworkCount;
     for (let k = 0; k < n; k++) {
       const ang = (k / n) * Math.PI * 2 + Math.random() * 0.18;
       const sp = 3.2 + Math.random() * 4.6;
-      parts.push({
+      alloc({
         kind: 'f', x: b.x, y: b.y, px: b.x, py: b.y,
         vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
         life: 1, fade: 0.014 + Math.random() * 0.012,
@@ -2888,7 +2910,8 @@ function confetti() {
     const t = (now - t0) / 1000;
     ctx.clearRect(0, 0, cv.width, cv.height);
     bursts.forEach(b => { if (!b.done && t >= b.at) { b.done = true; explode(b); } });
-    for (const p of parts) {
+    for (let i = 0; i < partCount; i++) {
+      const p = parts[i];
       if (p.kind === 'c') {
         p.vy += 0.28; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.vx *= 0.992;
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
@@ -3242,7 +3265,9 @@ window.__vessel = {
 
 /* tiny QA surface — one low-power profile, mobile-first (no profiler) */
 window.__vesselPerf = {
-  lowPower: true,
+  selectedCelebrationQuality: null,
+  get celebrationQuality() { return this.selectedCelebrationQuality || celebrationQuality(); },
+  get lowPower() { return this.celebrationQuality.lowPower; },
   glowEnabled: false,    /* WebGL glow removed; per-bottle glow is CSS-only */
   glassEnabled: false,   /* WebGL glass reflections removed */
   beatEnabled: false,    /* rhythm mode removed */
