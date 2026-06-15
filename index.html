@@ -242,26 +242,39 @@ body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255
 body[data-skin="tidepool"][data-render-quality="pretty"] .tide.caustics {
   animation: causticDrift 16s ease-in-out infinite alternate;
 }
-@media (min-width: 900px) and (min-height: 620px) {
-  body[data-skin="tidepool"][data-render-quality="pretty"] {
-    --glass: rgba(239, 255, 251, 0.26);
-    --glass-solid: rgba(239, 255, 251, 0.76);
-    --glass-edge: rgba(18, 92, 103, 0.30);
-    --card-border: rgba(18, 92, 103, 0.28);
-  }
+body[data-skin="tidepool"][data-render-quality="pretty"] {
+  --glass: rgba(239, 255, 251, 0.26);
+  --glass-solid: rgba(239, 255, 251, 0.76);
+  --glass-edge: rgba(18, 92, 103, 0.30);
+  --card-border: rgba(18, 92, 103, 0.28);
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.hifi {
+  display: block;
+  opacity: 1;
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.reef {
+  opacity: 0.16;
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.glow {
+  opacity: 0.42;
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.caustics {
+  opacity: 0.28;
+  mix-blend-mode: screen;
+}
+@media (max-width: 899px), (max-height: 619px) {
   body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.hifi {
-    display: block;
-    opacity: 1;
+    background-size: auto 100%;
+    background-position: 44% center;
   }
-  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.reef {
-    opacity: 0.16;
+}
+@media (max-width: 560px) {
+  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.hifi {
+    background-size: auto 100%;
+    background-position: 38% center;
   }
-  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.glow {
-    opacity: 0.42;
-  }
-  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.caustics {
-    opacity: 0.28;
-    mix-blend-mode: screen;
+  body[data-skin="tidepool"][data-render-quality="pretty"][data-screen="game"] #backdrop .tide.hifi {
+    background-position: 62% center;
   }
 }
 @keyframes causticDrift {
