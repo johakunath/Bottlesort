@@ -12,9 +12,10 @@
 <style>
 /* ============================================================
    Vessel — visual system
-   Two art directions, theme-switched on <body data-skin data-mode>:
+   Three art directions, theme-switched on <body data-skin data-mode>:
    · Apothecary — sunlit / candlelit shelf, corked glassware, serif type.
    · Neon Arcade — synthwave grid horizon, glowing tubes, techy sans.
+   · Tidepool Glass — sea-glass shelves, coral accents, pearl highlights.
    All chrome reads these custom properties, so a skin swap retones
    the whole UI. Defaults below = Apothecary · light.
    ============================================================ */
@@ -99,6 +100,34 @@ body[data-skin="neon"] {
   --shadow-pop: 0 22px 54px rgba(8, 2, 22, 0.7), 0 0 60px rgba(122, 60, 255, 0.25);
 }
 
+/* Tidepool Glass — bright sea-glass cabinet */
+body[data-skin="tidepool"] {
+  --head-font: 'Fraunces', Georgia, serif;
+  --body-font: 'Space Grotesk', system-ui, sans-serif;
+  --head-italic: italic;
+  --head-track: -0.006em;
+  --page-bg: radial-gradient(90% 70% at 50% 0%, rgba(255, 255, 232, 0.72), transparent 62%), linear-gradient(180deg, #dff8ee 0%, #b8eadf 42%, #85c8c7 76%, #5a9da6 100%);
+  --ink: #173f45;
+  --ink-dim: rgba(23, 63, 69, 0.64);
+  --title: #0f363c;
+  --accent: #f07b63;
+  --accent-deep: #c9524d;
+  --on-accent: #fff9ec;
+  --glass: rgba(255, 255, 255, 0.20);
+  --glass-solid: rgba(238, 255, 250, 0.66);
+  --glass-edge: rgba(20, 105, 118, 0.25);
+  --cta: linear-gradient(180deg, #ffb29a, #f07b63);
+  --cta-fg: #12393f;
+  --cta-shadow: 0 9px 22px rgba(42, 129, 132, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  --cta-radius: 16px;
+  --card-bg: linear-gradient(180deg, rgba(240, 255, 250, 0.95), rgba(204, 239, 232, 0.97));
+  --card-border: rgba(20, 105, 118, 0.25);
+  --shelf-shadow: rgba(22, 86, 91, 0.30);
+  --key-light: radial-gradient(52% 36% at 46% 0%, rgba(255, 255, 226, 0.30), transparent 72%);
+  --pool-light: radial-gradient(72% 80% at 50% 105%, rgba(255, 170, 140, 0.18), transparent 72%);
+  --shadow-pop: 0 22px 54px rgba(22, 86, 91, 0.34);
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body {
   margin: 0; padding: 0; min-height: 100%;
@@ -130,7 +159,8 @@ body::after { /* pooled light under the stage */
 #backdrop > * { display: none; }
 /* show the layers that belong to the active skin */
 body[data-skin="apothecary"] #backdrop .apo,
-body[data-skin="neon"] #backdrop .neon { display: block; }
+body[data-skin="neon"] #backdrop .neon,
+body[data-skin="tidepool"] #backdrop .tide:not(.hifi) { display: block; }
 
 /* — Apothecary shelf — */
 .apo.planks { position: absolute; inset: 0; opacity: 0.55; }
@@ -176,6 +206,69 @@ body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255
   /* static grid — the scrolling animation forced a full backdrop repaint every frame */
 }
 
+/* — Tidepool Glass — */
+.tide.hifi {
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(78% 60% at 50% 40%, rgba(227, 255, 247, 0.12), transparent 72%),
+    url("assets/tidepool-hifi-backdrop.png");
+  background-size: cover;
+  background-position: center center;
+  filter: saturate(1.04) brightness(1.03);
+  opacity: 0;
+}
+.tide.caustics {
+  position: absolute; inset: -16% -18%;
+  background:
+    repeating-linear-gradient(118deg, rgba(255,255,235,0.24) 0 2px, transparent 2px 38px),
+    repeating-linear-gradient(62deg, rgba(84,190,178,0.14) 0 1px, transparent 1px 44px);
+  opacity: 0.56;
+  mix-blend-mode: soft-light;
+  transform: translate3d(0, 0, 0) rotate(0.001deg);
+}
+.tide.reef {
+  position: absolute; left: -8%; right: -8%; bottom: -8%; height: 38%;
+  background:
+    radial-gradient(18% 44% at 12% 86%, rgba(58, 128, 97, 0.38), transparent 72%),
+    radial-gradient(15% 42% at 88% 78%, rgba(240, 123, 99, 0.26), transparent 74%),
+    radial-gradient(32% 54% at 48% 100%, rgba(255, 245, 206, 0.22), transparent 70%);
+}
+.tide.glow {
+  position: absolute; left: 50%; top: 42%; width: 78%; height: 48%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(ellipse, rgba(255, 255, 224, 0.36), transparent 70%);
+  filter: blur(12px);
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] .tide.caustics {
+  animation: causticDrift 16s ease-in-out infinite alternate;
+}
+@media (min-width: 900px) and (min-height: 620px) {
+  body[data-skin="tidepool"][data-render-quality="pretty"] {
+    --glass: rgba(239, 255, 251, 0.26);
+    --glass-solid: rgba(239, 255, 251, 0.76);
+    --glass-edge: rgba(18, 92, 103, 0.30);
+    --card-border: rgba(18, 92, 103, 0.28);
+  }
+  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.hifi {
+    display: block;
+    opacity: 1;
+  }
+  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.reef {
+    opacity: 0.16;
+  }
+  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.glow {
+    opacity: 0.42;
+  }
+  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.caustics {
+    opacity: 0.28;
+    mix-blend-mode: screen;
+  }
+}
+@keyframes causticDrift {
+  0% { transform: translate3d(-1.5%, -0.5%, 0) rotate(-1deg); }
+  100% { transform: translate3d(1.5%, 0.8%, 0) rotate(1deg); }
+}
+
 #vignette { /* filmic edge darkening over the whole scene */
   position: fixed; inset: 0; pointer-events: none; z-index: 2;
   background: radial-gradient(125% 105% at 50% 45%, transparent 62%, rgba(3, 5, 18, 0.10) 100%);
@@ -186,8 +279,8 @@ body[data-skin="neon"] #vignette { background: radial-gradient(125% 105% at 50% 
 @keyframes flashPop { 0% { opacity: 0; } 16% { opacity: 1; } 100% { opacity: 0; } }
 .hidden { display: none !important; }
 
-/* Dark-mode settings row is shown only on the Apothecary theme (Neon is always dark) */
-body[data-skin="neon"] #row-dark { display: none; }
+/* Dark-mode settings row is shown only on the Apothecary theme. */
+body:not([data-skin="apothecary"]) #row-dark { display: none; }
 
 h1, h2, .display { font-family: var(--head-font); }
 
@@ -196,6 +289,10 @@ body[data-skin="neon"] .bottle svg { filter: drop-shadow(0 calc(var(--bw) * 0.05
 body[data-skin="neon"] .hero-bottles svg { filter: drop-shadow(0 0 8px rgba(255, 120, 230, 0.5)) drop-shadow(0 0 22px rgba(120, 80, 255, 0.4)); }
 body[data-skin="neon"] .row::after { background: linear-gradient(180deg, rgba(255,76,198,0.35), rgba(120,60,255,0.05)); box-shadow: 0 6px 22px rgba(255,76,198,0.25), 0 1px 0 rgba(255,255,255,0.2) inset; }
 body[data-skin="apothecary"] .row::after { background: linear-gradient(180deg, rgba(255,240,210,0.5), rgba(180,140,90,0.08)); box-shadow: 0 6px 18px rgba(120,80,40,0.22), 0 1px 0 rgba(255,250,235,0.4) inset; }
+body[data-skin="tidepool"] .bottle svg { filter: drop-shadow(0 calc(var(--bw) * 0.08) calc(var(--bw) * 0.12) rgba(18, 76, 84, 0.36)); }
+body[data-skin="tidepool"] .hero-bottles svg { filter: drop-shadow(0 14px 24px rgba(18, 76, 84, 0.30)); }
+body[data-skin="tidepool"] .row::after { background: linear-gradient(180deg, rgba(238,255,252,0.7), rgba(85,180,172,0.12)); box-shadow: 0 8px 22px rgba(22,126,133,0.22), 0 1px 0 rgba(255,255,255,0.62) inset; }
+body[data-skin="tidepool"][data-render-quality="pretty"] .row::before { background: radial-gradient(60% 100% at 50% 0%, rgba(240,123,99,0.18), transparent 72%); }
 
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; touch-action: manipulation; }
 button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 12px; }
@@ -250,7 +347,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 .tile.locked .num { color: rgba(155,166,203,0.55); }
 .tile .lock { font-size: 14px; color: var(--ink-dim); }
 
-.menu-foot { color: var(--ink-dim); font-size: 13px; font-weight: 700; display: flex; gap: 18px; align-items: center; }
+.menu-foot { color: var(--ink-dim); font-size: 13px; font-weight: 700; display: flex; gap: 18px; align-items: center; margin-top: -4px; }
 .menu-foot button { color: var(--ink-dim); font-weight: 800; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--glass-edge); background: var(--glass); }
 
 /* ---------------- Game HUD ---------------- */
@@ -319,7 +416,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 .slot .glow {
   position: absolute; left: -8%; right: -8%; bottom: calc(var(--bw) * -0.14); height: calc(var(--bw) * 0.3);
-  border-radius: 50%; filter: blur(6px); opacity: 0.5; transition: background 0.4s, opacity 0.3s, transform 0.3s;
+  border-radius: 50%; filter: blur(6px); opacity: 0; transition: background 0.4s, opacity 0.3s, transform 0.3s;
   pointer-events: none;
 }
 .slot.selected .glow { opacity: 0.95; transform: scale(1.3); }
@@ -504,9 +601,9 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
   padding: 7px 16px; border-radius: 999px; font-weight: 900; font-size: clamp(13px, 2vmin, 15px);
   background: var(--glass-solid); border: 1px solid var(--glass-edge); color: var(--accent);
 }
-.modes { display: flex; gap: 12px; width: min(560px, 92vw); }
+.menu-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; width: min(720px, 92vw); }
 .mode-card {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
   padding: 14px 10px 12px; border-radius: var(--r-lg);
   background: var(--glass-solid); border: 1px solid var(--glass-edge);
   transition: transform 0.15s, background 0.2s, border-color 0.2s;
@@ -566,6 +663,19 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
   55% { opacity: 0.8; }
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.25); }
 }
+.pearl-bubble {
+  position: absolute; width: calc(var(--bw) * 0.13); height: calc(var(--bw) * 0.13);
+  min-width: 7px; min-height: 7px; border-radius: 50%; pointer-events: none; z-index: 71;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  background: radial-gradient(circle at 34% 28%, rgba(255,255,255,0.9), rgba(255,255,255,0.18) 42%, rgba(120,220,210,0.14) 72%, transparent 73%);
+  box-shadow: inset -1px -2px 4px rgba(58, 142, 150, 0.18), 0 0 8px rgba(255,255,255,0.28);
+  animation: pearlBubble 0.92s ease-out forwards;
+}
+@keyframes pearlBubble {
+  0% { opacity: 0; transform: translate(-50%, -10%) scale(0.35); }
+  18% { opacity: 0.86; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), var(--dy)) scale(1); }
+}
 
 /* ---------------- Modals (settings / achievements) ---------------- */
 .modal {
@@ -598,7 +708,7 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 }
 .switch.on { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 70%, #fff), var(--accent-deep)); }
 .switch.on::after { transform: translateX(22px); }
-.theme-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 12px 0 4px; }
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px; margin: 12px 0 4px; }
 .theme-card {
   position: relative; aspect-ratio: 1.5 / 1; border-radius: 16px; overflow: hidden;
   border: 2px solid var(--glass-edge); transition: transform 0.14s, border-color 0.2s;
@@ -658,11 +768,12 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
 /* ---------------- Responsive ---------------- */
 @media (max-width: 560px) {
   .level-grid { grid-template-columns: repeat(5, minmax(56px, 1fr)); width: 100%; max-width: 420px; }
+  .menu-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(420px, 92vw); }
   .seg button { padding: 9px 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hero-bottles svg, .stream, .splash, .slot, .sheenmove, .droplet, #flash,
-  .apo.rays, .neon.grid,
+  .pearl-bubble, .apo.rays, .neon.grid, .tide.caustics,
   .elem-frozen, .elem-electric, .elem-boil, .elem-toxic { animation: none !important; }
   * { transition-duration: 0.01s !important; }
 }
@@ -675,6 +786,10 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
   <div class="apo rays"></div>
   <div class="apo glow"></div>
   <div class="neon grid"></div>
+  <div class="tide hifi"></div>
+  <div class="tide caustics"></div>
+  <div class="tide reef"></div>
+  <div class="tide glow"></div>
 </div>
 <div id="vignette"></div>
 <div id="flash"></div>
@@ -691,7 +806,7 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
     <span class="chip" id="chip-stars">★ 0</span>
     <span class="chip" id="chip-streak">🔥 0 day streak</span>
   </div>
-  <div class="modes">
+  <div class="menu-actions">
     <button class="mode-card" id="card-daily">
       <span class="mc-icon">📅</span><span class="mc-name">Daily</span>
       <span class="mc-sub" id="daily-sub">Play today's puzzle</span>
@@ -699,6 +814,14 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
     <button class="mode-card" id="card-rush">
       <span class="mc-icon">⚡</span><span class="mc-name">Rush</span>
       <span class="mc-sub" id="rush-sub">Race the clock</span>
+    </button>
+    <button class="mode-card" id="btn-ach">
+      <span class="mc-icon">🏆</span><span class="mc-name">Awards</span>
+      <span class="mc-sub">Stars & badges</span>
+    </button>
+    <button class="mode-card" id="btn-settings">
+      <span class="mc-icon">⚙️</span><span class="mc-name">Settings</span>
+      <span class="mc-sub">Sound & style</span>
     </button>
   </div>
   <p class="section-label">Classic · pick your level</p>
@@ -709,8 +832,6 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
   </div>
   <div class="level-grid" id="level-grid"></div>
   <div class="menu-foot">
-    <button id="btn-ach">🏆 Awards</button>
-    <button id="btn-settings">⚙️ Settings</button>
     <button id="btn-sound-menu">🔊 Sound on</button>
   </div>
   <p class="credit">Every puzzle is verified solvable</p>
@@ -1103,6 +1224,17 @@ const NEON_COLORS = [
   ['#ff5db8', '#c8127a'], // pink    (magenta)
   ['#d8a76a', '#8a5a2c']  // sand    (brown)
 ];
+const TIDE_COLORS = [
+  ['#ff7f73', '#c63f45'], // coral   (red)
+  ['#ffbd67', '#d46a24'], // amber   (orange)
+  ['#f7e978', '#c9a93b'], // shell   (yellow)
+  ['#84d86d', '#2f9a55'], // kelp    (green)
+  ['#54d9c5', '#138b84'], // glass   (cyan)
+  ['#69b8ff', '#2a66c7'], // lagoon  (blue)
+  ['#b28dff', '#6650c6'], // lilac   (purple)
+  ['#ff91b7', '#c94678'], // anemone (pink)
+  ['#c8a06a', '#74603f']  // drift   (brown)
+];
 let COLORS = APO_COLORS;
 let HIDDEN_FILL = ['#cbb186', '#8a6a3e']; /* parchment-gray mystery fill (apothecary) */
 const COLOR_NAMES = ['cherry', 'tangerine', 'lemon', 'lime', 'teal', 'blue', 'violet', 'pink', 'mocha'];
@@ -1189,7 +1321,7 @@ let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
 save.progress = Object.assign({}, DEFAULT_SAVE.progress, save.progress || {});
 if (!['relaxed', 'normal', 'expert'].includes(save.difficulty)) save.difficulty = 'normal';
 /* migrate old colour-theme saves (dusk/ocean/candy/galaxy) to the new skins */
-if (!['apothecary', 'neon'].includes(save.theme)) save.theme = 'apothecary';
+if (!['apothecary', 'neon', 'tidepool'].includes(save.theme)) save.theme = 'apothecary';
 if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
 /* normalise visual toggles to explicit booleans (pre-fluid saves lack the key:
    the DEFAULT_SAVE merge already defaults it, this pins the schema) */
@@ -1307,6 +1439,9 @@ function chooseAutoRenderQuality() {
 }
 function activeRenderProfile() {
   return RENDER_PROFILES[renderQualityEffective] || RENDER_PROFILES.normal;
+}
+function prettyTidepoolEffects() {
+  return !RM && SKIN === 'tidepool' && activeRenderProfile().id === 'pretty';
 }
 function applyRenderQuality(reason) {
   renderQualityUser = save.renderQuality;
@@ -1632,6 +1767,7 @@ const locked = new Set();
 let ELEMENT_MAP = {};
 let slots = [];
 let focusedBottle = 0;
+let showBottleKeyboardFocus = false;
 
 function mergeRuns(bottle) {
   const out = [];
@@ -1948,8 +2084,23 @@ const SvgRenderer = {
       fx.appendChild(d);
       setTimeout(() => d.remove(), 600);
     }, 120);
+    const spawnPearlBubble = () => {
+      const b = document.createElement('span');
+      b.className = 'pearl-bubble';
+      b.style.left = (tx + (Math.random() * receiverW * 0.32 - receiverW * 0.16)).toFixed(1) + 'px';
+      b.style.top = (ty + receiverW * (0.02 + Math.random() * 0.12)).toFixed(1) + 'px';
+      b.style.setProperty('--dx', (Math.random() * 22 - 11).toFixed(0) + 'px');
+      b.style.setProperty('--dy', (-(24 + Math.random() * 34)).toFixed(0) + 'px');
+      fx.appendChild(b);
+      setTimeout(() => b.remove(), 1000);
+    };
+    let bubbleTimer = null;
+    if (prettyTidepoolEffects()) {
+      spawnPearlBubble();
+      bubbleTimer = setInterval(spawnPearlBubble, 180);
+    }
     if (!this.pourFxMap) this.pourFxMap = new Map();
-    this.pourFxMap.set(si, { pourSVG, steamEl, rippleEls, dropTimer });
+    this.pourFxMap.set(si, { pourSVG, steamEl, rippleEls, dropTimer, bubbleTimer });
   },
   updatePour() {},
   endPour(info) {
@@ -1957,6 +2108,7 @@ const SvgRenderer = {
     const fx = this.pourFxMap.get(info && info.si);
     if (!fx) return;
     if (fx.dropTimer) clearInterval(fx.dropTimer);
+    if (fx.bubbleTimer) clearInterval(fx.bubbleTimer);
     if (fx.pourSVG) fx.pourSVG.remove();
     if (fx.steamEl) fx.steamEl.remove();
     fx.rippleEls.forEach(e => e.remove());
@@ -2229,6 +2381,19 @@ const CanvasRenderer = {
         const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
         ctx.globalAlpha = (1 - u) * 0.65; ctx.strokeStyle = p.c0; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.ellipse(tx, ty, p.receiverW * (0.12 + u * 0.45), p.receiverW * (0.04 + u * 0.12), 0, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (prettyTidepoolEffects()) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.76)';
+        ctx.fillStyle = 'rgba(210,255,248,0.16)';
+        ctx.lineWidth = 1;
+        for (let k = 0; k < 3; k++) {
+          const u = (age * 0.9 + k * 0.31) % 1;
+          const bx = tx + Math.sin(age * 1.7 + k * 2.1) * p.receiverW * 0.16;
+          const by = ty + p.receiverW * 0.08 - u * p.receiverW * 0.62;
+          const br = p.receiverW * (0.045 + u * 0.045);
+          ctx.globalAlpha = (1 - u) * 0.58;
+          ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
       }
       if (SKIN === 'apothecary') {
         ctx.globalAlpha = 0.35; ctx.strokeStyle = 'rgba(240,245,255,0.75)'; ctx.lineWidth = 2;
@@ -2547,7 +2712,7 @@ function applyBottleFocus(i, moveDomFocus) {
   if (!slots.length) return;
   focusedBottle = Math.max(0, Math.min(i, slots.length - 1));
   slots.forEach((slot, idx) => {
-    slot.el.classList.toggle('keyboard-focus', idx === focusedBottle);
+    slot.el.classList.toggle('keyboard-focus', showBottleKeyboardFocus && idx === focusedBottle);
     slot.btn.tabIndex = idx === focusedBottle ? 0 : -1;
   });
   if (moveDomFocus) slots[focusedBottle].btn.focus({ preventScroll: true });
@@ -2572,9 +2737,9 @@ function handleGameKey(e) {
   const onBottleBtn = (k === 'Enter' || k === ' ') && slots.some(s => s.btn === e.target);
   if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(k) || onBottleBtn) e.preventDefault();
   else if (k === 'Enter' || k === ' ') return;
-  if (k === 'ArrowLeft' || k === 'ArrowUp') applyBottleFocus(focusedBottle - 1, true);
-  else if (k === 'ArrowRight' || k === 'ArrowDown') applyBottleFocus(focusedBottle + 1, true);
-  else if (k === 'Enter' || k === ' ') onTap(focusedBottle);
+  if (k === 'ArrowLeft' || k === 'ArrowUp') { showBottleKeyboardFocus = true; applyBottleFocus(focusedBottle - 1, true); }
+  else if (k === 'ArrowRight' || k === 'ArrowDown') { showBottleKeyboardFocus = true; applyBottleFocus(focusedBottle + 1, true); }
+  else if (k === 'Enter' || k === ' ') { showBottleKeyboardFocus = true; applyBottleFocus(focusedBottle, false); onTap(focusedBottle); }
   else if (k.toLowerCase() === 'u') { e.preventDefault(); undo(); }
   else if (k.toLowerCase() === 'r') {
     e.preventDefault();
@@ -2631,16 +2796,18 @@ function setupBoard(gen) {
       const seal = document.createElement('span'); seal.className = 'seal'; seal.textContent = '✦';
       slot.appendChild(seal);
     }
+    btn.addEventListener('pointerdown', () => { showBottleKeyboardFocus = false; applyBottleFocus(i, false); });
     btn.addEventListener('click', () => onTap(i));
     return { slot, el: slot, glow, btn, sh, liquidGroup: svg.querySelector('.liquids'), svg };
   });
   showScreen('game');
+  showBottleKeyboardFocus = false;
   focusedBottle = Math.min(focusedBottle, Math.max(0, slots.length - 1));
   renderer.setBoard(slots);
   renderer.syncLayout();
   renderer.renderAll();
   syncCaps();
-  applyBottleFocus(focusedBottle, true);
+  applyBottleFocus(focusedBottle, false);
   orbUpdate(false);
   updateHUD();
   $('#overlay').classList.remove('show');
@@ -3273,7 +3440,11 @@ const THEMES = [
   { id: 'neon', name: 'Neon Arcade', palette: NEON_COLORS, hidden: ['#5a4b86', '#2e2550'],
     modes: false, kicker: 'Arcade', tag: 'Sort to the beat.',
     rim: { light: 'rgba(190,240,255,0.9)', dark: 'rgba(190,240,255,0.9)' }, shadow: '#06021a',
-    preview: 'radial-gradient(circle at 50% 78%, rgba(255,76,198,0.85), transparent 58%), linear-gradient(#160a28, #1d0c33)' }
+    preview: 'radial-gradient(circle at 50% 78%, rgba(255,76,198,0.85), transparent 58%), linear-gradient(#160a28, #1d0c33)' },
+  { id: 'tidepool', name: 'Tidepool Glass', palette: TIDE_COLORS, hidden: ['#d8f3ee', '#4d7f86'],
+    modes: false, kicker: 'Tidepool Glass', tag: 'Sort in the shallows.',
+    rim: { light: 'rgba(245,255,250,0.96)', dark: 'rgba(245,255,250,0.96)' }, shadow: '#144d55',
+    preview: 'radial-gradient(circle at 34% 24%, rgba(255,255,220,0.9), transparent 34%), radial-gradient(circle at 78% 74%, rgba(240,123,99,0.7), transparent 34%), linear-gradient(140deg, #dff8ee, #71c5c1 62%, #477f92)' }
 ];
 
 function totalStars() {
@@ -3298,7 +3469,7 @@ function refreshBottles() {
 function applyTheme() {
   const t = THEMES.find(x => x.id === save.theme) || THEMES[0];
   SKIN = t.id;
-  MODE = t.modes ? (save.mode === 'dark' ? 'dark' : 'light') : 'dark';
+  MODE = t.modes ? (save.mode === 'dark' ? 'dark' : 'light') : (t.id === 'neon' ? 'dark' : 'light');
   document.body.dataset.skin = SKIN;
   document.body.dataset.mode = MODE;
   COLORS = t.palette;
@@ -3310,6 +3481,10 @@ function applyTheme() {
   if (k) k.textContent = t.kicker;
   if (tg) tg.textContent = t.tag;
   refreshBottles();
+  if (document.body.dataset.screen === 'menu' && ambientRaf) {
+    stopAmbient();
+    startAmbient();
+  }
 }
 
 function toggleMode() {
@@ -3408,6 +3583,8 @@ function onWin() {
     const fl = $('#flash');
     fl.style.background = SKIN === 'neon'
       ? 'radial-gradient(60% 60% at 50% 40%, rgba(255,76,198,0.45), transparent 70%)'
+      : SKIN === 'tidepool'
+        ? 'radial-gradient(60% 60% at 50% 40%, rgba(255,220,184,0.48), transparent 66%), radial-gradient(42% 42% at 50% 50%, rgba(91,218,198,0.26), transparent 72%)'
       : MODE === 'dark'
         ? 'radial-gradient(60% 60% at 50% 40%, rgba(255,180,90,0.50), transparent 70%)'
         : 'radial-gradient(60% 60% at 50% 40%, rgba(255,245,224,0.55), transparent 70%)';
@@ -3538,6 +3715,11 @@ function startAmbient() {
     W = cv.width = innerWidth; H = cv.height = innerHeight;
     parts = [];
     const count = Math.max(4, Math.round(Math.min(44, Math.floor(W * H / 38000)) * activeRenderProfile().particleScale));
+    const hues = SKIN === 'tidepool'
+      ? ['226,255,247', '255,184,154', '196,242,222']
+      : SKIN === 'neon'
+        ? ['255,76,198', '80,220,255', '180,120,255']
+        : ['255,220,170', '160,200,255'];
     for (let i = 0; i < count; i++) parts.push({
       x: Math.random() * W, y: Math.random() * H,
       r: 0.7 + Math.random() * 1.9,
@@ -3545,7 +3727,7 @@ function startAmbient() {
       vx: (Math.random() - 0.5) * 0.06,
       ph: Math.random() * Math.PI * 2,
       big: Math.random() < 0.12,
-      hue: Math.random() < 0.7 ? '255,220,170' : '160,200,255'
+      hue: hues[Math.floor(Math.random() * hues.length)]
     });
   }
   size();
@@ -3880,7 +4062,12 @@ window.__vesselPerf = {
   glowEnabled: false,    /* WebGL glow removed; per-bottle glow is CSS-only */
   glassEnabled: false,   /* WebGL glass reflections removed */
   beatEnabled: false,    /* rhythm mode removed */
-  bubblesEnabled: false, /* random idle bubbles removed */
+  get bubblesEnabled() { return prettyTidepoolEffects(); },
+  get causticsEnabled() { return prettyTidepoolEffects(); },
+  get hifiBackdropEnabled() {
+    const el = document.querySelector('.tide.hifi');
+    return !!el && getComputedStyle(el).display !== 'none' && getComputedStyle(el).opacity !== '0';
+  },
   get activeRenderer() { return renderer.active; },
   get rendererBackend() { return renderer.active; },
   get fluidEnabled() { return !!save.fluid; },
