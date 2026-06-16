@@ -158,11 +158,27 @@ body::after { /* pooled light under the stage */
 #backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 #backdrop > * { display: none; }
 /* show the layers that belong to the active skin */
-body[data-skin="apothecary"] #backdrop .apo,
-body[data-skin="neon"] #backdrop .neon,
+body[data-skin="apothecary"] #backdrop .apo:not(.hifi),
+body[data-skin="neon"] #backdrop .neon:not(.hifi),
 body[data-skin="tidepool"] #backdrop .tide:not(.hifi) { display: block; }
 
 /* — Apothecary shelf — */
+.apo.hifi {
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(76% 62% at 50% 40%, rgba(255, 246, 218, 0.16), transparent 74%),
+    url("assets/background-suggestions/apothecary-sunlit-cabinet.png");
+  background-size: cover;
+  background-position: center center;
+  filter: saturate(1.02) brightness(1.02);
+  opacity: 0;
+}
+body[data-skin="apothecary"][data-mode="dark"] .apo.hifi {
+  background-image:
+    radial-gradient(76% 62% at 50% 40%, rgba(255, 184, 104, 0.10), transparent 72%),
+    url("assets/background-suggestions/apothecary-moonlit-alchemy.png");
+  filter: saturate(1.05) brightness(0.92);
+}
 .apo.planks { position: absolute; inset: 0; opacity: 0.55; }
 body[data-skin="apothecary"][data-mode="light"] .apo.planks {
   background:
@@ -191,8 +207,31 @@ body[data-mode="dark"] .apo.rays { opacity: 0.5; }
   filter: blur(16px);
 }
 body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255,180,90,0.4), transparent 70%); }
+body[data-skin="apothecary"][data-render-quality="pretty"] #backdrop .apo.hifi {
+  display: block;
+  opacity: 1;
+}
+body[data-skin="apothecary"][data-render-quality="pretty"] #backdrop .apo.planks {
+  opacity: 0.12;
+}
+body[data-skin="apothecary"][data-render-quality="pretty"] #backdrop .apo.rays {
+  opacity: 0.34;
+}
+body[data-skin="apothecary"][data-render-quality="pretty"] #backdrop .apo.glow {
+  opacity: 0.28;
+}
 
 /* — Neon synth grid — */
+.neon.hifi {
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(74% 62% at 50% 44%, rgba(30, 18, 52, 0.12), transparent 70%),
+    url("assets/background-suggestions/neon-vaporwave-skyline.png");
+  background-size: cover;
+  background-position: center center;
+  filter: saturate(1.1) brightness(0.92);
+  opacity: 0;
+}
 .neon.grid {
   position: absolute; left: -25%; right: -25%; bottom: -2%; height: 52%;
   background-image:
@@ -204,6 +243,14 @@ body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255
   mask-image: linear-gradient(transparent, #000 60%);
   -webkit-mask-image: linear-gradient(transparent, #000 60%);
   /* static grid — the scrolling animation forced a full backdrop repaint every frame */
+}
+body[data-skin="neon"][data-render-quality="pretty"] #backdrop .neon.hifi {
+  display: block;
+  opacity: 1;
+}
+body[data-skin="neon"][data-render-quality="pretty"] #backdrop .neon.grid {
+  opacity: 0.38;
+  mix-blend-mode: screen;
 }
 
 /* — Tidepool Glass — */
@@ -242,26 +289,53 @@ body[data-mode="dark"] .apo.glow { background: radial-gradient(ellipse, rgba(255
 body[data-skin="tidepool"][data-render-quality="pretty"] .tide.caustics {
   animation: causticDrift 16s ease-in-out infinite alternate;
 }
-@media (min-width: 900px) and (min-height: 620px) {
-  body[data-skin="tidepool"][data-render-quality="pretty"] {
-    --glass: rgba(239, 255, 251, 0.26);
-    --glass-solid: rgba(239, 255, 251, 0.76);
-    --glass-edge: rgba(18, 92, 103, 0.30);
-    --card-border: rgba(18, 92, 103, 0.28);
+body[data-skin="tidepool"][data-render-quality="pretty"] {
+  --glass: rgba(239, 255, 251, 0.26);
+  --glass-solid: rgba(239, 255, 251, 0.76);
+  --glass-edge: rgba(18, 92, 103, 0.30);
+  --card-border: rgba(18, 92, 103, 0.28);
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.hifi {
+  display: block;
+  opacity: 1;
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.reef {
+  opacity: 0.16;
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.glow {
+  opacity: 0.42;
+}
+body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.caustics {
+  opacity: 0.28;
+  mix-blend-mode: screen;
+}
+@media (max-width: 899px), (max-height: 619px) {
+  body[data-render-quality="pretty"] #backdrop .apo.hifi,
+  body[data-render-quality="pretty"] #backdrop .neon.hifi,
+  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.hifi {
+    background-size: auto 100%;
+    background-position: 44% center;
+  }
+}
+@media (max-width: 560px) {
+  body[data-skin="apothecary"][data-render-quality="pretty"] #backdrop .apo.hifi {
+    background-position: 42% center;
+  }
+  body[data-skin="apothecary"][data-render-quality="pretty"][data-screen="game"] #backdrop .apo.hifi {
+    background-position: 58% center;
+  }
+  body[data-skin="neon"][data-render-quality="pretty"] #backdrop .neon.hifi {
+    background-position: 42% center;
+  }
+  body[data-skin="neon"][data-render-quality="pretty"][data-screen="game"] #backdrop .neon.hifi {
+    background-position: 58% center;
   }
   body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.hifi {
-    display: block;
-    opacity: 1;
+    background-size: auto 100%;
+    background-position: 38% center;
   }
-  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.reef {
-    opacity: 0.16;
-  }
-  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.glow {
-    opacity: 0.42;
-  }
-  body[data-skin="tidepool"][data-render-quality="pretty"] #backdrop .tide.caustics {
-    opacity: 0.28;
-    mix-blend-mode: screen;
+  body[data-skin="tidepool"][data-render-quality="pretty"][data-screen="game"] #backdrop .tide.hifi {
+    background-position: 62% center;
   }
 }
 @keyframes causticDrift {
@@ -782,9 +856,11 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
 <body>
 <canvas id="ambient"></canvas>
 <div id="backdrop" aria-hidden="true">
+  <div class="apo hifi"></div>
   <div class="apo planks"></div>
   <div class="apo rays"></div>
   <div class="apo glow"></div>
+  <div class="neon hifi"></div>
   <div class="neon grid"></div>
   <div class="tide hifi"></div>
   <div class="tide caustics"></div>
@@ -4065,7 +4141,8 @@ window.__vesselPerf = {
   get bubblesEnabled() { return prettyTidepoolEffects(); },
   get causticsEnabled() { return prettyTidepoolEffects(); },
   get hifiBackdropEnabled() {
-    const el = document.querySelector('.tide.hifi');
+    const cls = SKIN === 'apothecary' ? 'apo' : SKIN;
+    const el = document.querySelector('.' + cls + '.hifi');
     return !!el && getComputedStyle(el).display !== 'none' && getComputedStyle(el).opacity !== '0';
   },
   get activeRenderer() { return renderer.active; },
