@@ -32,16 +32,16 @@
   </div>
   <div class="hero-bottles" aria-hidden="true"></div>
   <div class="stat-chips">
-    <span class="chip" id="chip-stars">â˜… 0</span>
-    <span class="chip" id="chip-streak">ðŸ”¥ 0 day streak</span>
+    <span class="chip" id="chip-stars">★ 0</span>
+    <span class="chip" id="chip-streak">🔥 0 day streak</span>
   </div>
   <div class="menu-actions">
     <button class="mode-card" id="card-daily">
-      <span class="mc-icon">ðŸ“…</span><span class="mc-name">Daily</span>
+      <span class="mc-icon">📅</span><span class="mc-name">Daily</span>
       <span class="mc-sub" id="daily-sub">Play today's puzzle</span>
     </button>
     <button class="mode-card" id="card-rush">
-      <span class="mc-icon">âš¡</span><span class="mc-name">Rush</span>
+      <span class="mc-icon">⚡</span><span class="mc-name">Rush</span>
       <span class="mc-sub" id="rush-sub">Race the clock</span>
     </button>
     <button class="mode-card" id="btn-ach">
@@ -53,7 +53,7 @@
       <span class="mc-sub">Sound & style</span>
     </button>
   </div>
-  <p class="section-label">Classic Â· pick your level</p>
+  <p class="section-label">Classic · pick your level</p>
   <div class="seg" id="diff-seg" role="group" aria-label="Difficulty">
     <button data-d="relaxed">Relaxed</button>
     <button data-d="normal">Normal</button>
@@ -61,7 +61,7 @@
   </div>
   <div class="level-grid" id="level-grid"></div>
   <div class="menu-foot">
-    <button id="btn-sound-menu">ðŸ”Š Sound on</button>
+    <button id="btn-sound-menu">🔊 Sound on</button>
   </div>
   <p class="credit">Every puzzle is verified solvable</p>
 </div>
@@ -69,22 +69,22 @@
 <!-- ============ Game ============ -->
 <div id="game" class="screen hidden">
   <div class="hud">
-    <button class="icon-btn" id="btn-back" aria-label="Back to levels">â€¹</button>
+    <button class="icon-btn" id="btn-back" aria-label="Back to levels">‹</button>
     <div class="mid">
       <div class="lvl" id="hud-level">Level 1</div>
       <div class="sub" id="hud-sub"></div>
     </div>
     <div id="orb" aria-hidden="true"></div>
-    <button class="icon-btn" id="btn-undo" aria-label="Undo">â†©<span class="badge hidden" id="undo-badge"></span></button>
-    <button class="icon-btn" id="btn-restart" aria-label="Restart level">âŸ³</button>
-    <button class="icon-btn" id="btn-sound" aria-label="Toggle sound">ðŸ”Š</button>
+    <button class="icon-btn" id="btn-undo" aria-label="Undo">↩<span class="badge hidden" id="undo-badge"></span></button>
+    <button class="icon-btn" id="btn-restart" aria-label="Restart level">⟳</button>
+    <button class="icon-btn" id="btn-sound" aria-label="Toggle sound">🔊</button>
   </div>
   <div id="stage">
     <canvas id="board-canvas" aria-hidden="true"></canvas>
     <div id="fx"></div>
     <div id="hint">Tap a bottle, then tap where to pour</div>
     <div class="fabs">
-      <button class="fab" id="btn-hint" aria-label="Hint"><span class="fi">ðŸ’¡</span></button>
+      <button class="fab" id="btn-hint" aria-label="Hint"><span class="fi">💡</span></button>
     </div>
   </div>
 </div>
@@ -98,7 +98,7 @@
     <div class="btns">
       <button class="btn" id="btn-menu">Levels</button>
       <button class="btn" id="btn-replay">Replay</button>
-      <button class="btn primary" id="btn-next">Next â€º</button>
+      <button class="btn primary" id="btn-next">Next ›</button>
     </div>
   </div>
 </div>
@@ -110,8 +110,8 @@
     <h2 id="settings-title">Settings</h2>
     <div class="set-row"><span>Sound<span class="desc">Pours, chimes and fanfares</span></span><button class="switch" id="sw-sound" role="switch" aria-label="Sound"></button></div>
     <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
-    <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid â€” colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
-    <div class="set-row"><span>Liquid motion<span class="desc">Living surface â€” waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
+    <div class="set-row"><span>Color symbols<span class="desc">Shapes on every liquid — colorblind friendly</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Color symbols"></button></div>
+    <div class="set-row"><span>Liquid motion<span class="desc">Living surface — waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
     <div class="set-row"><span>Render quality<span class="desc">Auto can step down if frames get slow</span></span><select class="quality-select" id="render-quality" aria-label="Render quality"><option value="auto">Auto</option><option value="low">Low</option><option value="normal">Normal</option><option value="pretty">Pretty</option></select></div>
     <div class="set-row" id="row-dark"><span>Dark mode<span class="desc">Candlelit palette for the Apothecary theme</span></span><button class="switch" id="sw-dark" role="switch" aria-label="Dark mode"></button></div>
     <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Unlock new looks by earning stars</span></span></div>

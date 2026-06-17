@@ -1,5 +1,5 @@
 ﻿/* ============================================================
-   Vessel â€” game runtime v2
+   Vessel — game runtime v2
    Shapes, gravity-true liquid, mystery bottles, ambient magic.
    Requires logic.js loaded first.
    ============================================================ */
@@ -7,7 +7,7 @@
 (function () {
 
 /* ---------------- palette ----------------
-   Each entry = [bright face, shadow side]; used as a bâ†’aâ†’b across the band. */
+   Each entry = [bright face, shadow side]; used as a b→a→b across the band. */
 /* palettes retuned for mobile legibility: each colour sits on a distinct hue with
    varied lightness so neighbours never read as the same colour on a small screen */
 const APO_COLORS = [
@@ -47,7 +47,7 @@ let COLORS = APO_COLORS;
 let HIDDEN_FILL = ['#cbb186', '#8a6a3e']; /* parchment-gray mystery fill (apothecary) */
 const COLOR_NAMES = ['cherry', 'tangerine', 'lemon', 'lime', 'teal', 'blue', 'violet', 'pink', 'mocha'];
 /* one distinct glyph per liquid color, for colorblind-friendly play */
-const COLOR_GLYPHS = ['â™¥', 'â–²', 'â—', 'âœ¿', 'â—†', 'â˜…', 'âœš', 'â™ª', 'â¬£'];
+const COLOR_GLYPHS = ['♥', '▲', '●', '✿', '◆', '★', '✚', '♪', '⬣'];
 
 /* ---------------- bottle shapes ----------------
    Every shape: viewBox 100 x vbH. pivot = element center (CSS rotate origin).
@@ -133,7 +133,7 @@ if (!['apothecary', 'neon', 'tidepool'].includes(save.theme)) save.theme = 'apot
 if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
 /* normalise visual toggles to explicit booleans (pre-fluid saves lack the key:
    the DEFAULT_SAVE merge already defaults it, this pins the schema) */
-save.fluid = save.fluid !== false;   /* realistic liquid motion â€” default ON */
+save.fluid = save.fluid !== false;   /* realistic liquid motion — default ON */
 delete save.glass;                   /* removed: WebGL glass reflections */
 delete save.beat;                    /* removed: Neon rhythm mode */
 save.seenSpecials = save.seenSpecials || {};
@@ -452,7 +452,7 @@ const PerfMeter = (() => {
       'dropped: ' + snapshot.droppedFrames,
       'dpr: ' + snapshot.dpr,
       'quality: ' + snapshot.qualityProfile,
-      'demote: ' + (snapshot.autoDemotionReason || 'â€”')
+      'demote: ' + (snapshot.autoDemotionReason || '—')
     ].join('\n');
   }
   const api = {
@@ -569,7 +569,7 @@ function buildDefs() {
   hl.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#fff', 'stop-opacity': 0.9 }));
   hl.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#fff', 'stop-opacity': 0.05 }));
   defs.appendChild(hl);
-  /* glass interior backing â€” warm for apothecary, cool for neon */
+  /* glass interior backing — warm for apothecary, cool for neon */
   const backTint = neon ? '#7fd0ff' : '#ffe9c8';
   const gb = svgEl('linearGradient', { id: 'glassBack', x1: 0, y1: 0, x2: 0, y2: 1 });
   gb.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#ffffff', 'stop-opacity': 0.12 }));
@@ -632,8 +632,8 @@ function buildBottleSVG(shapeName, opts) {
     sheenWrap.appendChild(sheen);
     svg.appendChild(sheenWrap);
   }
-  /* parchment label â€” always built when requested; CSS hides it on Neon
-     (so a runtime Apothecaryâ†’Neon switch can't leave a stale label behind) */
+  /* parchment label — always built when requested; CSS hides it on Neon
+     (so a runtime Apothecary→Neon switch can't leave a stale label behind) */
   if (opts.label && sh.label) {
     svg.appendChild(buildLabel(sh.label));
   }
@@ -656,7 +656,7 @@ function buildBottleSVG(shapeName, opts) {
     gloss.appendChild(s);
   });
   svg.appendChild(gloss);
-  /* cork stopper â€” drawn last so it plugs the mouth opening (over the lip + the
+  /* cork stopper — drawn last so it plugs the mouth opening (over the lip + the
      dark mouth ellipse) instead of floating above a visible hole. Hidden on Neon via CSS. */
   if (opts.cork && sh.cork) {
     svg.appendChild(buildCork(sh.cork));
@@ -758,7 +758,7 @@ function buildVolMap(sn, sh) {
 /* ---- liquid element visual effects ---- */
 const ELEM_TYPES = ['frozen', 'electric', 'boiling', 'toxic'];
 function buildElementMap(gen) {
-  /* overlays render under reduced motion too â€” the CSS freezes their animations */
+  /* overlays render under reduced motion too — the CSS freezes their animations */
   ELEMENT_MAP = {};
   const stateHash = gen.state.reduce((s, b, i) => (s ^ b.reduce((x, c) => (x * 31 + c) | 0, i * 997)) | 0, 0);
   const rng = window.mulberry32(((stateHash >>> 0) ^ (gen.par * 1234567)) >>> 0);
@@ -818,14 +818,14 @@ function appendElemOverlay(g, elem, y, h, px) {
       x: px + 14, y: y + h / 2 + 4, 'text-anchor': 'middle', 'font-size': 10,
       fill: 'rgba(180,255,200,0.9)', 'pointer-events': 'none'
     });
-    skull.textContent = 'â˜ ';
+    skull.textContent = '☠';
     skull.setAttribute('class', 'elem-toxic');
     g.appendChild(skull);
   }
 }
 
 /* ============================================================
-   Liquid simulation â€” per-bottle 1-D shallow-water surface.
+   Liquid simulation — per-bottle 1-D shallow-water surface.
    Each active bottle keeps a height-field (offsets + velocities)
    across its width. A single rAF loop integrates every sim with
    wave propagation + damping so disturbances *settle* instead of
@@ -862,7 +862,7 @@ const Fluid = {
       s.v[k] += mag * dir * x;
     }
   },
-  /* a splash dropped into the centre â€” a dip that ripples outward */
+  /* a splash dropped into the centre — a dip that ripples outward */
   drop(i, mag) {
     if (!this.active()) return;
     const s = this.get(i), n = this.N, c = (n - 1) / 2;
@@ -888,7 +888,7 @@ const Fluid = {
         else if (h[k] < -cap) { h[k] = -cap; v[k] *= -0.3; }
         energy += h[k] * h[k] + v[k] * v[k] * 0.01;
       }
-      if (energy < 0.002) settled.push(i);   /* settled â€” drop it from the loop */
+      if (energy < 0.002) settled.push(i);   /* settled — drop it from the loop */
     }
     for (const i of settled) this.reset(i);
   },
@@ -900,7 +900,7 @@ const Fluid = {
             ' L' + left.toFixed(1) + ',' + (surfY + (s ? s.h[0] : 0)).toFixed(2);
     for (let k = 0; k < n; k++) {
       const x = left + (k / (n - 1)) * span;
-      const edge = Math.abs((k / (n - 1)) * 2 - 1);          /* 0 centre â†’ 1 wall */
+      const edge = Math.abs((k / (n - 1)) * 2 - 1);          /* 0 centre → 1 wall */
       const men = -this.MENISCUS * Math.pow(edge, 2.2);       /* climb up near walls */
       const y = surfY + (s ? s.h[k] : 0) + men;
       d += ' L' + x.toFixed(1) + ',' + y.toFixed(2);
@@ -1123,11 +1123,11 @@ const SvgRenderer = {
       cum += seg.u;
     }
     /* Fake-3D meniscus cue: a single concave-arc highlight on the topmost visible
-       liquid when fluid animation is off. Walls rise, centre dips â€” matching the
+       liquid when fluid animation is off. Walls rise, centre dips — matching the
        settled shape of Fluid.crestFor() so the static and animated states look
        identical. No dark lines; no per-band cost.
        Uses shapeWidthAt (same as the fluid code) so the arc never exceeds the
-       interior clip â€” fixes flask neck / nearly-full bottle cases. */
+       interior clip — fixes flask neck / nearly-full bottle cases. */
     if (ellipses.length && !topWave) {
       const e = ellipses[ellipses.length - 1];
       const wdy = wob ? wob.dy : 0;
@@ -1184,7 +1184,7 @@ const SvgRenderer = {
     g.appendChild(inner);
     const top = segs.length && cum > 0.01 ? segs[segs.length - 1] : null;
     const glowColor = top ? (hid >= cum ? HIDDEN_FILL[1] : COLORS[top.c][1]) : null;
-    /* subtle CSS-only per-bottle glow (WebGL bloom removed) â€” a touch stronger on Neon */
+    /* subtle CSS-only per-bottle glow (WebGL bloom removed) — a touch stronger on Neon */
     const glowAlpha = Math.round((SKIN === 'neon' ? 0.40 : 0.20) * activeRenderProfile().glowStrength * 255);
     const ga = Math.max(0, Math.min(255, glowAlpha)).toString(16).padStart(2, '0');
     slot.glow.style.background = glowColor
@@ -1346,7 +1346,7 @@ const CanvasRenderer = {
     } else if (elem === 'boiling') {
       ctx.fillStyle = 'rgba(255,255,255,0.65)'; for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(35 + k * 10, y + h - 8 - k * 2, 3.2 - k * 0.4, 0, Math.PI * 2); ctx.fill(); }
     } else if (elem === 'toxic') {
-      ctx.fillStyle = 'rgba(80,255,120,0.26)'; ctx.fillRect(-160, y, 420, h); ctx.fillStyle = 'rgba(180,255,200,0.9)'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('â˜ ', 64, y + h / 2 + 4);
+      ctx.fillStyle = 'rgba(80,255,120,0.26)'; ctx.fillRect(-160, y, 420, h); ctx.fillStyle = 'rgba(180,255,200,0.9)'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('☠', 64, y + h / 2 + 4);
     }
     ctx.restore();
   },
@@ -1482,8 +1482,8 @@ const CanvasRenderer = {
     }
     ctx.restore();
     ctx.drawImage(this.shellLayer(shapeName, window.isBottleComplete(state[i])), 0, 0, 100, sh.vbH);
-    if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('âœ¦', 50, sh.vbH * 0.38); }
-    if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('â„', 50, sh.vbH * 0.72); }
+    if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✦', 50, sh.vbH * 0.38); }
+    if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('❄', 50, sh.vbH * 0.72); }
     ctx.restore();
   }
 };
@@ -1596,11 +1596,11 @@ function rebuildSlotSpecialClasses(i) {
   const slotEl = slots[i].el;
 
   slotEl.classList.toggle('veiled', !!veiled[i]);
-  if (veiled[i]) ensureSlotMarker(slotEl, 'seal', 'âœ¦');
+  if (veiled[i]) ensureSlotMarker(slotEl, 'seal', '✦');
   else slotEl.querySelectorAll('.seal').forEach(seal => seal.remove());
 
   slotEl.classList.toggle('frozen', frozen.has(i));
-  if (frozen.has(i)) ensureSlotMarker(slotEl, 'ice', 'â„');
+  if (frozen.has(i)) ensureSlotMarker(slotEl, 'ice', '❄');
   else slotEl.querySelectorAll('.ice').forEach(ice => ice.remove());
 
   slotEl.classList.toggle('capped', window.isBottleComplete(state[i]));
@@ -1689,7 +1689,7 @@ function applySpecials(gen) {
   if (sp.frozen.length && !save.seenSpecials.f) { msgs.push('Ice thaws when you complete a bottle'); save.seenSpecials.f = 1; }
   if (msgs.length) {
     persist();
-    toastMsg(msgs.join('  Â·  '), 5200);
+    toastMsg(msgs.join('  ·  '), 5200);
   }
   return sp;
 }
@@ -1765,7 +1765,7 @@ function handleGameKey(e) {
 }
 
 function setupBoard(gen) {
-  /* boards can come from a cache â€” never mutate the generated original */
+  /* boards can come from a cache — never mutate the generated original */
   state = gen.state.map(b => b.slice());
   par = gen.par;
   undosAllowed = gen.undos; undosLeft = gen.undos;
@@ -1795,7 +1795,7 @@ function setupBoard(gen) {
     const btn = document.createElement('button');
     btn.className = 'bottle';
     btn.type = 'button';
-    /* no decorative cork in gameplay â€” an upright open bottle reads as unsolved;
+    /* no decorative cork in gameplay — an upright open bottle reads as unsolved;
        completion is shown by the .cap drop (see syncCaps) */
     const svg = buildBottleSVG(shapeName, { cork: false, label: true });
     btn.appendChild(svg);
@@ -1805,12 +1805,12 @@ function setupBoard(gen) {
     slot.appendChild(glow); slot.appendChild(shadow); slot.appendChild(btn);
     if (frozen.has(i)) {
       slot.classList.add('frozen');
-      const ice = document.createElement('span'); ice.className = 'ice'; ice.textContent = 'â„';
+      const ice = document.createElement('span'); ice.className = 'ice'; ice.textContent = '❄';
       slot.appendChild(ice);
     }
     if (veiled[i]) {
       slot.classList.add('veiled');
-      const seal = document.createElement('span'); seal.className = 'seal'; seal.textContent = 'âœ¦';
+      const seal = document.createElement('span'); seal.className = 'seal'; seal.textContent = '✦';
       slot.appendChild(seal);
     }
     btn.addEventListener('pointerdown', () => { showBottleKeyboardFocus = false; applyBottleFocus(i, false); });
@@ -1852,7 +1852,7 @@ function loadDaily() {
   stopRushTimer();
   const cfg = window.dailyConfig(todayStr());
   const gen = window.generateFromSeed(cfg.seed, cfg.colors, cfg.sets, cfg.empties);
-  if (!gen) { toastMsg('Todayâ€™s puzzle would not mix â€” try Classic'); return; }
+  if (!gen) { toastMsg('Today’s puzzle would not mix — try Classic'); return; }
   level = 1;
   setupBoard(gen);
 }
@@ -1868,7 +1868,7 @@ function loadRushStage() {
   clearTimeout(rushNextT);
   const cfg = window.rushConfig(rushStage);
   const gen = window.generateFromSeed(cfg.seed, cfg.colors, cfg.sets, cfg.empties);
-  if (!gen) { toastMsg('Rush hit a wall â€” try Classic'); return; }
+  if (!gen) { toastMsg('Rush hit a wall — try Classic'); return; }
   level = rushStage;
   setupBoard(gen);
   startRushTimer(window.rushTimeFor(gen.par));
@@ -1896,9 +1896,9 @@ function rushFail() {
   setSelected(null);
   const cleared = rushStage - 1;
   if (cleared > save.rushBest) { save.rushBest = cleared; persist(); }
-  $('#win-title').textContent = 'Timeâ€™s up!';
-  $('#win-stars').innerHTML = '<span>â±ï¸</span>';
-  $('#win-meta').textContent = 'Cleared ' + cleared + (cleared === 1 ? ' stage' : ' stages') + ' Â· best ' + save.rushBest;
+  $('#win-title').textContent = 'Time’s up!';
+  $('#win-stars').innerHTML = '<span>⏱️</span>';
+  $('#win-meta').textContent = 'Cleared ' + cleared + (cleared === 1 ? ' stage' : ' stages') + ' · best ' + save.rushBest;
   $('#btn-next').classList.add('hidden');
   $('#overlay').classList.add('show');
   AudioFX.invalid(); buzz([30, 60, 30]);
@@ -1908,7 +1908,7 @@ function onRushStageClear() {
   stopRushTimer();
   if (rushStage > save.rushBest) { save.rushBest = rushStage; persist(); }
   if (rushStage >= 5) unlockAch('rush5');
-  toastMsg('Stage ' + rushStage + ' clear! âš¡ +next', 1400);
+  toastMsg('Stage ' + rushStage + ' clear! ⚡ +next', 1400);
   AudioFX.win(); buzz([20, 50, 40]);
   if (!RM) confetti();
   rushNextT = setTimeout(() => {
@@ -1959,13 +1959,13 @@ function updateHUD() {
   const lvlEl = $('#hud-level'), subEl = $('#hud-sub');
   if (mode === 'daily') {
     lvlEl.textContent = 'Daily Challenge';
-    subEl.textContent = todayStr().slice(5).replace('-', '/') + ' Â· Moves ' + moves + ' Â· Par ' + par;
+    subEl.textContent = todayStr().slice(5).replace('-', '/') + ' · Moves ' + moves + ' · Par ' + par;
   } else if (mode === 'rush') {
-    lvlEl.textContent = 'Rush Â· Stage ' + rushStage;
-    subEl.textContent = 'â± ' + Math.max(0, rushTimeLeft) + 's Â· Moves ' + moves;
+    lvlEl.textContent = 'Rush · Stage ' + rushStage;
+    subEl.textContent = '⏱ ' + Math.max(0, rushTimeLeft) + 's · Moves ' + moves;
   } else {
     lvlEl.textContent = 'Level ' + level;
-    subEl.textContent = cap1(difficulty) + ' Â· Moves ' + moves + ' Â· Par ' + par;
+    subEl.textContent = cap1(difficulty) + ' · Moves ' + moves + ' · Par ' + par;
   }
   subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
@@ -2101,7 +2101,7 @@ async function doPour(si, di) {
   slotEl.classList.add('pouring');
   bottleEl.style.transition = 'none';
 
-  /* phase 1: lift, travel, tilt â€” carry-acceleration slosh */
+  /* phase 1: lift, travel, tilt — carry-acceleration slosh */
   if (!RM) {
     setTimeout(() => { Fluid.slosh(si, 1.4, -side); Fluid.start(); }, 60);  /* initial surge backward */
     setTimeout(() => { Fluid.slosh(si, 0.9, side); Fluid.start(); }, 210);   /* arc-peak settles forward */
@@ -2161,7 +2161,7 @@ async function doPour(si, di) {
   renderer.renderBottle(si, 0); renderer.renderBottle(di, 0);
 
   if (window.isBottleComplete(state[di])) {
-    /* a complete bottle holds no secrets â€” reveal any hidden bands under the cap */
+    /* a complete bottle holds no secrets — reveal any hidden bands under the cap */
     if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderer.renderBottle(di, 0); AudioFX.reveal(); }
     slots[di].el.classList.add('capped');
     if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
@@ -2180,7 +2180,7 @@ async function doPour(si, di) {
     await wait(RM ? 100 : 550);
     onWin();
   } else if (activePours === 0 && !autoPlaying && !anyUsefulMove()) {
-    toastMsg('No moves left â€” undo â†© or restart âŸ³', 3200);
+    toastMsg('No moves left — undo ↩ or restart ⟳', 3200);
     AudioFX.invalid();
   }
 }
@@ -2347,20 +2347,20 @@ function clearHintGlow() {
 let hintGlowT = null;
 async function showHint() {
   if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
-  if (mode === 'rush') { toastMsg('Hints are paused in Rush for timer fairness âš¡', 2200); AudioFX.invalid(); return; }
+  if (mode === 'rush') { toastMsg('Hints are paused in Rush for timer fairness ⚡', 2200); AudioFX.invalid(); return; }
   AudioFX.ensure();
-  toastMsg('Thinkingâ€¦', 1200);
+  toastMsg('Thinking…', 1200);
   let res;
   try {
     res = await requestSolution({ state, frozen, budget: 250000 });
   } catch (err) {
-    toastMsg((err && err.message === 'timeout') ? 'Still thinking â€” try a smaller board or undo â†©' : 'Search interrupted â€” try again', 3000);
+    toastMsg((err && err.message === 'timeout') ? 'Still thinking — try a smaller board or undo ↩' : 'Search interrupted — try again', 3000);
     AudioFX.invalid();
     return;
   }
-  if (res.aborted) { toastMsg('Ran out of search budget â€” undo â†© a little', 3000); AudioFX.invalid(); return; }
+  if (res.aborted) { toastMsg('Ran out of search budget — undo ↩ a little', 3000); AudioFX.invalid(); return; }
   const sol = res.solution && res.solution.length ? res.solution : null;
-  if (!sol) { toastMsg('No solution found from here â€” undo â†© a little', 3000); AudioFX.invalid(); return; }
+  if (!sol) { toastMsg('No solution found from here — undo ↩ a little', 3000); AudioFX.invalid(); return; }
   const [i, j] = sol[0];
   clearHintGlow();
   slots[i].el.classList.add('hint-src');
@@ -2369,7 +2369,7 @@ async function showHint() {
   hintGlowT = setTimeout(clearHintGlow, 2400);
   const c = state[i][state[i].length - 1];
   const what = veiled[i] || (hiddenDepth[i] || 0) >= state[i].length ? 'that bottle' : 'the ' + COLOR_NAMES[c];
-  toastMsg('Hint: pour ' + what + ' into the glowing bottle â€” ' + sol.length + ' to go');
+  toastMsg('Hint: pour ' + what + ' into the glowing bottle — ' + sol.length + ' to go');
   usedHint = true;
   unlockAch('oracle');
   AudioFX.reveal(); buzz(8);
@@ -2377,24 +2377,24 @@ async function showHint() {
 
 async function autoSolve() {
   if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
-  if (mode === 'rush') { toastMsg('Auto-solve is paused in Rush for timer fairness âš¡', 2400); AudioFX.invalid(); return; }
+  if (mode === 'rush') { toastMsg('Auto-solve is paused in Rush for timer fairness ⚡', 2400); AudioFX.invalid(); return; }
   AudioFX.ensure();
-  toastMsg('Thinkingâ€¦', 1200);
+  toastMsg('Thinking…', 1200);
   let res;
   try {
     res = await requestSolution({ state, frozen, budget: 350000 });
   } catch (err) {
-    toastMsg((err && err.message === 'timeout') ? 'Timed out searching â€” control is back' : 'Search interrupted â€” try again', 3200);
+    toastMsg((err && err.message === 'timeout') ? 'Timed out searching — control is back' : 'Search interrupted — try again', 3200);
     AudioFX.invalid();
     return;
   }
-  if (res.aborted) { toastMsg('Hit the search budget â€” undo â†© a few moves first', 3200); AudioFX.invalid(); return; }
+  if (res.aborted) { toastMsg('Hit the search budget — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
   const sol = res.solution && res.solution.length ? res.solution : null;
-  if (!sol) { toastMsg('No solution found from here â€” undo â†© a few moves first', 3200); AudioFX.invalid(); return; }
+  if (!sol) { toastMsg('No solution found from here — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
   autoPlaying = true; usedAuto = true;
   setSelected(null); clearHintGlow();
   updateHUD();
-  toastMsg('Auto-solving â€” watch the ' + sol.length + '-move solve âœ¨', 2400);
+  toastMsg('Auto-solving — watch the ' + sol.length + '-move solve ✨', 2400);
   for (const [i, j] of sol) {
     if (!autoPlaying) break;
     if (veiled[i]) unveil(i);
@@ -2408,17 +2408,17 @@ async function autoSolve() {
 
 /* ---------------- achievements ---------------- */
 const ACHIEVEMENTS = [
-  { id: 'first',    icon: 'ðŸ¾', name: 'First pour',       desc: 'Complete your first level' },
-  { id: 'triple',   icon: 'ðŸŒŸ', name: 'Flawless',         desc: 'Earn 3 stars on a level' },
-  { id: 'perfect3', icon: 'ðŸ‘‘', name: 'Hat trick',        desc: '3-star three levels in a row' },
-  { id: 'stars25',  icon: 'âœ¨', name: 'Constellation',    desc: 'Collect 25 stars in Classic' },
-  { id: 'stars60',  icon: 'ðŸŒŒ', name: 'Galaxy brain',     desc: 'Collect 60 stars in Classic' },
-  { id: 'expert',   icon: 'ðŸ§ ', name: 'Master mixer',     desc: 'Beat an Expert level' },
-  { id: 'pure',     icon: 'ðŸŽ¯', name: 'No takebacks',     desc: 'Beat Normal or Expert without undo' },
-  { id: 'daily',    icon: 'ðŸ“…', name: 'Fresh squeeze',    desc: 'Complete a Daily Challenge' },
-  { id: 'streak3',  icon: 'ðŸ”¥', name: 'On a roll',        desc: 'Reach a 3-day Daily streak' },
-  { id: 'rush5',    icon: 'âš¡', name: 'Quicksilver',      desc: 'Clear stage 5 in Rush' },
-  { id: 'oracle',   icon: 'ðŸ’¡', name: 'Ask the oracle',   desc: 'Use one of your hints' }
+  { id: 'first',    icon: '🍾', name: 'First pour',       desc: 'Complete your first level' },
+  { id: 'triple',   icon: '🌟', name: 'Flawless',         desc: 'Earn 3 stars on a level' },
+  { id: 'perfect3', icon: '👑', name: 'Hat trick',        desc: '3-star three levels in a row' },
+  { id: 'stars25',  icon: '✨', name: 'Constellation',    desc: 'Collect 25 stars in Classic' },
+  { id: 'stars60',  icon: '🌌', name: 'Galaxy brain',     desc: 'Collect 60 stars in Classic' },
+  { id: 'expert',   icon: '🧠', name: 'Master mixer',     desc: 'Beat an Expert level' },
+  { id: 'pure',     icon: '🎯', name: 'No takebacks',     desc: 'Beat Normal or Expert without undo' },
+  { id: 'daily',    icon: '📅', name: 'Fresh squeeze',    desc: 'Complete a Daily Challenge' },
+  { id: 'streak3',  icon: '🔥', name: 'On a roll',        desc: 'Reach a 3-day Daily streak' },
+  { id: 'rush5',    icon: '⚡', name: 'Quicksilver',      desc: 'Clear stage 5 in Rush' },
+  { id: 'oracle',   icon: '💡', name: 'Ask the oracle',   desc: 'Use one of your hints' }
 ];
 
 let achToastT = null;
@@ -2554,7 +2554,7 @@ function starsFor(m) { return m <= par ? 3 : m <= Math.ceil(par * 1.5) ? 2 : 1; 
 function onWin() {
   if (mode === 'rush') return onRushStageClear();
   const st = usedAuto ? 1 : starsFor(moves);
-  let meta = moves + ' moves Â· par ' + par;
+  let meta = moves + ' moves · par ' + par;
 
   if (mode === 'daily') {
     const today = todayStr();
@@ -2566,7 +2566,7 @@ function onWin() {
     unlockAch('daily');
     if (save.daily.streak >= 3) unlockAch('streak3');
     $('#win-title').textContent = 'Daily complete!';
-    meta += ' Â· ðŸ”¥ ' + save.daily.streak + '-day streak';
+    meta += ' · 🔥 ' + save.daily.streak + '-day streak';
     $('#btn-next').classList.add('hidden');
   } else {
     const prev = save.progress[difficulty][level];
@@ -2585,12 +2585,12 @@ function onWin() {
     if (ts >= 60) unlockAch('stars60');
     $('#win-title').textContent = 'Level complete';
     const best = save.progress[difficulty][level].best;
-    if (best < moves) meta += ' Â· best ' + best;
+    if (best < moves) meta += ' · best ' + best;
     $('#btn-next').classList.toggle('hidden', level >= window.MAX_LEVEL);
   }
 
-  if (usedAuto) meta += ' Â· auto-solved âœ¨';
-  $('#win-stars').innerHTML = [1, 2, 3].map(k => '<span class="' + (k <= st ? '' : 'off') + '">â˜…</span>').join('');
+  if (usedAuto) meta += ' · auto-solved ✨';
+  $('#win-stars').innerHTML = [1, 2, 3].map(k => '<span class="' + (k <= st ? '' : 'off') + '">★</span>').join('');
   $('#win-meta').textContent = meta;
   $('#overlay').classList.add('show');
   const orbHost = $('#orb');
@@ -2823,12 +2823,12 @@ function unlockedUpTo() {
 
 function renderMenu() {
   document.querySelectorAll('#diff-seg button').forEach(b => b.classList.toggle('on', b.dataset.d === difficulty));
-  $('#chip-stars').textContent = 'â˜… ' + totalStars();
-  $('#chip-streak').textContent = 'ðŸ”¥ ' + (save.daily.streak || 0) + ' day streak';
+  $('#chip-stars').textContent = '★ ' + totalStars();
+  $('#chip-streak').textContent = '🔥 ' + (save.daily.streak || 0) + ' day streak';
   const doneToday = save.daily.lastWin === todayStr();
   $('#card-daily').classList.toggle('done', doneToday);
-  $('#daily-sub').textContent = doneToday ? 'âœ“ Done Â· back tomorrow' : 'Play todayâ€™s puzzle';
-  $('#rush-sub').textContent = save.rushBest > 0 ? 'Best Â· stage ' + save.rushBest : 'Race the clock';
+  $('#daily-sub').textContent = doneToday ? '✓ Done · back tomorrow' : 'Play today’s puzzle';
+  $('#rush-sub').textContent = save.rushBest > 0 ? 'Best · stage ' + save.rushBest : 'Race the clock';
   const grid = $('#level-grid');
   grid.innerHTML = '';
   const maxOpen = unlockedUpTo();
@@ -2840,15 +2840,15 @@ function renderMenu() {
     if (!open) t.classList.add('locked');
     if (p) t.classList.add('done');
     let starsHTML = '';
-    if (p) starsHTML = [1, 2, 3].map(k => '<span class="' + (k <= p.stars ? '' : 'off') + '">â˜…</span>').join('');
+    if (p) starsHTML = [1, 2, 3].map(k => '<span class="' + (k <= p.stars ? '' : 'off') + '">★</span>').join('');
     t.innerHTML = '<div class="num">' + l + '</div>' +
-      (open ? '<div class="stars">' + starsHTML + '</div>' : '<div class="lock">ðŸ”’</div>');
+      (open ? '<div class="stars">' + starsHTML + '</div>' : '<div class="lock">🔒</div>');
     if (open) t.addEventListener('click', () => { AudioFX.select(); loadLevel(l); });
     else t.addEventListener('click', () => { AudioFX.invalid(); });
     t.setAttribute('aria-label', 'Level ' + l + (open ? '' : ' locked'));
     grid.appendChild(t);
   }
-  $('#btn-sound-menu').textContent = save.sound ? 'ðŸ”Š Sound on' : 'ðŸ”‡ Sound off';
+  $('#btn-sound-menu').textContent = save.sound ? '🔊 Sound on' : '🔇 Sound off';
 }
 
 function buildHeroBottles() {
@@ -2979,10 +2979,10 @@ function init() {
   $('#btn-restart').addEventListener('click', () => { if (activePours === 0 && !autoPlaying) { AudioFX.swap(); restartCurrent(); } });
   $('#btn-sound').addEventListener('click', () => {
     save.sound = !save.sound; persist();
-    $('#btn-sound').textContent = save.sound ? 'ðŸ”Š' : 'ðŸ”‡';
+    $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
     AudioFX.select();
   });
-  $('#btn-sound').textContent = save.sound ? 'ðŸ”Š' : 'ðŸ”‡';
+  $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
 
   $('#btn-replay').addEventListener('click', () => {
     $('#overlay').classList.remove('show');
@@ -3072,7 +3072,7 @@ window.__vessel = {
 
 window.__vesselRenderer = renderer;
 
-/* tiny QA surface â€” one low-power profile, mobile-first (no profiler) */
+/* tiny QA surface — one low-power profile, mobile-first (no profiler) */
 window.__vesselPerf = {
   selectedCelebrationQuality: null,
   get celebrationQuality() { return this.selectedCelebrationQuality || celebrationQuality(); },

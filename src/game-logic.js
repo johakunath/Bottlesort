@@ -1,5 +1,5 @@
 ﻿/* ============================================================
-   Vessel â€” pure game logic (no DOM)
+   Vessel — pure game logic (no DOM)
    Bottles are arrays of color indices, bottom -> top. Capacity 4.
    ============================================================ */
 'use strict';
