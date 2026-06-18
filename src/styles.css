@@ -153,13 +153,13 @@ body[data-skin="tidepool"] #backdrop .tide:not(.hifi) { display: block; }
 /* — Apothecary shelf — */
 .apo.hifi {
   position: absolute; inset: 0;
-  background-image: var(--apo-hifi-bg, none);
+  background-image: var(--apo-hifi-bg, image-set(url("/assets/optimized/apothecary-sunlit-cabinet-960.webp") type("image/webp") 1x, url("/assets/optimized/apothecary-sunlit-cabinet-1365.webp") type("image/webp") 2x));
   background-size: cover;
   background-position: center center;
   opacity: 0;
 }
 body[data-skin="apothecary"][data-mode="dark"] .apo.hifi {
-  background-image: var(--apo-hifi-bg, none);
+  background-image: var(--apo-hifi-bg, image-set(url("/assets/optimized/apothecary-moonlit-alchemy-960.webp") type("image/webp") 1x, url("/assets/optimized/apothecary-moonlit-alchemy-1365.webp") type("image/webp") 2x));
 }
 .apo.planks { position: absolute; inset: 0; opacity: 0.55; }
 body[data-skin="apothecary"][data-mode="light"] .apo.planks {
@@ -205,7 +205,7 @@ body[data-skin="apothecary"][data-background-quality="hifi"] #backdrop .apo.glow
 /* — Neon synth grid — */
 .neon.hifi {
   position: absolute; inset: 0;
-  background-image: var(--neon-hifi-bg, none);
+  background-image: var(--neon-hifi-bg, image-set(url("/assets/optimized/neon-vaporwave-skyline-960.webp") type("image/webp") 1x, url("/assets/optimized/neon-vaporwave-skyline-1365.webp") type("image/webp") 2x));
   background-size: cover;
   background-position: center center;
   opacity: 0;
@@ -234,7 +234,7 @@ body[data-skin="neon"][data-background-quality="hifi"] #backdrop .neon.grid {
 /* — Tidepool Glass — */
 .tide.hifi {
   position: absolute; inset: 0;
-  background-image: var(--tide-hifi-bg, none);
+  background-image: var(--tide-hifi-bg, image-set(url("/assets/optimized/tidepool-hifi-backdrop-960.webp") type("image/webp") 1x, url("/assets/optimized/tidepool-hifi-backdrop-1365.webp") type("image/webp") 2x));
   background-size: cover;
   background-position: center center;
   opacity: 0;
