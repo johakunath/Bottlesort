@@ -141,6 +141,7 @@ save.ach = save.ach || {};
 save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
 save.lowPowerEffects = save.lowPowerEffects === true;
 if (!['auto', 'low', 'normal', 'pretty'].includes(save.renderQuality)) save.renderQuality = 'auto';
+if (save.backgroundQualityUserSet !== true) save.backgroundQuality = 'hifi';
 if (!['basic', 'hifi'].includes(save.backgroundQuality)) save.backgroundQuality = 'hifi';
 function persist() { store.save(save); }
 
@@ -245,38 +246,38 @@ let activeBackgroundAsset = null;
 const HIFI_BACKGROUNDS = {
   apothecaryLight: {
     cssVar: '--apo-hifi-bg',
-    png: 'assets/background-suggestions/apothecary-sunlit-cabinet.png',
-    avif960: 'assets/optimized/apothecary-sunlit-cabinet-960.avif',
-    avif1365: 'assets/optimized/apothecary-sunlit-cabinet-1365.avif',
-    webp960: 'assets/optimized/apothecary-sunlit-cabinet-960.webp',
-    webp1365: 'assets/optimized/apothecary-sunlit-cabinet-1365.webp',
+    png: '/assets/background-suggestions/apothecary-sunlit-cabinet.png',
+    avif960: '/assets/optimized/apothecary-sunlit-cabinet-960.avif',
+    avif1365: '/assets/optimized/apothecary-sunlit-cabinet-1365.avif',
+    webp960: '/assets/optimized/apothecary-sunlit-cabinet-960.webp',
+    webp1365: '/assets/optimized/apothecary-sunlit-cabinet-1365.webp',
     overlay: 'radial-gradient(76% 62% at 50% 40%, rgba(255, 246, 218, 0.16), transparent 74%)'
   },
   apothecaryDark: {
     cssVar: '--apo-hifi-bg',
-    png: 'assets/background-suggestions/apothecary-moonlit-alchemy.png',
-    avif960: 'assets/optimized/apothecary-moonlit-alchemy-960.avif',
-    avif1365: 'assets/optimized/apothecary-moonlit-alchemy-1365.avif',
-    webp960: 'assets/optimized/apothecary-moonlit-alchemy-960.webp',
-    webp1365: 'assets/optimized/apothecary-moonlit-alchemy-1365.webp',
+    png: '/assets/background-suggestions/apothecary-moonlit-alchemy.png',
+    avif960: '/assets/optimized/apothecary-moonlit-alchemy-960.avif',
+    avif1365: '/assets/optimized/apothecary-moonlit-alchemy-1365.avif',
+    webp960: '/assets/optimized/apothecary-moonlit-alchemy-960.webp',
+    webp1365: '/assets/optimized/apothecary-moonlit-alchemy-1365.webp',
     overlay: 'radial-gradient(76% 62% at 50% 40%, rgba(255, 184, 104, 0.10), transparent 72%)'
   },
   neon: {
     cssVar: '--neon-hifi-bg',
-    png: 'assets/background-suggestions/neon-vaporwave-skyline.png',
-    avif960: 'assets/optimized/neon-vaporwave-skyline-960.avif',
-    avif1365: 'assets/optimized/neon-vaporwave-skyline-1365.avif',
-    webp960: 'assets/optimized/neon-vaporwave-skyline-960.webp',
-    webp1365: 'assets/optimized/neon-vaporwave-skyline-1365.webp',
+    png: '/assets/background-suggestions/neon-vaporwave-skyline.png',
+    avif960: '/assets/optimized/neon-vaporwave-skyline-960.avif',
+    avif1365: '/assets/optimized/neon-vaporwave-skyline-1365.avif',
+    webp960: '/assets/optimized/neon-vaporwave-skyline-960.webp',
+    webp1365: '/assets/optimized/neon-vaporwave-skyline-1365.webp',
     overlay: 'radial-gradient(74% 62% at 50% 44%, rgba(30, 18, 52, 0.12), transparent 70%)'
   },
   tidepool: {
     cssVar: '--tide-hifi-bg',
-    png: 'assets/tidepool-hifi-backdrop.png',
-    avif960: 'assets/optimized/tidepool-hifi-backdrop-960.avif',
-    avif1365: 'assets/optimized/tidepool-hifi-backdrop-1365.avif',
-    webp960: 'assets/optimized/tidepool-hifi-backdrop-960.webp',
-    webp1365: 'assets/optimized/tidepool-hifi-backdrop-1365.webp',
+    png: '/assets/tidepool-hifi-backdrop.png',
+    avif960: '/assets/optimized/tidepool-hifi-backdrop-960.avif',
+    avif1365: '/assets/optimized/tidepool-hifi-backdrop-1365.avif',
+    webp960: '/assets/optimized/tidepool-hifi-backdrop-960.webp',
+    webp1365: '/assets/optimized/tidepool-hifi-backdrop-1365.webp',
     overlay: 'radial-gradient(78% 60% at 50% 40%, rgba(227, 255, 247, 0.12), transparent 72%)'
   }
 };
@@ -319,14 +320,14 @@ function throttleFluidRuntime(reason) {
     fluidRuntimeReason = reason || 'fluid samples reduced after slow frames';
     return true;
   }
-  Fluid.runtimeEnabled = false;
-  Fluid.resetAll();
-  fluidRuntimeReason = reason || 'fluid motion paused after slow frames';
-  return true;
+  fluidRuntimeReason = reason || 'fluid samples already at low profile; user liquid motion remains on';
+  return false;
 }
 function preferredBackgroundQuality() {
-  const raw = (new URLSearchParams(location.search).get('background') || localStorage.getItem('vessel_background') || save.backgroundQuality || 'hifi').toLowerCase();
-  return raw === 'basic' ? 'basic' : 'hifi';
+  const params = new URLSearchParams(location.search);
+  const query = (params.get('background') || '').toLowerCase();
+  if (query === 'basic' || query === 'hifi') return query;
+  return save.backgroundQualityUserSet === true && save.backgroundQuality === 'basic' ? 'basic' : 'hifi';
 }
 function activeBackgroundKey() {
   if (SKIN === 'apothecary') return MODE === 'dark' ? 'apothecaryDark' : 'apothecaryLight';
@@ -1353,7 +1354,7 @@ const CanvasRenderer = {
   beginPour(info) {
     if (!this.pourMap) this.pourMap = new Map();
     this.pourMap.set(info.si, Object.assign({ t: 0, particles: [], rippleAge: 0 }, info));
-    if (!RM && this.effectsEnabled()) {
+    if (this.effectsEnabled()) {
       Fluid.drop(info.di, -1.8);
       Fluid.start();
     }
@@ -1365,7 +1366,7 @@ const CanvasRenderer = {
     if (!p) return;
     Object.assign(p, info);
     const now = performance.now();
-    if (!RM && this.effectsEnabled() && (!p.lastParticle || now - p.lastParticle > 70)) {
+    if (this.prettyEffectsEnabled() && (!p.lastParticle || now - p.lastParticle > 70)) {
       p.lastParticle = now;
       for (let k = 0; k < 2; k++) p.particles.push({
         x: p.tx + (Math.random() * 14 - 7), y: p.ty,
@@ -1379,7 +1380,8 @@ const CanvasRenderer = {
     if (this.pourMap) { this.pourMap.delete(info && info.si); }
     this.renderAll();
   },
-  effectsEnabled() { return explicitPrettyEffects(); },
+  effectsEnabled() { return !RM && activeRenderProfile().id !== 'low'; },
+  prettyEffectsEnabled() { return !RM && activeRenderProfile().id === 'pretty'; },
   drawPourEffects(ctx) {
     if (!this.pourMap || !this.pourMap.size) return;
     for (const p of this.pourMap.values()) this._drawOnePour(ctx, p);
@@ -1395,7 +1397,7 @@ const CanvasRenderer = {
       ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(cpx, cpy, sx + (tx - sx) * t, sy + (ty - sy) * t); ctx.stroke(); ctx.restore();
     };
     drawArc(9, p.c0, 0.28, 3); drawArc(5, grad, 1, 0); drawArc(1.6, 'rgba(255,255,255,0.42)', 1, 0);
-    if (!RM && this.effectsEnabled()) {
+    if (this.effectsEnabled()) {
       const age = ((performance.now() - (p.started || performance.now())) / 1000);
       for (let r = 0; r < 2; r++) {
         const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
@@ -1415,7 +1417,7 @@ const CanvasRenderer = {
           ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         }
       }
-      if (SKIN === 'apothecary') {
+      if (this.prettyEffectsEnabled() && SKIN === 'apothecary') {
         ctx.globalAlpha = 0.35; ctx.strokeStyle = 'rgba(240,245,255,0.75)'; ctx.lineWidth = 2;
         for (let k = 0; k < 2; k++) { const u = (age * 0.8 + k * 0.45) % 1; ctx.beginPath(); ctx.moveTo(sx + p.side * 6, sy - 12 - u * 28); ctx.bezierCurveTo(sx + 10, sy - 20 - u * 30, sx - 8, sy - 26 - u * 36, sx + 6, sy - 38 - u * 40); ctx.stroke(); }
       }
@@ -1443,13 +1445,18 @@ const CanvasRenderer = {
     const paths = this.paths(shapeName), interior = paths.interior;
     ctx.fillStyle = SKIN === 'neon' ? 'rgba(127,208,255,0.10)' : 'rgba(255,233,200,0.12)'; ctx.fill(interior); ctx.shadowColor = 'transparent';
     ctx.save(); ctx.clip(interior);
+    if (rot) {
+      ctx.translate(50, sh.vbH / 2);
+      ctx.rotate(-rot);
+      ctx.translate(-50, -sh.vbH / 2);
+    }
     let cum = 0;
     const segs = visual[i] || [];
     for (const seg of segs) {
       const yBot = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
       const yTop = sh.volToY ? sh.volToY((cum + seg.u) / 4) : sh.B - (cum + seg.u) * sh.unit;
       const h = yBot - yTop;
-      const isTop = seg === segs[segs.length - 1] && !rot && Fluid.active() && !locked.has(i) && h > Fluid.AMP + Fluid.MENISCUS + 7;
+      const isTop = seg === segs[segs.length - 1] && Fluid.active() && !locked.has(i) && h > Fluid.AMP + Fluid.MENISCUS + 7;
       ctx.fillStyle = this.liquidGradient(ctx, seg.c);
       if (isTop) {
         const halfW = Math.max(5, shapeWidthAt(shapeName, yTop) / 2);
@@ -2065,6 +2072,22 @@ function fillSnapshot(snap, color, q) {
 }
 
 /* ---------------- pour choreography (rAF-driven) ---------------- */
+function liveBottleMouthPoint(i, angleDeg) {
+  const stageRect = $('#stage').getBoundingClientRect();
+  const rect = slots[i].slot.getBoundingClientRect();
+  const sh = slots[i].sh;
+  const bw = rect.width, bh = rect.height;
+  const inline = slots[i].btn.style.transform || '';
+  const tMatch = inline.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
+  const tx = tMatch ? parseFloat(tMatch[1]) : 0;
+  const ty = tMatch ? parseFloat(tMatch[2]) : 0;
+  const a = (angleDeg || 0) * Math.PI / 180;
+  const cx = bw / 2, cy = bh / 2;
+  const mx = bw / 2, my = sh.mouthFrac * bh;
+  const rx = Math.cos(a) * (mx - cx) - Math.sin(a) * (my - cy);
+  const ry = Math.sin(a) * (mx - cx) + Math.cos(a) * (my - cy);
+  return { x: rect.left + tx + cx + rx - stageRect.left, y: rect.top + ty + cy + ry - stageRect.top };
+}
 async function doPour(si, di) {
   locked.add(si); locked.add(di); activePours++;
   undoHistory.push(snapshotBoard());
@@ -2123,10 +2146,11 @@ async function doPour(si, di) {
   const c0 = COLORS[color][0], c1 = COLORS[color][1];
 
   /* Gravity arc metadata for the active renderer. */
-  const sx = Q.x - stageRect.left, sy = Q.y - stageRect.top;
+  const mouth0 = liveBottleMouthPoint(si, A);
+  let sx = mouth0.x, sy = mouth0.y;
   const tx = Pm.x - stageRect.left, ty = surfaceY - stageRect.top;
-  const cpx = sx + (tx - sx) * 0.35 + side * 8;
-  const cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
+  let cpx = sx + (tx - sx) * 0.35 + side * 8;
+  let cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
   renderer.beginPour({ si, di, color, c0, c1, sx, sy, tx, ty, cpx, cpy, side, receiverW: bwD, progress: 0, started: performance.now() });
   AudioFX.pour(dur / 1000 + 0.1);
   buzz(12);
@@ -2136,6 +2160,10 @@ async function doPour(si, di) {
   await tween(dur, p => {
     visual[si] = drainSnapshot(snapS, n * p);
     visual[di] = fillSnapshot(snapD, color, n * p);
+    const mouth = liveBottleMouthPoint(si, A);
+    sx = mouth.x; sy = mouth.y;
+    cpx = sx + (tx - sx) * 0.35 + side * 8;
+    cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
     renderer.updatePour({ si, progress: p, sx, sy, tx, ty, cpx, cpy });
     renderer.renderBottle(si, A);
     renderer.renderBottle(di, 0);
@@ -2545,6 +2573,8 @@ function renderSettings() {
   setSwitch('#sw-dark', save.mode === 'dark');
   const rq = $('#render-quality');
   if (rq) rq.value = save.renderQuality;
+  const bq = $('#background-quality');
+  if (bq) bq.value = save.backgroundQuality;
   renderThemeGrid();
 }
 
@@ -3029,6 +3059,15 @@ function init() {
     renderSettings();
     AudioFX.select();
   });
+  $('#background-quality').addEventListener('change', e => {
+    save.backgroundQuality = e.target.value === 'basic' ? 'basic' : 'hifi';
+    save.backgroundQualityUserSet = true;
+    try { localStorage.setItem('vessel_background', save.backgroundQuality); } catch (err) {}
+    persist();
+    applyBackgroundQuality();
+    renderSettings();
+    AudioFX.select();
+  });
   $('#sw-dark').addEventListener('click', () => { toggleMode(); renderSettings(); });
   $('#btn-reset').addEventListener('click', () => {
     if (!confirm('Erase all progress, stars and achievements?')) return;
@@ -3085,7 +3124,9 @@ window.__vesselPerf = {
   get hifiBackdropEnabled() {
     const cls = SKIN === 'apothecary' ? 'apo' : (SKIN === 'tidepool' ? 'tide' : SKIN);
     const el = document.querySelector('.' + cls + '.hifi');
-    return !!el && getComputedStyle(el).display !== 'none' && getComputedStyle(el).opacity !== '0';
+    if (!el) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.opacity !== '0' && cs.backgroundImage !== 'none';
   },
   get activeRenderer() { return renderer.active; },
   get rendererBackend() { return renderer.active; },
@@ -3093,6 +3134,7 @@ window.__vesselPerf = {
   get fluidRuntimeEnabled() { return !!(Fluid.enabled && Fluid.runtimeEnabled); },
   get fluidRuntimeReason() { return fluidRuntimeReason; },
   get backgroundQuality() { return backgroundQualityEffective; },
+  get activeBackgroundAsset() { return activeBackgroundAsset ? activeBackgroundAsset.webp960 : null; },
   get backgroundAsset() { return activeBackgroundAsset ? {
     key: activeBackgroundAsset.key,
     png: activeBackgroundAsset.png,
