@@ -46,8 +46,6 @@ const TIDE_COLORS = [
 let COLORS = APO_COLORS;
 let HIDDEN_FILL = ['#cbb186', '#8a6a3e']; /* parchment-gray mystery fill (apothecary) */
 const COLOR_NAMES = ['cherry', 'tangerine', 'lemon', 'lime', 'teal', 'blue', 'violet', 'pink', 'mocha'];
-/* one distinct glyph per liquid color, for colorblind-friendly play */
-const COLOR_GLYPHS = ['♥', '▲', '●', '✿', '◆', '★', '✚', '♪', '⬣'];
 
 /* ---------------- bottle shapes ----------------
    Every shape: viewBox 100 x vbH. pivot = element center (CSS rotate origin).
@@ -122,7 +120,7 @@ const store = {
 const DEFAULT_SAVE = {
   progress: { relaxed: {}, normal: {}, expert: {} },
   sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
-  theme: 'apothecary', mode: 'light', symbols: false, haptics: true, fluid: true,
+  theme: 'apothecary', mode: 'light', haptics: true, fluid: true,
   ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0, lowPowerEffects: false, renderQuality: 'auto', backgroundQuality: 'hifi'
 };
 let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
@@ -136,6 +134,7 @@ if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
 save.fluid = save.fluid !== false;   /* realistic liquid motion — default ON */
 delete save.glass;                   /* removed: WebGL glass reflections */
 delete save.beat;                    /* removed: Neon rhythm mode */
+delete save.symbols;                 /* removed: per-colour liquid symbols */
 save.seenSpecials = save.seenSpecials || {};
 save.ach = save.ach || {};
 save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
@@ -1111,15 +1110,6 @@ const SvgRenderer = {
       }
       inner.appendChild(svgEl('rect', { x: -160, y: rectY, width: 420, height: rectH + 1.4, fill: 'url(#liq' + seg.c + ')' }));
       if (!t && ELEMENT_MAP[seg.c]) appendElemOverlay(inner, ELEMENT_MAP[seg.c], y, h, px);
-      if (save.symbols && fade > 0.3 && seg.u >= 0.8) {
-        const gl = svgEl('text', {
-          x: px, y: y + h / 2 + 5, 'text-anchor': 'middle',
-          'font-size': 13, fill: 'rgba(255,255,255,0.85)', opacity: fade,
-          style: 'paint-order:stroke; stroke:rgba(0,0,0,0.25); stroke-width:2px;'
-        });
-        gl.textContent = COLOR_GLYPHS[seg.c];
-        inner.appendChild(gl);
-      }
       if (fade > 0.04) ellipses.push({ y, c: seg.c });
       cum += seg.u;
     }
@@ -1472,7 +1462,6 @@ const CanvasRenderer = {
         ctx.lineTo(260, yTop); ctx.lineTo(260, yBot + 1.2); ctx.closePath(); ctx.fill();
       } else ctx.fillRect(-160, yTop, 420, h + 1.2);
       if (ELEMENT_MAP[seg.c]) this.drawElement(ctx, ELEMENT_MAP[seg.c], yTop, h);
-      if (save.symbols && seg.u >= 0.8) { ctx.fillStyle = 'rgba(255,255,255,0.86)'; ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.strokeText(COLOR_GLYPHS[seg.c], 50, yTop + h / 2); ctx.fillText(COLOR_GLYPHS[seg.c], 50, yTop + h / 2); }
       cum += seg.u;
     }
     if (segs.length) {
@@ -1488,7 +1477,7 @@ const CanvasRenderer = {
       ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 50, (yTop + yBot) / 2);
     }
     ctx.restore();
-    ctx.drawImage(this.shellLayer(shapeName, window.isBottleComplete(state[i])), 0, 0, 100, sh.vbH);
+    ctx.drawImage(this.shellLayer(shapeName, slot.el.classList.contains('capped')), 0, 0, 100, sh.vbH);
     if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✦', 50, sh.vbH * 0.38); }
     if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('❄', 50, sh.vbH * 0.72); }
     ctx.restore();
@@ -1568,7 +1557,7 @@ function revealMystery(i) {
 
 function syncCaps() {
   state.forEach((b, i) => {
-    const capped = window.isBottleComplete(b);
+    const capped = window.isBottleComplete(b) && !locked.has(i);
     if (capped && hiddenDepth[i]) { hiddenDepth[i] = 0; renderer.renderBottle(i, 0); }
     const has = slots[i].el.classList.contains('capped');
     if (capped && !has) slots[i].el.classList.add('capped');
@@ -2330,17 +2319,48 @@ function cancelSolution(reason) {
   updateHUD();
 }
 
+
+function solveOnMainThread(requestedState, requestedFrozen, budget) {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      const frozenSet = requestedFrozen && requestedFrozen.size ? new Set(requestedFrozen) : null;
+      const res = window.solve(window.cloneState(requestedState || []), budget || 250000, frozenSet);
+      resolve({ solution: res.solution || null, nodes: res.nodes || 0, aborted: !!res.aborted });
+    }, 0);
+  });
+}
+
 function requestSolution({ state: requestedState, frozen: requestedFrozen, budget }) {
   cancelSolution('cancelled');
   solutionPending = true;
   updateHUD();
   const id = ++solverRequestId;
-  const worker = getSolverWorker();
+  let worker;
+  try {
+    worker = getSolverWorker();
+  } catch (err) {
+    return solveOnMainThread(requestedState, requestedFrozen, budget).finally(() => {
+      if (id === solverRequestId) { solutionPending = false; updateHUD(); }
+    });
+  }
   return new Promise((resolve, reject) => {
-    solverReject = reject;
-    solverTimer = setTimeout(() => {
-      if (id === solverRequestId) cancelSolution('timeout');
-    }, SOLVER_WORKER_TIMEOUT);
+    const finish = fn => value => {
+      clearTimeout(solverTimer);
+      solverTimer = null;
+      solverReject = null;
+      solutionPending = false;
+      updateHUD();
+      fn(value);
+    };
+    const resolveDone = finish(resolve);
+    const rejectDone = finish(reject);
+    const fallback = () => {
+      if (id !== solverRequestId) return;
+      if (solverWorker) { solverWorker.terminate(); solverWorker = null; }
+      solveOnMainThread(requestedState, requestedFrozen, Math.min(budget || 250000, 180000)).then(resolveDone, rejectDone);
+    };
+    solverReject = rejectDone;
+    solverTimer = setTimeout(fallback, SOLVER_WORKER_TIMEOUT);
     worker.onmessage = e => {
       if (!e.data || e.data.id !== id) return;
       clearTimeout(solverTimer);
@@ -2348,17 +2368,10 @@ function requestSolution({ state: requestedState, frozen: requestedFrozen, budge
       solverReject = null;
       solutionPending = false;
       updateHUD();
-      if (e.data.error) reject(new Error(e.data.error));
+      if (e.data.error) fallback();
       else resolve(e.data);
     };
-    worker.onerror = e => {
-      clearTimeout(solverTimer);
-      solverTimer = null;
-      solverReject = null;
-      solutionPending = false;
-      updateHUD();
-      reject(new Error(e.message || 'worker error'));
-    };
+    worker.onerror = () => fallback();
     worker.postMessage({
       id,
       state: window.cloneState(requestedState),
@@ -2382,7 +2395,7 @@ async function showHint() {
   try {
     res = await requestSolution({ state, frozen, budget: 250000 });
   } catch (err) {
-    toastMsg((err && err.message === 'timeout') ? 'Still thinking — try a smaller board or undo ↩' : 'Search interrupted — try again', 3000);
+    toastMsg((err && err.message === 'timeout') ? 'Still thinking — try a smaller board or undo ↩' : 'Could not find a hint yet — try again or undo ↩', 3000);
     AudioFX.invalid();
     return;
   }
@@ -2412,7 +2425,7 @@ async function autoSolve() {
   try {
     res = await requestSolution({ state, frozen, budget: 350000 });
   } catch (err) {
-    toastMsg((err && err.message === 'timeout') ? 'Timed out searching — control is back' : 'Search interrupted — try again', 3200);
+    toastMsg((err && err.message === 'timeout') ? 'Timed out searching — control is back' : 'Could not find a hint yet — try again or undo ↩', 3200);
     AudioFX.invalid();
     return;
   }
@@ -2568,7 +2581,6 @@ function renderSettings() {
   };
   setSwitch('#sw-sound', !!save.sound);
   setSwitch('#sw-haptics', !!save.haptics);
-  setSwitch('#sw-symbols', !!save.symbols);
   setSwitch('#sw-fluid', !!save.fluid);
   setSwitch('#sw-dark', save.mode === 'dark');
   const rq = $('#render-quality');
@@ -3044,10 +3056,6 @@ function init() {
   });
   $('#sw-sound').addEventListener('click', () => { save.sound = !save.sound; persist(); renderSettings(); AudioFX.select(); });
   $('#sw-haptics').addEventListener('click', () => { save.haptics = !save.haptics; persist(); renderSettings(); buzz(15); });
-  $('#sw-symbols').addEventListener('click', () => {
-    save.symbols = !save.symbols; persist(); renderSettings(); AudioFX.select();
-    if (state.length && slots.length) renderer.renderAll();
-  });
   $('#sw-fluid').addEventListener('click', () => {
     save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; resetFluidRuntime(); persist(); renderSettings(); AudioFX.select();
     if (state.length && slots.length) renderer.renderAll();
