@@ -395,8 +395,8 @@ function applyRenderQuality(reason) {
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
   if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
-  if (!p.idleAnimations) stopAmbient();
-  else if (document.body && document.body.dataset.screen === 'menu') startAmbient();
+  if (!p.idleAnimations) { stopAmbient(); MenuLife.stop(); }
+  else if (document.body && document.body.dataset.screen === 'menu') { startAmbient(); MenuLife.start(); }
 }
 function demoteRenderQuality(reason) {
   const idx = QUALITY_ORDER.indexOf(renderQualityEffective);
@@ -411,7 +411,7 @@ function demoteRenderQuality(reason) {
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
   if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
-  if (!p.idleAnimations) stopAmbient();
+  if (!p.idleAnimations) { stopAmbient(); MenuLife.stop(); }
   return true;
 }
 
@@ -750,6 +750,8 @@ const MenuLife = {
   start() {
     if (RM || this.t || !activeRenderProfile().idleAnimations) return;
     const tick = () => {
+      /* quality may have dropped (user choice or auto-demotion) since start */
+      if (!activeRenderProfile().idleAnimations) { this.t = null; return; }
       this.t = setTimeout(tick, 6500 + Math.random() * 4000);
       if (document.hidden || document.body.dataset.screen !== 'menu') return;
       const svgs = document.querySelectorAll('.hero-bottles svg');
@@ -3119,6 +3121,7 @@ function confetti() {
 
 /* ---------------- ambient dust ---------------- */
 let ambientOn = false;
+let ambientGen = 0;     /* invalidates callbacks already handed to rAF on stop/restart */
 let ambientRaf = 0;
 let ambientResize = null;
 
@@ -3157,9 +3160,13 @@ function startAmbient() {
   ambientResize = size;
   window.addEventListener('resize', ambientResize);
   ambientOn = true;
+  const gen = ++ambientGen;
   FrameGate.reset('ambient');
   function frame(now) {
-    if (!ambientOn) return;
+    /* the gen check drops stale callbacks that were already queued in rAF when
+       a stop/restart pair (e.g. theme switch on the menu) raced past the
+       clearTimeout — otherwise a second dust loop joins the new session */
+    if (!ambientOn || gen !== ambientGen) return;
     PerfMeter.mark('canvas-ambient', now);
     ctx.clearRect(0, 0, W, H);
     for (const p of parts) {
@@ -3187,6 +3194,7 @@ function startAmbient() {
 
 function stopAmbient() {
   ambientOn = false;
+  ambientGen++;
   if (ambientRaf) {
     clearTimeout(ambientRaf);
     ambientRaf = 0;
