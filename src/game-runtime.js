@@ -213,6 +213,37 @@ function svgEl(tag, attrs) {
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
+/* mix two #rrggbb colours; t=0 → a, t=1 → b */
+function mixHex(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ch = s => Math.round(((pa >> s) & 255) + (((pb >> s) & 255) - ((pa >> s) & 255)) * t);
+  return '#' + ((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, '0');
+}
+
+/* ---- shared element-emblem geometry (SVG path strings; canvas via Path2D) ---- */
+function snowflakePath(cx, cy, r) {
+  let d = '';
+  for (let k = 0; k < 6; k++) {
+    const a = k * Math.PI / 3 + Math.PI / 12;
+    const x2 = cx + Math.cos(a) * r, y2 = cy + Math.sin(a) * r;
+    d += `M${cx.toFixed(1)},${cy.toFixed(1)} L${x2.toFixed(1)},${y2.toFixed(1)} `;
+    const bx = cx + Math.cos(a) * r * 0.62, by = cy + Math.sin(a) * r * 0.62;
+    for (const branch of [a + Math.PI / 5, a - Math.PI / 5]) {
+      d += `M${bx.toFixed(1)},${by.toFixed(1)} L${(bx + Math.cos(branch) * r * 0.3).toFixed(1)},${(by + Math.sin(branch) * r * 0.3).toFixed(1)} `;
+    }
+  }
+  return d;
+}
+function boltPath(cx, cy, hh) {
+  const w = hh * 0.9;
+  return `M${(cx + w * 0.12).toFixed(1)},${(cy - hh / 2).toFixed(1)}` +
+    ` L${(cx - w * 0.42).toFixed(1)},${(cy + hh * 0.08).toFixed(1)}` +
+    ` L${(cx - w * 0.05).toFixed(1)},${(cy + hh * 0.08).toFixed(1)}` +
+    ` L${(cx - w * 0.16).toFixed(1)},${(cy + hh / 2).toFixed(1)}` +
+    ` L${(cx + w * 0.44).toFixed(1)},${(cy - hh * 0.10).toFixed(1)}` +
+    ` L${(cx + w * 0.02).toFixed(1)},${(cy - hh * 0.10).toFixed(1)} Z`;
+}
+
 /* ---------------- gameplay renderer quality profiles ---------------- */
 const RENDER_PROFILES = {
   low: {
@@ -394,6 +425,7 @@ const PerfMeter = (() => {
   let overlay = null;
   let overlayEnabled = false;
   let lastDemoteAt = 0;
+  let markCount = 0;
 
   function rounded(n, digits) {
     const m = Math.pow(10, digits || 1);
@@ -470,9 +502,16 @@ const PerfMeter = (() => {
         }
       }
       lastTsMap.set(renderer, ts);
-      const snap = api.snapshot();
-      maybeDemote(snap, ts);
-      paintOverlay(api.snapshot());
+      /* stats (sort + object build) are throttled — doing them every frame was
+         measurable CPU on phones; demotion only needs a periodic look anyway */
+      markCount++;
+      if (markCount % 30 === 0) {
+        const snap = api.snapshot();
+        maybeDemote(snap, ts);
+        paintOverlay(snap);
+      } else if (overlayEnabled && markCount % 10 === 0) {
+        paintOverlay(api.snapshot());
+      }
     },
     reset() { deltas.length = 0; lastTsMap.clear(); droppedFrames = 0; renderer = 'idle'; paintOverlay(api.snapshot()); },
     enableOverlay(on) {
@@ -553,13 +592,14 @@ function buildDefs() {
   const neon = SKIN === 'neon';
   const svg = svgEl('svg', { id: 'vessel-defs', width: 0, height: 0, style: 'position:absolute' });
   const defs = svgEl('defs', {});
+  /* cylinder shading pinned to the glass body (viewBox x 18–82) — the old
+     bounding-box gradient stretched across the whole 420-wide band rect, so
+     only its flat middle was ever visible and every liquid read washed-out */
   function liquidGrad(id, light, dark) {
-    const g = svgEl('linearGradient', { id, x1: 0, y1: 0, x2: 1, y2: 0 });
-    g.appendChild(svgEl('stop', { offset: '0', 'stop-color': dark }));
-    g.appendChild(svgEl('stop', { offset: '0.3', 'stop-color': light }));
-    g.appendChild(svgEl('stop', { offset: '0.5', 'stop-color': light }));
-    g.appendChild(svgEl('stop', { offset: '0.7', 'stop-color': light }));
-    g.appendChild(svgEl('stop', { offset: '1', 'stop-color': dark }));
+    const g = svgEl('linearGradient', { id, gradientUnits: 'userSpaceOnUse', x1: 18, y1: 0, x2: 82, y2: 0 });
+    const core = mixHex(light, '#ffffff', neon ? 0.26 : 0.15);
+    [[0, dark], [0.16, mixHex(dark, light, 0.55)], [0.4, light], [0.56, core], [0.74, light], [1, dark]]
+      .forEach(([o, c]) => g.appendChild(svgEl('stop', { offset: String(o), 'stop-color': c })));
     defs.appendChild(g);
   }
   COLORS.forEach((c, i) => liquidGrad('liq' + i, c[0], c[1]));
@@ -623,12 +663,12 @@ function buildBottleSVG(shapeName, opts) {
   svg.appendChild(liquids);
   /* cylinder shading sits over the liquid, under the gloss */
   svg.appendChild(svgEl('path', { d: sh.interior, fill: 'url(#glassSide)', 'pointer-events': 'none' }));
-  /* roaming sheen, clipped to the interior, desynced per bottle */
-  if (!RM) {
+  /* roaming sheen, clipped to the interior — invisible at rest; finite WAAPI
+     sweeps play on demand (sweepSheen / MenuLife) so idle boards stay static */
+  if (!RM && opts.sheen !== false) {
     const sheenWrap = svgEl('g', { 'clip-path': 'url(#' + id + ')' });
     const sheen = svgEl('rect', { x: -20, y: -20, width: 30, height: sh.vbH + 40, fill: 'url(#sheenGrad)' });
     sheen.setAttribute('class', 'sheenmove');
-    sheen.style.animationDelay = (-Math.random() * 8).toFixed(2) + 's';
     sheenWrap.appendChild(sheen);
     svg.appendChild(sheenWrap);
   }
@@ -688,6 +728,47 @@ function buildCork(c) {
       stroke: 'rgba(90,55,25,0.28)', 'stroke-width': 0.7 })));
   return g;
 }
+
+/* ---------------- finite sheen sweeps (replaces the always-on CSS loop) ---------------- */
+const SHEEN_KEYFRAMES = [
+  { transform: 'translateX(-55px) skewX(-13deg)', opacity: 0 },
+  { opacity: 0.55, offset: 0.45 },
+  { transform: 'translateX(150px) skewX(-13deg)', opacity: 0 }
+];
+function sweepSheen(svg, delay) {
+  if (RM || !svg || typeof svg.querySelector !== 'function') return;
+  const sheen = svg.querySelector('.sheenmove');
+  if (!sheen || typeof sheen.animate !== 'function') return;
+  sheen.animate(SHEEN_KEYFRAMES, { duration: 1700, easing: 'ease-in-out', delay: delay || 0 });
+}
+
+/* Occasional life on the menu: a bob + sheen sweep on one hero bottle every
+   few seconds. Bounded WAAPI animations from a coarse timer — between ticks
+   nothing animates, so the compositor (and the phone) can rest. */
+const MenuLife = {
+  t: null,
+  start() {
+    if (RM || this.t || !activeRenderProfile().idleAnimations) return;
+    const tick = () => {
+      this.t = setTimeout(tick, 6500 + Math.random() * 4000);
+      if (document.hidden || document.body.dataset.screen !== 'menu') return;
+      const svgs = document.querySelectorAll('.hero-bottles svg');
+      if (!svgs.length) return;
+      const k = Math.floor(Math.random() * svgs.length);
+      const hero = svgs[k];
+      if (typeof hero.animate === 'function') {
+        hero.animate([
+          { transform: 'translateY(0)' },
+          { transform: 'translateY(-8px)', offset: 0.5 },
+          { transform: 'translateY(0)' }
+        ], { duration: 3800, easing: 'ease-in-out' });
+      }
+      sweepSheen(hero, 350);
+    };
+    this.t = setTimeout(tick, 1200);
+  },
+  stop() { clearTimeout(this.t); this.t = null; }
+};
 
 /* ---------------- game state ---------------- */
 let level = 1, difficulty = save.difficulty || 'normal';
@@ -772,54 +853,57 @@ function buildElementMap(gen) {
   }
 }
 
+/* liquid element badges (SVG twin of CanvasRenderer.drawElement) — legible
+   emblems; the elem-* classes carry finite shimmer animations */
 function appendElemOverlay(g, elem, y, h, px) {
+  const cy = y + h / 2;
   if (elem === 'frozen') {
-    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(190,235,255,0.30)', 'pointer-events': 'none' });
+    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(190,238,255,0.22)', 'pointer-events': 'none' });
     ov.setAttribute('class', 'elem-frozen');
     g.appendChild(ov);
-    for (let k = 0; k < 3; k++) {
-      const sx = px - 16 + k * 16, sy = y + h * (0.2 + k * 0.3);
-      const cross = svgEl('path', {
-        d: `M${sx},${sy - 5} L${sx},${sy + 5} M${sx - 5},${sy} L${sx + 5},${sy} M${sx - 3.5},${sy - 3.5} L${sx + 3.5},${sy + 3.5} M${sx + 3.5},${sy - 3.5} L${sx - 3.5},${sy + 3.5}`,
-        stroke: 'rgba(220,250,255,0.95)', 'stroke-width': 1.2, fill: 'none', 'pointer-events': 'none'
-      });
-      cross.setAttribute('class', 'elem-frozen');
-      cross.style.animationDelay = (-k * 1.07).toFixed(2) + 's';
-      g.appendChild(cross);
-    }
+    g.appendChild(svgEl('line', { x1: -160, y1: y + 0.6, x2: 260, y2: y + 0.6,
+      stroke: 'rgba(235,250,255,0.5)', 'stroke-width': 1, 'pointer-events': 'none' }));
+    const r = Math.min(h * 0.3, 7);
+    const flake = svgEl('path', { d: snowflakePath(px, cy, r), fill: 'none',
+      stroke: 'rgba(240,252,255,0.95)', 'stroke-width': 1.3, 'stroke-linecap': 'round', 'pointer-events': 'none' });
+    flake.setAttribute('class', 'elem-frozen');
+    g.appendChild(flake);
+    [[-r * 1.9, -r * 0.7, 1.1], [r * 1.8, r * 0.6, 0.9]].forEach(([dx, dy, dr]) =>
+      g.appendChild(svgEl('circle', { cx: px + dx, cy: cy + dy, r: dr, fill: 'rgba(255,255,255,0.85)', 'pointer-events': 'none' })));
   } else if (elem === 'electric') {
-    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(140,255,248,0.20)', 'pointer-events': 'none' });
+    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(140,240,255,0.14)', 'pointer-events': 'none' });
     ov.setAttribute('class', 'elem-electric');
     g.appendChild(ov);
-    const zx = px - 5, zy = y + 3, zd = h - 6, steps = 6;
-    let d = `M${zx},${zy}`;
-    for (let k = 0; k < steps; k++) d += ` L${zx + (k % 2 === 0 ? 10 : -10)},${zy + (k + 1) * zd / steps}`;
-    const bolt = svgEl('path', { d, fill: 'none', stroke: 'rgba(220,255,255,0.95)', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'pointer-events': 'none' });
+    const hh = Math.min(h * 0.62, 13);
+    const bolt = svgEl('path', { d: boltPath(px, cy, hh), fill: 'rgba(255,250,190,0.95)',
+      stroke: 'rgba(120,235,255,0.9)', 'stroke-width': 0.9, 'stroke-linejoin': 'round', 'pointer-events': 'none' });
     bolt.setAttribute('class', 'elem-electric');
-    bolt.style.animationDelay = '-0.7s';
     g.appendChild(bolt);
+    g.appendChild(svgEl('path', {
+      d: `M${px - hh * 1.7},${cy} L${px - hh * 0.8},${cy} M${px + hh * 0.8},${cy} L${px + hh * 1.7},${cy}`,
+      stroke: 'rgba(190,250,255,0.35)', 'stroke-width': 1, fill: 'none', 'pointer-events': 'none'
+    }));
   } else if (elem === 'boiling') {
-    for (let k = 0; k < 4; k++) {
-      const bub = svgEl('circle', {
-        cx: px - 15 + k * 10, cy: y + h - 4, r: 3.2 - k * 0.4, fill: 'rgba(255,255,255,0.65)', 'pointer-events': 'none'
-      });
+    [[px - 13, y + h - 5, 2.6], [px - 3, y + h - 7.5, 3.4], [px + 8, y + h - 4.5, 2.2], [px + 13, y + h * 0.4, 1.6]].forEach(([bx, by, br], k) => {
+      const bub = svgEl('circle', { cx: bx, cy: by, r: br,
+        fill: 'rgba(255,255,255,0.30)', stroke: 'rgba(255,255,255,0.75)', 'stroke-width': 0.9, 'pointer-events': 'none' });
       bub.setAttribute('class', 'elem-boil b' + (k % 3));
       g.appendChild(bub);
-    }
+    });
   } else if (elem === 'toxic') {
-    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(80,255,120,0.26)', 'pointer-events': 'none' });
+    const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(110,255,140,0.16)', 'pointer-events': 'none' });
     ov.setAttribute('class', 'elem-toxic');
     g.appendChild(ov);
-    const glow = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'none', stroke: 'rgba(120,255,160,0.5)', 'stroke-width': 3, 'pointer-events': 'none' });
-    glow.setAttribute('class', 'elem-toxic');
-    glow.style.animationDelay = '-1.25s';
-    g.appendChild(glow);
+    const cw = Math.min(h * 0.72, 15);
+    const chip = svgEl('rect', { x: px - cw / 2, y: cy - cw / 2, width: cw, height: cw, rx: cw * 0.28,
+      fill: 'rgba(16,52,28,0.6)', stroke: 'rgba(170,255,190,0.85)', 'stroke-width': 1, 'pointer-events': 'none' });
+    chip.setAttribute('class', 'elem-toxic');
+    g.appendChild(chip);
     const skull = svgEl('text', {
-      x: px + 14, y: y + h / 2 + 4, 'text-anchor': 'middle', 'font-size': 10,
-      fill: 'rgba(180,255,200,0.9)', 'pointer-events': 'none'
+      x: px, y: cy + cw * 0.22, 'text-anchor': 'middle', 'font-size': Math.round(cw * 0.62), 'font-weight': 700,
+      fill: 'rgba(214,255,224,0.95)', 'pointer-events': 'none'
     });
     skull.textContent = '☠';
-    skull.setAttribute('class', 'elem-toxic');
     g.appendChild(skull);
   }
 }
@@ -979,16 +1063,19 @@ const SvgRenderer = {
       pgrad.appendChild(stop);
     });
     pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
-    const mkPath = (stroke, width, opacity, blur) => {
+    const mkPath = (stroke, width, opacity) => {
       const path = document.createElementNS(NS, 'path');
       path.setAttribute('d', arcD); path.setAttribute('fill', 'none');
       path.setAttribute('stroke', stroke); path.setAttribute('stroke-width', width);
       path.setAttribute('stroke-linecap', 'round');
       if (opacity !== undefined) path.setAttribute('opacity', opacity);
-      if (blur) path.style.filter = 'blur(' + blur + 'px)';
       return path;
     };
-    if (activeRenderProfile().streamGlow) pourSVG.appendChild(mkPath(c0, 9, 0.28 * activeRenderProfile().glowStrength, 3));
+    /* layered wide strokes fake the glow — the blur() filter was a mobile slow path */
+    if (activeRenderProfile().streamGlow) {
+      pourSVG.appendChild(mkPath(c0, 14, 0.10 * activeRenderProfile().glowStrength));
+      pourSVG.appendChild(mkPath(c0, 8, 0.18 * activeRenderProfile().glowStrength));
+    }
     pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));
     pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6));
     fx.appendChild(pourSVG);
@@ -1196,6 +1283,9 @@ const CanvasRenderer = {
   pathCache: new Map(),
   gradientCache: new Map(),
   shellCache: new Map(),
+  backCache: new Map(),
+  glowCache: new Map(),
+  PAD: 18,               /* sprite padding so baked shadows/glows aren't clipped */
   ensure() {
     this.canvas = this.canvas || document.getElementById('board-canvas');
     if (!this.canvas) return false;
@@ -1214,6 +1304,7 @@ const CanvasRenderer = {
       this.canvas.width = w; this.canvas.height = h;
       this.gradientCache.clear();
       this.shellCache.clear();
+      this.backCache.clear();
     }
     this.canvas.style.width = sr.width + 'px';
     this.canvas.style.height = sr.height + 'px';
@@ -1250,8 +1341,8 @@ const CanvasRenderer = {
   renderAll() {
     return this.requestRender();
   },
-  setTheme() { this.gradientCache.clear(); this.shellCache.clear(); this.renderAll(); return this; },
-  setQuality(q) { this.quality = q || 'auto'; this.shellCache.clear(); return this; },
+  setTheme() { this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
+  setQuality(q) { this.quality = q || 'auto'; this.shellCache.clear(); this.backCache.clear(); return this; },
   destroy() { this.renderQueued = false; this.clear(); return this; },
   roundRect(ctx, x, y, w, h, r) {
     r = Math.min(r || 0, w / 2, h / 2);
@@ -1270,15 +1361,102 @@ const CanvasRenderer = {
     }
     return cached;
   },
-  liquidGradient(ctx, c) {
-    const key = SKIN + ':' + MODE + ':' + c;
+  liquidGradient(ctx, c, shapeName) {
+    const key = SKIN + ':' + MODE + ':' + c + ':' + shapeName;
     const cached = this.gradientCache.get(key);
     if (cached) return cached;
-    const g = ctx.createLinearGradient(0, 0, 100, 0);
+    const sh = SHAPES[shapeName];
+    /* span the actual glass body, not the full band rect — the old 0–100 span
+       kept the dark cylinder edges outside the visible interior */
+    const xl = sh.box[0] - 4, xr = sh.box[1] + 4;
+    const g = ctx.createLinearGradient(xl, 0, xr, 0);
     const pair = c === 'hidden' ? HIDDEN_FILL : COLORS[c];
-    g.addColorStop(0, pair[1]); g.addColorStop(0.3, pair[0]); g.addColorStop(0.7, pair[0]); g.addColorStop(1, pair[1]);
+    const dark = pair[1], light = pair[0];
+    const core = mixHex(light, '#ffffff', SKIN === 'neon' ? 0.26 : 0.15);
+    g.addColorStop(0, dark);
+    g.addColorStop(0.16, mixHex(dark, light, 0.55));
+    g.addColorStop(0.4, light);
+    g.addColorStop(0.56, core);
+    g.addColorStop(0.74, light);
+    g.addColorStop(1, dark);
     this.gradientCache.set(key, g);
     return g;
+  },
+  /* vertical depth: liquid reads deeper toward the base — cached per shape */
+  depthOverlay(ctx, shapeName) {
+    const key = 'depth:' + shapeName + ':' + SKIN;
+    const cached = this.gradientCache.get(key);
+    if (cached) return cached;
+    const sh = SHAPES[shapeName];
+    const g = ctx.createLinearGradient(0, sh.T, 0, sh.B);
+    const tint = SKIN === 'neon' ? '18,8,42' : '38,22,10';
+    g.addColorStop(0, 'rgba(' + tint + ',0)');
+    g.addColorStop(0.62, 'rgba(' + tint + ',0.05)');
+    g.addColorStop(1, 'rgba(' + tint + ',0.20)');
+    this.gradientCache.set(key, g);
+    return g;
+  },
+  makeLayer(w, h) {
+    const cv = typeof OffscreenCanvas === 'function'
+      ? new OffscreenCanvas(Math.ceil(w), Math.ceil(h))
+      : document.createElement('canvas');
+    cv.width = Math.ceil(w);
+    cv.height = Math.ceil(h);
+    return cv;
+  },
+  /* baked under-layer: drop shadow + glass backing tint. Rendered once per
+     shape × theme × dpr; per-frame cost is a single drawImage instead of the
+     shadowBlur slow path every bottle every frame. */
+  backLayer(shapeName) {
+    const sh = SHAPES[shapeName];
+    const key = [shapeName, SKIN, MODE, this.dpr].join(':');
+    const cached = this.backCache.get(key);
+    if (cached) return cached;
+    const P = this.PAD;
+    const scale = Math.max(1, Math.min(2, this.dpr || 1));
+    const cv = this.makeLayer((100 + 2 * P) * scale, (sh.vbH + 2 * P) * scale);
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.translate(P, P);
+    ctx.shadowColor = 'rgba(4,8,26,0.45)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 7;
+    ctx.fillStyle = SKIN === 'neon' ? 'rgba(127,208,255,0.10)' : 'rgba(255,233,200,0.12)';
+    ctx.fill(this.paths(shapeName).interior);
+    ctx.shadowColor = 'transparent';
+    /* pooled scene light beneath the bottle ties it to the backdrop
+       (Neon skips this — it gets a per-colour bloom in drawBottle) */
+    if (SKIN !== 'neon') {
+      const tone = SKIN === 'tidepool' ? '224,255,246' : MODE === 'dark' ? '255,176,92' : '255,219,150';
+      const alpha = MODE === 'dark' ? 0.26 : 0.20;
+      const glow = ctx.createRadialGradient(50, sh.vbH - 4, 2, 50, sh.vbH - 4, 42);
+      glow.addColorStop(0, 'rgba(' + tone + ',' + alpha + ')');
+      glow.addColorStop(1, 'rgba(' + tone + ',0)');
+      ctx.fillStyle = glow;
+      ctx.save();
+      ctx.scale(1, 0.3);
+      ctx.beginPath();
+      ctx.arc(50, (sh.vbH - 4) / 0.3, 42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    this.backCache.set(key, cv);
+    return cv;
+  },
+  /* soft radial glow dot, cached per colour — replaces per-particle shadowBlur */
+  glowDot(color) {
+    const cached = this.glowCache.get(color);
+    if (cached) return cached;
+    const cv = this.makeLayer(32, 32);
+    const ctx = cv.getContext('2d');
+    const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, color + 'cc');
+    g.addColorStop(0.55, color + '55');
+    g.addColorStop(1, color + '00');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 32, 32);
+    this.glowCache.set(color, cv);
+    return cv;
   },
   shellLayer(shapeName, complete) {
     const sh = SHAPES[shapeName];
@@ -1286,28 +1464,77 @@ const CanvasRenderer = {
     const cached = this.shellCache.get(key);
     if (cached) return cached;
     const scale = Math.max(1, Math.min(2, this.dpr || 1));
-    const cv = typeof OffscreenCanvas === 'function'
-      ? new OffscreenCanvas(Math.ceil(100 * scale), Math.ceil(sh.vbH * scale))
-      : document.createElement('canvas');
-    cv.width = Math.ceil(100 * scale);
-    cv.height = Math.ceil(sh.vbH * scale);
+    const cv = this.makeLayer(100 * scale, sh.vbH * scale);
     const ctx = cv.getContext('2d');
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     const paths = this.paths(shapeName);
-    const shade = ctx.createLinearGradient(0, 0, 100, 0);
-    shade.addColorStop(0, 'rgba(58,36,16,0.32)');
+    const [xl, xr, , yb] = sh.box;
+    const shadowRgb = parseInt(GLASS_SHADOW.slice(1), 16);
+    const shadowTint = ((shadowRgb >> 16) & 255) + ',' + ((shadowRgb >> 8) & 255) + ',' + (shadowRgb & 255);
+    /* cylinder side shade pinned to the glass body span */
+    const shade = ctx.createLinearGradient(xl - 4, 0, xr + 4, 0);
+    shade.addColorStop(0, 'rgba(' + shadowTint + ',0.34)');
+    shade.addColorStop(0.16, 'rgba(' + shadowTint + ',0.06)');
     shade.addColorStop(0.5, 'rgba(255,255,255,0)');
-    shade.addColorStop(1, 'rgba(58,36,16,0.34)');
+    shade.addColorStop(0.86, 'rgba(' + shadowTint + ',0.10)');
+    shade.addColorStop(1, 'rgba(' + shadowTint + ',0.38)');
     ctx.fillStyle = shade;
     ctx.fill(paths.interior);
+    /* refractive inner edge: bright line hugging the inside of the walls */
+    ctx.save();
+    ctx.clip(paths.interior);
+    ctx.strokeStyle = 'rgba(255,255,255,0.20)';
+    ctx.lineWidth = 3.4;
+    ctx.stroke(paths.interior);
+    ctx.restore();
     ctx.fillStyle = 'rgba(255,255,255,0.34)';
     (sh.gloss || []).forEach(g => { this.roundRect(ctx, g.x, g.y, g.w, g.h, g.rx); ctx.globalAlpha = g.o; ctx.fill(); ctx.globalAlpha = 1; });
-    ctx.strokeStyle = RIM_COLOR;
-    ctx.lineWidth = 2.6;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    /* soft theme-tinted halo under the crisp rim gives the glass weight */
+    ctx.strokeStyle = SKIN === 'neon' ? 'rgba(150,90,255,0.30)'
+      : SKIN === 'tidepool' ? 'rgba(24,110,120,0.28)'
+      : MODE === 'dark' ? 'rgba(255,176,96,0.30)' : 'rgba(120,78,38,0.26)';
+    ctx.lineWidth = 4.6;
     ctx.stroke(paths.outline);
+    ctx.strokeStyle = RIM_COLOR;
+    ctx.lineWidth = 2.4;
+    ctx.stroke(paths.outline);
+    /* key light: brighter rim on the left, candle-amber on the right in the dark */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, 42, sh.vbH); ctx.clip();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 3.2;
+    ctx.stroke(paths.outline);
+    ctx.restore();
+    if (SKIN === 'apothecary' && MODE === 'dark') {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(58, 0, 42, sh.vbH); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,178,92,0.55)';
+      ctx.lineWidth = 3;
+      ctx.stroke(paths.outline);
+      ctx.restore();
+    }
+    /* bottom rim light (the SVG renderer always had this; canvas was missing it) */
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(xl + 9, yb - 4);
+    ctx.quadraticCurveTo(50, yb + 5, xr - 9, yb - 4);
+    ctx.stroke();
+    if (SKIN === 'tidepool') { /* pearl specular */
+      const px2 = xl + (xr - xl) * 0.24, py2 = sh.vbH * 0.30;
+      const pearl = ctx.createRadialGradient(px2, py2, 0, px2, py2, 5);
+      pearl.addColorStop(0, 'rgba(255,255,255,0.85)');
+      pearl.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = pearl;
+      ctx.beginPath(); ctx.arc(px2, py2, 5, 0, Math.PI * 2); ctx.fill();
+    }
     const lip = sh.lip;
-    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    const lipG = ctx.createLinearGradient(0, lip.y, 0, lip.y + lip.h);
+    lipG.addColorStop(0, 'rgba(255,255,255,0.5)');
+    lipG.addColorStop(1, 'rgba(255,255,255,0.10)');
+    ctx.fillStyle = lipG;
     this.roundRect(ctx, lip.x, lip.y, lip.w, lip.h, lip.rx);
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.45)';
@@ -1317,27 +1544,79 @@ const CanvasRenderer = {
     ctx.beginPath();
     ctx.ellipse(50, lip.mouthCy, lip.mouthRx, lip.mouthRy, 0, 0, Math.PI * 2);
     ctx.fill();
+    /* inner neck shadow just below the mouth reads as glass thickness */
+    const neckG = ctx.createLinearGradient(0, lip.mouthCy, 0, lip.mouthCy + 9);
+    neckG.addColorStop(0, 'rgba(8,10,28,0.28)');
+    neckG.addColorStop(1, 'rgba(8,10,28,0)');
+    ctx.fillStyle = neckG;
+    ctx.fillRect(lip.x + 3, lip.mouthCy, lip.w - 6, 9);
     if (complete && sh.cork) {
       const c = sh.cork;
-      ctx.fillStyle = '#a9763f';
+      const wood = ctx.createLinearGradient(c.x, 0, c.x + c.w, 0);
+      wood.addColorStop(0, '#c79a5e');
+      wood.addColorStop(0.42, '#a9763f');
+      wood.addColorStop(1, '#7c5026');
+      ctx.fillStyle = wood;
       this.roundRect(ctx, c.x, c.y, c.w, c.h, c.r);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(90,55,25,0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#caa06a';
+      ctx.beginPath();
+      ctx.ellipse(c.x + c.w / 2, c.y + 2.5, (c.w - 5) / 2, 2.4, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     this.shellCache.set(key, cv);
     return cv;
   },
+  /* liquid element badges — small legible emblems instead of the old scribbles */
   drawElement(ctx, elem, y, h) {
     ctx.save();
+    const cx = 50, cy = y + h / 2;
     if (elem === 'frozen') {
-      ctx.fillStyle = 'rgba(190,235,255,0.30)'; ctx.fillRect(-160, y, 420, h);
-      ctx.strokeStyle = 'rgba(220,250,255,0.95)'; ctx.lineWidth = 1.2;
-      for (let k = 0; k < 3; k++) { const x = 34 + k * 16, cy = y + h * (0.2 + k * 0.3); ctx.beginPath(); ctx.moveTo(x, cy - 5); ctx.lineTo(x, cy + 5); ctx.moveTo(x - 5, cy); ctx.lineTo(x + 5, cy); ctx.moveTo(x - 3.5, cy - 3.5); ctx.lineTo(x + 3.5, cy + 3.5); ctx.moveTo(x + 3.5, cy - 3.5); ctx.lineTo(x - 3.5, cy + 3.5); ctx.stroke(); }
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, 'rgba(205,242,255,0.30)');
+      g.addColorStop(1, 'rgba(160,220,250,0.12)');
+      ctx.fillStyle = g; ctx.fillRect(-160, y, 420, h);
+      ctx.strokeStyle = 'rgba(235,250,255,0.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-160, y + 0.6); ctx.lineTo(260, y + 0.6); ctx.stroke();
+      const r = Math.min(h * 0.3, 7);
+      ctx.strokeStyle = 'rgba(240,252,255,0.95)'; ctx.lineWidth = 1.3; ctx.lineCap = 'round';
+      ctx.stroke(new Path2D(snowflakePath(cx, cy, r)));
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      for (const [dx2, dy2, dr] of [[-r * 1.9, -r * 0.7, 1.1], [r * 1.8, r * 0.6, 0.9]]) {
+        ctx.beginPath(); ctx.arc(cx + dx2, cy + dy2, dr, 0, Math.PI * 2); ctx.fill();
+      }
     } else if (elem === 'electric') {
-      ctx.fillStyle = 'rgba(140,255,248,0.20)'; ctx.fillRect(-160, y, 420, h); ctx.strokeStyle = 'rgba(220,255,255,0.95)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(45, y + 3); for (let k = 0; k < 6; k++) ctx.lineTo(45 + (k % 2 === 0 ? 10 : -10), y + 3 + (k + 1) * (h - 6) / 6); ctx.stroke();
+      ctx.fillStyle = 'rgba(140,240,255,0.14)'; ctx.fillRect(-160, y, 420, h);
+      const hh = Math.min(h * 0.62, 13);
+      const bolt = new Path2D(boltPath(cx, cy, hh));
+      ctx.fillStyle = 'rgba(255,250,190,0.95)'; ctx.fill(bolt);
+      ctx.strokeStyle = 'rgba(120,235,255,0.9)'; ctx.lineWidth = 0.9; ctx.lineJoin = 'round'; ctx.stroke(bolt);
+      ctx.strokeStyle = 'rgba(190,250,255,0.35)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - hh * 1.7, cy); ctx.lineTo(cx - hh * 0.8, cy);
+      ctx.moveTo(cx + hh * 0.8, cy); ctx.lineTo(cx + hh * 1.7, cy);
+      ctx.stroke();
     } else if (elem === 'boiling') {
-      ctx.fillStyle = 'rgba(255,255,255,0.65)'; for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(35 + k * 10, y + h - 8 - k * 2, 3.2 - k * 0.4, 0, Math.PI * 2); ctx.fill(); }
+      for (const [bx, by, br] of [[cx - 13, y + h - 5, 2.6], [cx - 3, y + h - 7.5, 3.4], [cx + 8, y + h - 4.5, 2.2], [cx + 13, y + h * 0.4, 1.6], [cx - 8, y + h * 0.28, 1.3]]) {
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 0.9; ctx.stroke();
+        ctx.beginPath(); ctx.arc(bx - br * 0.35, by - br * 0.35, br * 0.3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+      }
     } else if (elem === 'toxic') {
-      ctx.fillStyle = 'rgba(80,255,120,0.26)'; ctx.fillRect(-160, y, 420, h); ctx.fillStyle = 'rgba(180,255,200,0.9)'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('☠', 64, y + h / 2 + 4);
+      ctx.fillStyle = 'rgba(110,255,140,0.16)'; ctx.fillRect(-160, y, 420, h);
+      const cw = Math.min(h * 0.72, 15);
+      this.roundRect(ctx, cx - cw / 2, cy - cw / 2, cw, cw, cw * 0.28);
+      ctx.fillStyle = 'rgba(16,52,28,0.6)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(170,255,190,0.85)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = 'rgba(214,255,224,0.95)';
+      ctx.font = '700 ' + Math.round(cw * 0.62) + 'px system-ui';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('☠', cx, cy + 0.5);
     }
     ctx.restore();
   },
@@ -1380,13 +1659,62 @@ const CanvasRenderer = {
     ctx.save();
     const t = Math.max(0, Math.min(1, p.progress == null ? 1 : p.progress));
     const sx = p.sx, sy = p.sy, tx = p.tx, ty = p.ty, cpx = p.cpx, cpy = p.cpy;
+    /* sample the gravity arc once; every pass shares the polyline. The stream
+       reaches the surface in the first ~15% of the pour, then holds. */
+    const reach = Math.min(1, t / 0.15);
+    const N = 16;
+    const qx = [], qy = [], nx = [], ny = [];
+    for (let k = 0; k <= N; k++) {
+      const u = (k / N) * reach, a = 1 - u;
+      qx.push(a * a * sx + 2 * a * u * cpx + u * u * tx);
+      qy.push(a * a * sy + 2 * a * u * cpy + u * u * ty);
+    }
+    for (let k = 0; k <= N; k++) {
+      const k0 = Math.max(0, k - 1), k1 = Math.min(N, k + 1);
+      const dx = qx[k1] - qx[k0], dy = qy[k1] - qy[k0];
+      const len = Math.hypot(dx, dy) || 1;
+      nx.push(-dy / len); ny.push(dx / len);
+    }
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const polyline = () => { ctx.beginPath(); ctx.moveTo(qx[0], qy[0]); for (let k = 1; k <= N; k++) ctx.lineTo(qx[k], qy[k]); };
+    /* soft glow: layered wide strokes — ctx.filter blur was a mobile slow path */
+    if (activeRenderProfile().streamGlow) {
+      ctx.globalAlpha = 0.10 * activeRenderProfile().glowStrength; ctx.strokeStyle = p.c0; ctx.lineWidth = 14; polyline(); ctx.stroke();
+      ctx.globalAlpha = 0.18 * activeRenderProfile().glowStrength; ctx.lineWidth = 8; polyline(); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    /* tapered liquid body — wide at the lip, narrowing as it falls */
     const grad = ctx.createLinearGradient(sx, sy, tx, ty); grad.addColorStop(0, p.c0); grad.addColorStop(1, p.c1);
-    const drawArc = (w, stroke, alpha, blur) => {
-      ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = stroke; ctx.lineWidth = w; if (blur) ctx.filter = 'blur(' + blur + 'px)';
-      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(cpx, cpy, sx + (tx - sx) * t, sy + (ty - sy) * t); ctx.stroke(); ctx.restore();
-    };
-    drawArc(9, p.c0, 0.28, 3); drawArc(5, grad, 1, 0); drawArc(1.6, 'rgba(255,255,255,0.42)', 1, 0);
+    const w0 = 3.4, w1 = 1.6;
+    ctx.beginPath();
+    for (let k = 0; k <= N; k++) {
+      const w = w0 + (w1 - w0) * (k / N);
+      const fx = qx[k] + nx[k] * w, fy = qy[k] + ny[k] * w;
+      if (k) ctx.lineTo(fx, fy); else ctx.moveTo(fx, fy);
+    }
+    for (let k = N; k >= 0; k--) {
+      const w = w0 + (w1 - w0) * (k / N);
+      ctx.lineTo(qx[k] - nx[k] * w, qy[k] - ny[k] * w);
+    }
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+    /* highlight streak riding the inner edge */
+    ctx.globalAlpha = 0.55; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let k = 0; k <= N; k++) {
+      const w = (w0 + (w1 - w0) * (k / N)) * 0.4;
+      const fx = qx[k] + nx[k] * w, fy = qy[k] + ny[k] * w;
+      if (k) ctx.lineTo(fx, fy); else ctx.moveTo(fx, fy);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    /* impact glint where the stream meets the surface */
+    if (reach >= 1) {
+      ctx.globalAlpha = 0.6;
+      ctx.drawImage(this.glowDot('#ffffff'), tx - 8, ty - 5, 16, 10);
+      ctx.globalAlpha = 1;
+    }
     if (this.effectsEnabled()) {
       const age = ((performance.now() - (p.started || performance.now())) / 1000);
       for (let r = 0; r < 2; r++) {
@@ -1411,7 +1739,8 @@ const CanvasRenderer = {
         ctx.globalAlpha = 0.35; ctx.strokeStyle = 'rgba(240,245,255,0.75)'; ctx.lineWidth = 2;
         for (let k = 0; k < 2; k++) { const u = (age * 0.8 + k * 0.45) % 1; ctx.beginPath(); ctx.moveTo(sx + p.side * 6, sy - 12 - u * 28); ctx.bezierCurveTo(sx + 10, sy - 20 - u * 30, sx - 8, sy - 26 - u * 36, sx + 6, sy - 38 - u * 40); ctx.stroke(); }
       }
-      const dt = 1 / 60; p.particles = (p.particles || []).filter(d => { d.age += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vy += 190 * dt; const a = 1 - d.age / d.life; if (a <= 0) return false; ctx.globalAlpha = a; ctx.fillStyle = p.c0; ctx.shadowColor = p.c0 + '88'; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); return true; });
+      const dt = 1 / 60; const glow = this.glowDot(p.c0);
+      p.particles = (p.particles || []).filter(d => { d.age += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vy += 190 * dt; const a = 1 - d.age / d.life; if (a <= 0) return false; ctx.globalAlpha = a * 0.8; ctx.drawImage(glow, d.x - d.r * 2.4, d.y - d.r * 2.4, d.r * 4.8, d.r * 4.8); ctx.globalAlpha = a; ctx.fillStyle = p.c0; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); return true; });
     }
     ctx.restore();
   },
@@ -1431,9 +1760,28 @@ const CanvasRenderer = {
     ctx.translate(r.x + tx, r.y + ty);
     if (rot) { ctx.translate(r.w / 2, r.h / 2); ctx.rotate(rot); ctx.translate(-r.w / 2, -r.h / 2); }
     ctx.scale(sx, sy);
-    ctx.shadowColor = 'rgba(4,8,26,0.45)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 7;
     const paths = this.paths(shapeName), interior = paths.interior;
-    ctx.fillStyle = SKIN === 'neon' ? 'rgba(127,208,255,0.10)' : 'rgba(255,233,200,0.12)'; ctx.fill(interior); ctx.shadowColor = 'transparent';
+    const P = this.PAD;
+    const segs = visual[i] || [];
+    /* Neon: additive bloom tinted by the top liquid + a shelf reflection —
+       two drawImages of a cached sprite, only when the bottle repaints anyway */
+    if (SKIN === 'neon' && segs.length) {
+      const units = segs.reduce((s, x) => s + x.u, 0);
+      if (units > 0.01) {
+        const hid0 = hiddenDepth[i] || 0;
+        const col = hid0 >= units ? HIDDEN_FILL[0] : COLORS[segs[segs.length - 1].c][0];
+        const bloom = this.glowDot(col);
+        const gs = activeRenderProfile().glowStrength;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.26 * gs;
+        ctx.drawImage(bloom, -12, sh.vbH * 0.34 - 62, 124, 150);
+        ctx.globalAlpha = 0.5 * gs;
+        ctx.drawImage(bloom, 4, sh.vbH - 13, 92, 24);
+        ctx.restore();
+      }
+    }
+    ctx.drawImage(this.backLayer(shapeName), -P, -P, 100 + 2 * P, sh.vbH + 2 * P);
     ctx.save(); ctx.clip(interior);
     if (rot) {
       ctx.translate(50, sh.vbH / 2);
@@ -1441,13 +1789,12 @@ const CanvasRenderer = {
       ctx.translate(-50, -sh.vbH / 2);
     }
     let cum = 0;
-    const segs = visual[i] || [];
     for (const seg of segs) {
       const yBot = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
       const yTop = sh.volToY ? sh.volToY((cum + seg.u) / 4) : sh.B - (cum + seg.u) * sh.unit;
       const h = yBot - yTop;
       const isTop = seg === segs[segs.length - 1] && Fluid.active() && !locked.has(i) && h > Fluid.AMP + Fluid.MENISCUS + 7;
-      ctx.fillStyle = this.liquidGradient(ctx, seg.c);
+      ctx.fillStyle = this.liquidGradient(ctx, seg.c, shapeName);
       if (isTop) {
         const halfW = Math.max(5, shapeWidthAt(shapeName, yTop) / 2);
         const sample = Fluid.sample(i);
@@ -1464,6 +1811,12 @@ const CanvasRenderer = {
       if (ELEMENT_MAP[seg.c]) this.drawElement(ctx, ELEMENT_MAP[seg.c], yTop, h);
       cum += seg.u;
     }
+    if (segs.length && cum > 0.01) {
+      /* vertical depth shading over the whole liquid column */
+      const liqTop = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
+      ctx.fillStyle = this.depthOverlay(ctx, shapeName);
+      ctx.fillRect(-160, liqTop, 420, sh.B - liqTop + 2);
+    }
     if (segs.length) {
       const topY = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
       const halfW = Math.max(5, shapeWidthAt(shapeName, topY) / 2);
@@ -1473,7 +1826,7 @@ const CanvasRenderer = {
     for (let u = 0; u < hid && u < cum; u++) {
       const yBot = sh.volToY ? sh.volToY(u / 4) : sh.B - u * sh.unit;
       const yTop = sh.volToY ? sh.volToY((u + 1) / 4) : sh.B - (u + 1) * sh.unit;
-      ctx.fillStyle = this.liquidGradient(ctx, 'hidden'); ctx.fillRect(-160, yTop, 420, yBot - yTop + 1.2);
+      ctx.fillStyle = this.liquidGradient(ctx, 'hidden', shapeName); ctx.fillRect(-160, yTop, 420, yBot - yTop + 1.2);
       ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 50, (yTop + yBot) / 2);
     }
     ctx.restore();
@@ -1792,8 +2145,9 @@ function setupBoard(gen) {
     btn.className = 'bottle';
     btn.type = 'button';
     /* no decorative cork in gameplay — an upright open bottle reads as unsolved;
-       completion is shown by the .cap drop (see syncCaps) */
-    const svg = buildBottleSVG(shapeName, { cork: false, label: true });
+       completion is shown by the .cap drop (see syncCaps). Canvas mode keeps the
+       SVG as an invisible proxy, so skip building sheen DOM for it. */
+    const svg = buildBottleSVG(shapeName, { cork: false, label: true, sheen: !isCanvasMode() });
     btn.appendChild(svg);
     const cap = document.createElement('span'); cap.className = 'cap';
     const ring = document.createElement('span'); ring.className = 'ring';
@@ -1953,15 +2307,16 @@ function orbUpdate(pulse) {
 
 function updateHUD() {
   const lvlEl = $('#hud-level'), subEl = $('#hud-sub');
+  /* compact copy — the old three-part line wrapped on phone widths */
   if (mode === 'daily') {
     lvlEl.textContent = 'Daily Challenge';
-    subEl.textContent = todayStr().slice(5).replace('-', '/') + ' · Moves ' + moves + ' · Par ' + par;
+    subEl.textContent = todayStr().slice(5).replace('-', '/') + ' · Moves ' + moves;
   } else if (mode === 'rush') {
     lvlEl.textContent = 'Rush · Stage ' + rushStage;
     subEl.textContent = '⏱ ' + Math.max(0, rushTimeLeft) + 's · Moves ' + moves;
   } else {
     lvlEl.textContent = 'Level ' + level;
-    subEl.textContent = cap1(difficulty) + ' · Moves ' + moves + ' · Par ' + par;
+    subEl.textContent = 'Moves ' + moves + ' · Par ' + par;
   }
   subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
@@ -1979,7 +2334,10 @@ function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function setSelected(i) {
   if (sel !== null && slots[sel]) slots[sel].el.classList.remove('selected');
   sel = i;
-  if (i !== null) { slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start(); }  /* lift sloshes the liquid */
+  if (i !== null) {
+    slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start();   /* lift sloshes the liquid */
+    if (!isCanvasMode()) sweepSheen(slots[i].svg);
+  }
   updateBottleLabels();
   if (renderer.active === 'canvas2d') renderer.renderAll();
 }
@@ -2131,7 +2489,10 @@ async function doPour(si, di) {
   /* phase 2: arc stream + drain */
   const dur = RM ? 40 : 260 + activeRenderProfile().settleMs + 150 * n;
   const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
-  const surfaceY = dRect.top + ((shD.B - dstUnits0 * shD.unit) / shD.vbH) * bhD;
+  /* volume-true surface height — the linear sh.unit estimate left the landing
+     ripple floating above (or sunk below) the real liquid surface */
+  const surfVb = shD.volToY ? shD.volToY(dstUnits0 / 4) : shD.B - dstUnits0 * shD.unit;
+  const surfaceY = dRect.top + (surfVb / shD.vbH) * bhD;
   const c0 = COLORS[color][0], c1 = COLORS[color][1];
 
   /* Gravity arc metadata for the active renderer. */
@@ -2182,6 +2543,7 @@ async function doPour(si, di) {
     if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderer.renderBottle(di, 0); AudioFX.reveal(); }
     slots[di].el.classList.add('capped');
     if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
+    if (!isCanvasMode()) sweepSheen(slots[di].svg);
     AudioFX.cap(); buzz([15, 40, 25]);
     orbUpdate(true);
     if (frozen.size) thawAll();
@@ -2756,6 +3118,7 @@ function confetti() {
 }
 
 /* ---------------- ambient dust ---------------- */
+let ambientOn = false;
 let ambientRaf = 0;
 let ambientResize = null;
 
@@ -2766,7 +3129,7 @@ function clearAmbientCanvas() {
 }
 
 function startAmbient() {
-  if (RM || ambientRaf || document.hidden || document.body.dataset.screen !== 'menu' || !activeRenderProfile().idleAnimations) return;
+  if (RM || ambientOn || document.hidden || document.body.dataset.screen !== 'menu' || !activeRenderProfile().idleAnimations) return;
   const cv = $('#ambient');
   const ctx = cv.getContext && cv.getContext('2d');
   if (!ctx) return;
@@ -2793,7 +3156,10 @@ function startAmbient() {
   size();
   ambientResize = size;
   window.addEventListener('resize', ambientResize);
+  ambientOn = true;
+  FrameGate.reset('ambient');
   function frame(now) {
+    if (!ambientOn) return;
     PerfMeter.mark('canvas-ambient', now);
     ctx.clearRect(0, 0, W, H);
     for (const p of parts) {
@@ -2814,16 +3180,18 @@ function startAmbient() {
         ctx.stroke();
       }
     }
-    ambientRaf = requestAnimationFrame(frame);
+    ambientRaf = FrameGate.request('ambient', frame, 30);   /* dust reads fine at 30 FPS */
   }
-  ambientRaf = requestAnimationFrame(frame);
+  ambientRaf = FrameGate.request('ambient', frame, 30);
 }
 
 function stopAmbient() {
+  ambientOn = false;
   if (ambientRaf) {
-    cancelAnimationFrame(ambientRaf);
+    clearTimeout(ambientRaf);
     ambientRaf = 0;
   }
+  FrameGate.reset('ambient');
   if (ambientResize) {
     window.removeEventListener('resize', ambientResize);
     ambientResize = null;
@@ -2836,8 +3204,8 @@ function showScreen(name) {
   $('#menu').classList.toggle('hidden', name !== 'menu');
   $('#game').classList.toggle('hidden', name !== 'game');
   document.body.dataset.screen = name;
-  if (name === 'menu' && !RM && !document.hidden) startAmbient();
-  else stopAmbient();
+  if (name === 'menu' && !RM && !document.hidden) { startAmbient(); MenuLife.start(); }
+  else { stopAmbient(); MenuLife.stop(); }
   /* push one history entry on entering gameplay so the device/browser Back
      button returns to the menu instead of leaving the page (window.history is
      the browser API; the game's undo stack is the separate `undoHistory`) */
@@ -2847,8 +3215,8 @@ function showScreen(name) {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) stopAmbient();
-  else if (document.body.dataset.screen === 'menu') startAmbient();
+  if (document.hidden) { stopAmbient(); MenuLife.stop(); }
+  else if (document.body.dataset.screen === 'menu') { startAmbient(); MenuLife.start(); }
 });
 
 /* in-app back: consume the gameplay history entry so the stack stays in sync */
@@ -3151,7 +3519,7 @@ window.__vesselPerf = {
     webp960: activeBackgroundAsset.webp960,
     webp1365: activeBackgroundAsset.webp1365
   } : null; },
-  get ambientEnabled() { return document.body.dataset.screen === 'menu' && !RM && !document.hidden && !!ambientRaf; },
+  get ambientEnabled() { return document.body.dataset.screen === 'menu' && !RM && !document.hidden && ambientOn; },
   get activeAnimations() {
     return (Fluid.running && Fluid.active() && Fluid.hasSims() ? 1 : 0) +   /* liquid surface loop */
            (this.ambientEnabled ? 1 : 0);                /* menu dust loop */

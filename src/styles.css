@@ -353,6 +353,8 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; bo
 
 .brand { text-align: center; }
 .brand .kicker { display: block; color: var(--accent); font-family: var(--head-font); font-size: clamp(11px, 1.9vmin, 13px); letter-spacing: 0.42em; text-transform: uppercase; opacity: 0.9; margin-bottom: 6px; }
+/* deepen the kicker over bright hi-fi backdrops so it stays readable */
+body[data-mode="light"] .brand .kicker { color: color-mix(in srgb, var(--accent) 45%, var(--title)); font-weight: 600; text-shadow: 0 1px 8px rgba(255, 255, 255, 0.45); opacity: 1; }
 .brand h1 {
   margin: 0; font-family: var(--head-font); font-size: clamp(48px, 11vmin, 92px);
   font-weight: 600; font-style: var(--head-italic); letter-spacing: var(--head-track);
@@ -363,10 +365,10 @@ body[data-skin="neon"] .brand h1 { letter-spacing: 0.01em; text-shadow: 0 0 14px
 body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 500; }
 
 .hero-bottles { display: flex; gap: 8px; align-items: flex-end; height: clamp(96px, 16vh, 150px); }
-.hero-bottles svg { width: clamp(40px, 7vh, 62px); height: auto; max-height: 100%; filter: drop-shadow(0 14px 22px var(--shelf-shadow)); animation: bob 4.2s ease-in-out infinite; }
-.hero-bottles svg:nth-child(2) { width: clamp(50px, 9vh, 80px); animation-delay: -1.4s; }
-.hero-bottles svg:nth-child(3) { animation-delay: -2.8s; }
-@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+/* hero bottles idle still by default; MenuLife plays occasional finite
+   bob/sheen sweeps via WAAPI so the GPU can sleep between them */
+.hero-bottles svg { width: clamp(40px, 7vh, 62px); height: auto; max-height: 100%; filter: drop-shadow(0 14px 22px var(--shelf-shadow)); }
+.hero-bottles svg:nth-child(2) { width: clamp(50px, 9vh, 80px); }
 
 /* no backdrop-filter here: it produced horizontal compositing glitch lines on mobile Chrome */
 .seg { display: flex; gap: 4px; padding: 5px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-edge); }
@@ -408,7 +410,7 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 .hud .mid { flex: 1; text-align: center; min-width: 0; }
 .hud .lvl { font-family: var(--head-font); font-weight: 600; font-size: clamp(16px, 2.6vmin, 21px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hud .sub { font-size: clamp(11px, 1.8vmin, 13px); color: var(--ink-dim); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.hud .sub { font-size: clamp(10px, 1.8vmin, 13px); color: var(--ink-dim); font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #orb { width: clamp(38px, 6vmin, 46px); height: clamp(40px, 6.4vmin, 49px); flex: 0 0 auto; position: relative; }
 #orb svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 4px 10px rgba(232, 137, 58, 0.3)); }
 #orb.pulse { animation: orbPulse 0.5s cubic-bezier(0.3, 1.6, 0.5, 1); }
@@ -467,16 +469,25 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
   pointer-events: none;
 }
 .slot.selected .glow { opacity: 0.95; transform: scale(1.3); }
+/* neon tubes cast their light even at rest (static — no animation cost);
+   inert in canvas mode where the renderer draws its own bloom */
+body[data-skin="neon"] .slot .glow { opacity: 0.5; }
+body[data-skin="neon"] .slot.selected .glow { opacity: 0.95; }
 .slot.keyboard-focus .bottle { outline: 3px solid var(--accent); outline-offset: 6px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 20%, transparent); }
 .bottle {
   position: absolute; inset: 0; display: block; width: 100%; height: 100%;
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.5, 1);
-  will-change: transform; border-radius: 16px;
+  border-radius: 16px;
 }
+/* promote to a compositor layer only while the bottle actually moves —
+   a permanent per-bottle layer kept the GPU busy on idle boards */
+.slot.selected .bottle, .slot.pouring .bottle { will-change: transform; }
 .bottle svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 calc(var(--bw) * 0.09) calc(var(--bw) * 0.12) rgba(4, 8, 26, 0.45)); }
 /* Canvas gameplay keeps the DOM buttons/slots as an input and accessibility
    proxy only; the canvas backend owns visible bottle pixels in #stage. */
 .slot.canvas-dom-proxy .bottle svg { opacity: 0; filter: none; }
+/* backstop: nothing inside an invisible proxy SVG may animate */
+.slot.canvas-dom-proxy .bottle svg * { animation: none !important; }
 .slot.selected .bottle { transform: translateY(calc(var(--bw) * -0.22)); }
 .slot.selected .shadow { opacity: 0.55; transform: scale(0.88); }
 .slot.pouring { z-index: 60; }
@@ -571,7 +582,7 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
   position: absolute; top: 32%; left: 50%; z-index: 6; pointer-events: none;
   font-size: calc(var(--bw) * 0.38); color: #e2d2ff; text-shadow: 0 0 12px #9a6bff, 0 0 26px #7c4ce0;
   transform: translate(-50%, -50%);
-  animation: sealPulse 2.4s ease-in-out infinite;
+  animation: sealPulse 2.4s ease-in-out 3;
   transition: opacity 0.45s, transform 0.45s;
 }
 @keyframes sealPulse { 0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(0.92) rotate(-6deg); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08) rotate(6deg); } }
@@ -590,7 +601,7 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
   0% { opacity: 1; transform: translate(0, 0) scale(1.2); }
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.1); }
 }
-.twinkle { animation: twinkle 2.6s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+.twinkle { animation: twinkle 2.6s ease-in-out 3 forwards; transform-origin: center; transform-box: fill-box; }
 .twinkle.t1 { animation-delay: -0.9s; }
 .twinkle.t2 { animation-delay: -1.7s; }
 @keyframes twinkle { 0%, 100% { opacity: 0.15; transform: scale(0.6); } 50% { opacity: 0.95; transform: scale(1.1); } }
@@ -689,13 +700,9 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 .hud .sub.warn { color: #ff7d7d; animation: warnBlink 1s steps(2) infinite; }
 @keyframes warnBlink { 50% { opacity: 0.45; } }
 
-/* roaming light sweep across the glass */
-.sheenmove { animation: sheenMove 8s ease-in-out infinite; }
-@keyframes sheenMove {
-  0%, 58% { transform: translateX(-55px) skewX(-13deg); opacity: 0; }
-  66% { opacity: 0.55; }
-  80%, 100% { transform: translateX(150px) skewX(-13deg); opacity: 0; }
-}
+/* roaming light sweep across the glass — invisible at rest; finite sweeps are
+   played on demand (WAAPI) so no compositor animation runs while idle */
+.sheenmove { opacity: 0; transform: translateX(-55px) skewX(-13deg); }
 
 /* splash droplets at the pour impact point */
 .droplet {
@@ -796,13 +803,15 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 @keyframes electricArc { 0%,82%,100%{opacity:0.35} 83%,85%,87%,89%{opacity:1} 84%,86%,88%{opacity:0.45} }
 @keyframes boilBubble { 0%{transform:translateY(0) scale(1);opacity:0.85} 100%{transform:translateY(-26px) scale(0.3);opacity:0} }
 @keyframes toxicPulse { 0%,100%{opacity:0.55} 50%{opacity:0.95} }
-.elem-frozen { animation: iceShimmer 3.2s ease-in-out infinite; }
-.elem-electric { animation: electricArc 2.2s step-start infinite; }
-.elem-boil { animation: boilBubble 1.9s ease-in infinite; transform-box: fill-box; transform-origin: center bottom; }
+/* finite runs (they restart whenever renderBottle rebuilds the group on a
+   pour) so element badges feel alive during play but idle boards go static */
+.elem-frozen { animation: iceShimmer 3.2s ease-in-out 3 forwards; }
+.elem-electric { animation: electricArc 2.2s step-start 3 forwards; }
+.elem-boil { animation: boilBubble 1.9s ease-in 4 forwards; transform-box: fill-box; transform-origin: center bottom; }
 .elem-boil.b1 { animation-delay: -0.63s; }
 .elem-boil.b2 { animation-delay: -1.27s; }
 .elem-boil.b3 { animation-delay: -1.9s; }
-.elem-toxic { animation: toxicPulse 2.5s ease-in-out infinite; }
+.elem-toxic { animation: toxicPulse 2.5s ease-in-out 3 forwards; }
 body[data-render-quality="low"] .elem-frozen,
 body[data-render-quality="low"] .elem-electric,
 body[data-render-quality="low"] .elem-boil,
