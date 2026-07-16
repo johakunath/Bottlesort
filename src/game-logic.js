@@ -281,3 +281,4 @@ const VesselLogic = {
 };
 if (typeof window !== 'undefined') Object.assign(window, VesselLogic);
 if (typeof module !== 'undefined' && module.exports) module.exports = VesselLogic;
+export { VesselLogic };

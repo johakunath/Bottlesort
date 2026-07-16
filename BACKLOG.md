@@ -16,9 +16,10 @@ Scope / constraints:
 - Keep it readable: light/translucent highlight, not a dark band. Should survive
   on small mobile screens and in both themes.
 
-Where: `renderBottle()` in `index.html` — the top-band highlight block that
-currently appends a single faint white ellipse on `ellipses[last]` (guarded by
-`!topWave`). Replace/augment that one ellipse with a slightly convex meniscus
+Where: `SvgRenderer.renderBottle()` in `src/game-runtime.js` — the top-band
+highlight block that currently appends a single faint white ellipse on
+`ellipses[last]` (guarded by `!topWave`). Replace/augment that one ellipse
+with a slightly convex meniscus
 (e.g. a shallow arc/clipped ellipse following `sh.surfRx`) rather than a flat
 sliver. Reuse `sh.surfRx` and the existing `wob` offset; do not reintroduce the
 removed `COLORS[c][0]` dark surface ellipses.

@@ -805,14 +805,14 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 @keyframes toxicPulse { 0%,100%{opacity:0.55} 50%{opacity:0.95} }
 /* finite runs (they restart whenever renderBottle rebuilds the group on a
    pour) so element badges feel alive during play but idle boards go static */
-.elem-frozen { animation: iceShimmer 3.2s ease-in-out 3 forwards; }
+.elem-icy { animation: iceShimmer 3.2s ease-in-out 3 forwards; }
 .elem-electric { animation: electricArc 2.2s step-start 3 forwards; }
 .elem-boil { animation: boilBubble 1.9s ease-in 4 forwards; transform-box: fill-box; transform-origin: center bottom; }
 .elem-boil.b1 { animation-delay: -0.63s; }
 .elem-boil.b2 { animation-delay: -1.27s; }
 .elem-boil.b3 { animation-delay: -1.9s; }
 .elem-toxic { animation: toxicPulse 2.5s ease-in-out 3 forwards; }
-body[data-render-quality="low"] .elem-frozen,
+body[data-render-quality="low"] .elem-icy,
 body[data-render-quality="low"] .elem-electric,
 body[data-render-quality="low"] .elem-boil,
 body[data-render-quality="low"] .elem-toxic,
@@ -828,6 +828,6 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .hero-bottles svg, .stream, .splash, .slot, .sheenmove, .droplet, #flash,
   .pearl-bubble, .apo.rays, .neon.grid, .tide.caustics,
-  .elem-frozen, .elem-electric, .elem-boil, .elem-toxic { animation: none !important; }
+  .elem-icy, .elem-electric, .elem-boil, .elem-toxic { animation: none !important; }
   * { transition-duration: 0.01s !important; }
 }
