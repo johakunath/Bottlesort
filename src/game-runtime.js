@@ -838,8 +838,12 @@ function buildVolMap(sn, sh) {
   };
 }
 
-/* ---- liquid element visual effects ---- */
-const ELEM_TYPES = ['frozen', 'electric', 'boiling', 'toxic'];
+/* ---- liquid element visual effects ----
+   Purely cosmetic per-colour badges (icy/electric/boiling/toxic) — unrelated
+   to the gameplay "frozen bottle" special (the `frozen` Set below, which
+   locks a bottle until another one completes). Named 'icy' rather than
+   'frozen' to keep the two concepts from being confused in code/search. */
+const ELEM_TYPES = ['icy', 'electric', 'boiling', 'toxic'];
 function buildElementMap(gen) {
   /* overlays render under reduced motion too — the CSS freezes their animations */
   ELEMENT_MAP = {};
@@ -859,16 +863,16 @@ function buildElementMap(gen) {
    emblems; the elem-* classes carry finite shimmer animations */
 function appendElemOverlay(g, elem, y, h, px) {
   const cy = y + h / 2;
-  if (elem === 'frozen') {
+  if (elem === 'icy') {
     const ov = svgEl('rect', { x: -160, y, width: 420, height: h, fill: 'rgba(190,238,255,0.22)', 'pointer-events': 'none' });
-    ov.setAttribute('class', 'elem-frozen');
+    ov.setAttribute('class', 'elem-icy');
     g.appendChild(ov);
     g.appendChild(svgEl('line', { x1: -160, y1: y + 0.6, x2: 260, y2: y + 0.6,
       stroke: 'rgba(235,250,255,0.5)', 'stroke-width': 1, 'pointer-events': 'none' }));
     const r = Math.min(h * 0.3, 7);
     const flake = svgEl('path', { d: snowflakePath(px, cy, r), fill: 'none',
       stroke: 'rgba(240,252,255,0.95)', 'stroke-width': 1.3, 'stroke-linecap': 'round', 'pointer-events': 'none' });
-    flake.setAttribute('class', 'elem-frozen');
+    flake.setAttribute('class', 'elem-icy');
     g.appendChild(flake);
     [[-r * 1.9, -r * 0.7, 1.1], [r * 1.8, r * 0.6, 0.9]].forEach(([dx, dy, dr]) =>
       g.appendChild(svgEl('circle', { cx: px + dx, cy: cy + dy, r: dr, fill: 'rgba(255,255,255,0.85)', 'pointer-events': 'none' })));
@@ -1576,7 +1580,7 @@ const CanvasRenderer = {
   drawElement(ctx, elem, y, h) {
     ctx.save();
     const cx = 50, cy = y + h / 2;
-    if (elem === 'frozen') {
+    if (elem === 'icy') {
       const g = ctx.createLinearGradient(0, y, 0, y + h);
       g.addColorStop(0, 'rgba(205,242,255,0.30)');
       g.addColorStop(1, 'rgba(160,220,250,0.12)');
@@ -2780,6 +2784,11 @@ async function showHint() {
   AudioFX.reveal(); buzz(8);
 }
 
+/* No UI button calls this — it's reachable only via window.__vessel.autoSolve()
+   (see the export at the bottom of this file). That's intentional: it exists
+   for solver verification / manual QA of a board, not as a player-facing
+   "skip the puzzle" feature. Keep it that way unless a deliberate design
+   decision adds an auto-solve control to the HUD. */
 async function autoSolve() {
   if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
   if (mode === 'rush') { toastMsg('Auto-solve is paused in Rush for timer fairness ⚡', 2400); AudioFX.invalid(); return; }

@@ -5,8 +5,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'index.html'),
-        pixiSpike: resolve(__dirname, 'pixi-spike.html')
+        main: resolve(__dirname, 'index.html')
       }
     }
   }
