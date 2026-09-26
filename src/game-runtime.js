@@ -325,6 +325,21 @@ function boltPath(cx, cy, hh) {
     ` L${(cx + w * 0.02).toFixed(1)},${(cy - hh * 0.10).toFixed(1)} Z`;
 }
 
+/* Layout box of `el` relative to `root`, ignoring CSS transforms. Bounding
+   rects include in-flight transforms (the slots' entrance animation, a
+   selection lift), which made the canvas draw the board at the animation's
+   start pose — 26 px low and 8 % small — away from the hit targets and the
+   pour geometry. */
+function layoutBox(el, root) {
+  let x = 0, y = 0, e = el;
+  while (e && e !== root) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; }
+  if (e !== root) {   /* root is not in the offsetParent chain: fall back */
+    const r = el.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    return { x: r.left - rr.left, y: r.top - rr.top, w: r.width, h: r.height };
+  }
+  return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+}
+
 /* ---------------- gameplay renderer quality profiles ---------------- */
 const RENDER_PROFILES = {
   low: {
@@ -1456,10 +1471,7 @@ const CanvasRenderer = {
     }
     this.canvas.style.width = sr.width + 'px';
     this.canvas.style.height = sr.height + 'px';
-    this.rects = slots.map((slot, i) => {
-      const r = slot.slot.getBoundingClientRect();   /* home rect: the button may be mid-pour */
-      return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height, shapeName: shapesByBottle[i] };
-    });
+    this.rects = slots.map((slot, i) => Object.assign(layoutBox(slot.slot, stage), { shapeName: shapesByBottle[i] }));
     return true;
   },
   clear() {
@@ -2720,7 +2732,7 @@ function jobsInto(i) {
   return out;
 }
 function cacheBodyPx() {
-  bodyPx = slots.map(sl => sl ? sl.slot.getBoundingClientRect().width * corkBodyW(sl.sh) / 100 : 40);
+  bodyPx = slots.map(sl => sl ? sl.slot.offsetWidth * corkBodyW(sl.sh) / 100 : 40);
 }
 
 /* per-shape pour geometry in viewBox units: lip corner, rim, outline samples
@@ -2818,7 +2830,7 @@ function poseSourceLip(job, lipX, lipY, a) {
 
 function createJob(si, di, n, color, srcBefore, dstBefore, srcAfter, dstAfter, lifted) {
   const stage = $('#stage'), sr = stage.getBoundingClientRect();
-  const home = i => { const r = slots[i].slot.getBoundingClientRect(); return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height }; };
+  const home = i => layoutBox(slots[i].slot, stage);
   const hs = home(si), hd = home(di);
   const snS = shapesByBottle[si], snD = shapesByBottle[di];
   const gS = pourGeo(snS), gD = pourGeo(snD);
