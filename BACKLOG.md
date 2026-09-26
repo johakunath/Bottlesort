@@ -1,5 +1,23 @@
 # Vessel — Backlog
 
+## Shipped — Aliquot mechanics port (pour physics, cork, sound, input)
+
+Ported from `reference/aliquot.html` (mechanics only; Vessel keeps its look).
+
+- **Timing:** travel 240–420 ms by distance, pour 160 ms + 100 ms/layer, return 280 ms. Normal quality targets 60 FPS.
+- **Sound:** `AudioFX` runs on Aliquot's graph (master → compressor, delay send for bells, one noise buffer). Pour is a live voice whose pitch follows the receiver's fill. The cork pop climbs a pentatonic scale per completion. There is a new `land` thud. Mute ramps the master gain; the context suspends while the page is hidden.
+- **Cork:** drawn in the bottle's own frame (canvas) or as an animated SVG group. It drops when the receiver finishes filling; pop, haptic, ripple and sparkles fire on contact. The DOM `.cap` is gone.
+- **Physics:** `src/pour-physics.js` (unit-tested) gives volume-true bands at any tilt and the tilt at which liquid meets the lip. Canvas draws bands in the surface frame. The pour is an Aliquot-style job: lip anchored over the receiver, clearance against its outline, tapered stream with a detaching tail, fill delayed by the fall, slosh oscillator driven by pose acceleration.
+- **Input:** taps commit instantly; animations queue per bottle (`src/pour-queue.js`) and independent pours run in parallel. Undo, restart, hint and menu fast-forward pending pours.
+
+### Left / follow-ups
+- **Real-device check:** 60 FPS on a mid-range Android is unverified. Headless Chromium with 4× CPU throttle shows the same native raster cost as before the port; JS per frame stays small (see PR #35).
+- **Headspace (decision needed):** the brief asked for capacity at the shoulder and a 35–50° full-bottle start angle. With Vessel's narrow necks these conflict: shoulder caps give 60–79°. Shipped caps are in the upper neck (classic 37, tall 33, flask 33) for 41–43°. Change `SHAPE_GEO.cap` in `src/pour-physics.js` if the look matters more.
+- **SVG fallback** still uses its old tilt heuristic for liquid (not volume-true). Its stream follows the lip, and it has no slosh oscillator.
+- **Colour-blind symbols:** not ported; the `symbols` setting was removed earlier. Element emblems follow the new band geometry.
+- **Frozen timing:** frozen bottles thaw when the completing pour lands (as before), so a very fast tapper can hit a still-frozen bottle once.
+- **QA:** `scripts/qa-rapid-tap.mjs` (Playwright, manual) covers rapid taps, undo mid-pour and the win path. `?slowmo=N` slows board motion for inspection.
+
 ## Top — single "fake 3D" liquid top (meniscus cue)
 
 Deferred from the mobile-stabilization pass. We removed the per-band dark
