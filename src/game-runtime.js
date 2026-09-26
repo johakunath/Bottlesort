@@ -100,6 +100,9 @@ SHAPES.tall.label = { x: 34, y: 196, w: 32, h: 76, rx: 4 };
 let SKIN = 'apothecary', MODE = 'light';
 let RIM_COLOR = 'rgba(255,255,255,0.95)';
 let GLASS_SHADOW = '#3a2410';
+/* completion lid colours: [left, mid, right, top face]; wood on Apothecary,
+   the skin accent elsewhere (what the old DOM .cap used) */
+let LID = ['#c79a5e', '#a9763f', '#7c5026', '#caa06a'];
 
 const RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -661,6 +664,36 @@ function tween(dur, fn) {
   });
 }
 
+/* ---------------- Motion: the single rAF loop for board animation ----------------
+   Tasks are fn(dt, now) → true while they still need frames. After the tasks
+   run, the canvas backend paints once, so every moving thing shares a frame. */
+const Motion = {
+  tasks: new Set(),
+  running: false,
+  last: 0,
+  add(fn) { this.tasks.add(fn); this.start(); },
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.last = performance.now();
+    FrameGate.reset('motion');
+    FrameGate.request('motion', now => this.frame(now));
+  },
+  frame(now) {
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.last) / 1000));
+    this.last = now;
+    PerfMeter.mark(isCanvasMode() ? 'canvas-motion' : 'svg-motion', now);
+    for (const fn of [...this.tasks]) {
+      let keep = false;
+      try { keep = fn(dt, now); } catch (e) { console.error(e); }
+      if (!keep) this.tasks.delete(fn);
+    }
+    if (isCanvasMode() && state.length) renderer.backend.renderNow();
+    if (this.tasks.size) FrameGate.request('motion', t => this.frame(t));
+    else { this.running = false; FrameGate.reset('motion'); }
+  }
+};
+
 /* ---------------- shared SVG defs (theme-aware, rebuildable) ---------------- */
 function buildDefs() {
   const old = document.getElementById('vessel-defs');
@@ -713,6 +746,10 @@ function buildDefs() {
   ck.appendChild(svgEl('stop', { offset: '0.42', 'stop-color': '#a9763f' }));
   ck.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#7c5026' }));
   defs.appendChild(ck);
+  /* gameplay completion lid (colours follow the skin, see LID) */
+  const ld = svgEl('linearGradient', { id: 'lidGrad', x1: 0, y1: 0, x2: 1, y2: 0 });
+  [[0, LID[0]], [0.42, LID[1]], [1, LID[2]]].forEach(([o, c]) => ld.appendChild(svgEl('stop', { offset: String(o), 'stop-color': c })));
+  defs.appendChild(ld);
   /* parchment label */
   const lb = svgEl('linearGradient', { id: 'lblGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
   lb.appendChild(svgEl('stop', { offset: '0', 'stop-color': MODE === 'dark' ? '#e8dcc2' : '#f7ecd3' }));
@@ -777,6 +814,12 @@ function buildBottleSVG(shapeName, opts) {
   if (opts.cork && sh.cork) {
     svg.appendChild(buildCork(sh.cork));
   }
+  /* gameplay completion lid: hidden until a cork animation drives it */
+  if (opts.lid && sh.cork) {
+    const lid = buildLid(sh.cork);
+    lid.setAttribute('opacity', '0');
+    svg.appendChild(lid);
+  }
   return svg;
 }
 
@@ -803,6 +846,69 @@ function buildCork(c) {
     g.appendChild(svgEl('line', { x1: c.x + 3, y1: c.y + c.h * f, x2: c.x + c.w - 3, y2: c.y + c.h * f,
       stroke: 'rgba(90,55,25,0.28)', 'stroke-width': 0.7 })));
   return g;
+}
+
+function buildLid(c) {
+  const g = svgEl('g', { class: 'lid-g' });
+  g.appendChild(svgEl('rect', { x: c.x, y: c.y, width: c.w, height: c.h, rx: c.r,
+    fill: 'url(#lidGrad)', stroke: 'rgba(60,35,15,0.5)', 'stroke-width': 1 }));
+  const top = svgEl('ellipse', { cx: c.x + c.w / 2, cy: c.y + 2.5, rx: (c.w - 5) / 2, ry: 2.4,
+    fill: LID[3], stroke: 'rgba(60,35,15,0.35)', 'stroke-width': 0.7 });
+  top.setAttribute('class', 'lid-top');
+  g.appendChild(top);
+  return g;
+}
+
+/* ---------------- completion corks ----------------
+   corks[i] = null | { t: 0..1, popped, note }. The lid falls into the mouth
+   in 340 ms: quadratic drop for 70 %, one small bounce, fade-in over 18 %.
+   Contact (70 %) fires the pop sound, haptic, ripple and sparkles. */
+let corks = [];
+const CORK_MS = 340;
+function corkBodyW(sh) { return sh.box[1] - sh.box[0]; }
+/* vertical offset (viewBox units) and opacity of a cork at progress t */
+function corkPose(t, bodyW) {
+  const off = t < 0.7 ? -0.9 * bodyW * (1 - (t / 0.7) * (t / 0.7))
+    : -0.07 * bodyW * Math.sin(Math.PI * (t - 0.7) / 0.3);
+  return { off, alpha: Math.min(1, t / 0.18) };
+}
+function corkContact(i) {
+  const c = corks[i];
+  if (!c || c.popped) return;
+  c.popped = true;
+  const slot = slots[i];
+  slot.el.classList.add('capped');
+  AudioFX.cap(c.note); buzz([15, 40, 25]);
+  Fluid.drop(i, -1.6); Fluid.start();
+  if (!RM) spawnSparkles(slot.el, 8, 0.55);
+  if (!isCanvasMode()) sweepSheen(slot.svg);
+}
+function paintCorkSvg(i) {
+  const slot = slots[i], c = corks[i];
+  const lid = slot && slot.svg && slot.svg.querySelector('.lid-g');
+  if (!lid) return;
+  if (!c) { lid.setAttribute('opacity', '0'); lid.removeAttribute('transform'); return; }
+  const pose = corkPose(c.t, corkBodyW(slot.sh));
+  lid.setAttribute('opacity', pose.alpha.toFixed(3));
+  lid.setAttribute('transform', 'translate(0,' + pose.off.toFixed(2) + ')');
+}
+function startCork(i) {
+  corks[i] = { t: RM ? 1 : 0, popped: false, note: capsThisLevel++ };
+  if (RM) { corkContact(i); paintCorkSvg(i); renderer.renderAll(); return; }
+  Motion.add(dt => {
+    const c = corks[i];
+    if (!c || c.t >= 1) return false;
+    c.t = Math.min(1, c.t + dt * 1000 / CORK_MS);
+    if (c.t >= 0.7) corkContact(i);
+    paintCorkSvg(i);
+    return c.t < 1;
+  });
+}
+/* seat corks on every complete bottle, remove them from broken ones (undo,
+   restart, board setup). Instant: no fall, no sound. */
+function seatCorkNow(i) {
+  corks[i] = { t: 1, popped: true, note: 0 };
+  paintCorkSvg(i);
 }
 
 /* ---------------- finite sheen sweeps (replaces the always-on CSS loop) ---------------- */
@@ -1541,9 +1647,9 @@ const CanvasRenderer = {
     this.glowCache.set(color, cv);
     return cv;
   },
-  shellLayer(shapeName, complete) {
+  shellLayer(shapeName) {
     const sh = SHAPES[shapeName];
-    const key = [shapeName, SKIN, MODE, RIM_COLOR, complete ? 'cap' : 'open', this.dpr].join(':');
+    const key = [shapeName, SKIN, MODE, RIM_COLOR, this.dpr].join(':');
     const cached = this.shellCache.get(key);
     if (cached) return cached;
     const scale = Math.max(1, Math.min(2, this.dpr || 1));
@@ -1633,25 +1739,30 @@ const CanvasRenderer = {
     neckG.addColorStop(1, 'rgba(8,10,28,0)');
     ctx.fillStyle = neckG;
     ctx.fillRect(lip.x + 3, lip.mouthCy, lip.w - 6, 9);
-    if (complete && sh.cork) {
-      const c = sh.cork;
-      const wood = ctx.createLinearGradient(c.x, 0, c.x + c.w, 0);
-      wood.addColorStop(0, '#c79a5e');
-      wood.addColorStop(0.42, '#a9763f');
-      wood.addColorStop(1, '#7c5026');
-      ctx.fillStyle = wood;
-      this.roundRect(ctx, c.x, c.y, c.w, c.h, c.r);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(90,55,25,0.5)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = '#caa06a';
-      ctx.beginPath();
-      ctx.ellipse(c.x + c.w / 2, c.y + 2.5, (c.w - 5) / 2, 2.4, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
     this.shellCache.set(key, cv);
     return cv;
+  },
+  /* completion lid in bottle-local viewBox units, so it follows lift and tilt */
+  drawCork(ctx, sh, c) {
+    if (c.t <= 0) return;
+    const k = sh.cork, pose = corkPose(c.t, corkBodyW(sh));
+    const key = 'lid:' + LID.join(',') + ':' + k.x + ':' + k.w;
+    let wood = this.gradientCache.get(key);
+    if (!wood) {
+      wood = ctx.createLinearGradient(k.x, 0, k.x + k.w, 0);
+      wood.addColorStop(0, LID[0]); wood.addColorStop(0.42, LID[1]); wood.addColorStop(1, LID[2]);
+      this.gradientCache.set(key, wood);
+    }
+    ctx.save();
+    ctx.globalAlpha = pose.alpha;
+    ctx.translate(0, pose.off);
+    ctx.fillStyle = wood;
+    this.roundRect(ctx, k.x, k.y, k.w, k.h, k.r);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,35,15,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = LID[3];
+    ctx.beginPath(); ctx.ellipse(k.x + k.w / 2, k.y + 2.5, (k.w - 5) / 2, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   },
   /* liquid element badges — small legible emblems instead of the old scribbles */
   drawElement(ctx, elem, y, h) {
@@ -1913,7 +2024,8 @@ const CanvasRenderer = {
       ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 50, (yTop + yBot) / 2);
     }
     ctx.restore();
-    ctx.drawImage(this.shellLayer(shapeName, slot.el.classList.contains('capped')), 0, 0, 100, sh.vbH);
+    ctx.drawImage(this.shellLayer(shapeName), 0, 0, 100, sh.vbH);
+    if (corks[i] && sh.cork) this.drawCork(ctx, sh, corks[i]);
     if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✦', 50, sh.vbH * 0.38); }
     if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('❄', 50, sh.vbH * 0.72); }
     ctx.restore();
@@ -1995,10 +2107,13 @@ function syncCaps() {
   state.forEach((b, i) => {
     const capped = window.isBottleComplete(b) && !locked.has(i);
     if (capped && hiddenDepth[i]) { hiddenDepth[i] = 0; renderer.renderBottle(i, 0); }
+    if (capped && !corks[i]) seatCorkNow(i);
+    else if (!capped && corks[i]) { corks[i] = null; paintCorkSvg(i); }
     const has = slots[i].el.classList.contains('capped');
     if (capped && !has) slots[i].el.classList.add('capped');
     else if (!capped && has) slots[i].el.classList.remove('capped');
   });
+  if (isCanvasMode()) renderer.renderAll();
 }
 
 function snapshotBoard() {
@@ -2205,6 +2320,7 @@ function setupBoard(gen) {
   moves = 0; undoHistory = []; sel = null; locked.clear(); activePours = 0;
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
   capsThisLevel = 0;
+  corks = state.map(() => null);
   AudioFX.stopAllPours();
   Fluid.resetAll();
   clearHintGlow();
@@ -2230,13 +2346,13 @@ function setupBoard(gen) {
     btn.className = 'bottle';
     btn.type = 'button';
     /* no decorative cork in gameplay — an upright open bottle reads as unsolved;
-       completion is shown by the .cap drop (see syncCaps). Canvas mode keeps the
+       completion is shown by the cork lid (see startCork / syncCaps). Canvas mode keeps the
        SVG as an invisible proxy, so skip building sheen DOM for it. */
-    const svg = buildBottleSVG(shapeName, { cork: false, label: true, sheen: !isCanvasMode() });
+    const svg = buildBottleSVG(shapeName, { cork: false, lid: true, label: true, sheen: !isCanvasMode() });
     btn.appendChild(svg);
-    const cap = document.createElement('span'); cap.className = 'cap';
     const ring = document.createElement('span'); ring.className = 'ring';
-    btn.appendChild(cap); btn.appendChild(ring);
+    ring.style.top = (sh.mouthFrac * 100).toFixed(1) + '%';
+    btn.appendChild(ring);
     slot.appendChild(glow); slot.appendChild(shadow); slot.appendChild(btn);
     if (frozen.has(i)) {
       slot.classList.add('frozen');
@@ -2617,6 +2733,12 @@ async function doPour(si, di) {
   AudioFX.stopPour(voice);
   renderer.endPour({ si, di });
   if (explicitPrettyEffects()) spawnSparkles(slots[di].el, 4, 0.25);
+  const completed = window.isBottleComplete(state[di]);
+  if (completed) {
+    /* a complete bottle holds no secrets — reveal any hidden bands as the lid drops */
+    if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderer.renderBottle(di, 0); AudioFX.reveal(); }
+    startCork(di);
+  }
 
   /* phase 3: return */
   await tween(RM ? 0 : 280, p => {
@@ -2636,13 +2758,7 @@ async function doPour(si, di) {
   revealMystery(si);
   renderer.renderBottle(si, 0); renderer.renderBottle(di, 0);
 
-  if (window.isBottleComplete(state[di])) {
-    /* a complete bottle holds no secrets — reveal any hidden bands under the cap */
-    if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderer.renderBottle(di, 0); AudioFX.reveal(); }
-    slots[di].el.classList.add('capped');
-    if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
-    if (!isCanvasMode()) sweepSheen(slots[di].svg);
-    AudioFX.cap(capsThisLevel++); buzz([15, 40, 25]);
+  if (completed) {
     orbUpdate(true);
     if (frozen.size) thawAll();
   }
@@ -3000,6 +3116,16 @@ function applyTheme() {
   HIDDEN_FILL = t.hidden;
   RIM_COLOR = t.modes ? t.rim[MODE] : t.rim.light;
   GLASS_SHADOW = t.shadow;
+  if (SKIN === 'apothecary') LID = ['#c79a5e', '#a9763f', '#7c5026', '#caa06a'];
+  else {
+    const cs = getComputedStyle(document.body);
+    const acc = (cs.getPropertyValue('--accent') || '#f0c074').trim();
+    const deep = (cs.getPropertyValue('--accent-deep') || '#d18b34').trim();
+    const ok = c => /^#[0-9a-f]{6}$/i.test(c);
+    const a = ok(acc) ? acc : '#f0c074', d = ok(deep) ? deep : '#d18b34';
+    LID = [mixHex(a, '#ffffff', 0.45), a, d, mixHex(a, '#ffffff', 0.6)];
+  }
+  document.querySelectorAll('.lid-top').forEach(el => el.setAttribute('fill', LID[3]));
   applyBackgroundQuality();
   buildDefs();
   const k = $('#brand-kicker'), tg = $('#brand-tag');
@@ -3596,7 +3722,8 @@ window.__vessel = {
   get shapes() { return shapesByBottle; },
   get veiled() { return veiled; },
   get frozen() { return frozen; },
-  get orbFrac() { return orbFrac; }
+  get orbFrac() { return orbFrac; },
+  get corks() { return corks; }
 };
 
 window.__vesselRenderer = renderer;
