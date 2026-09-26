@@ -100,10 +100,10 @@ test('volume is conserved at any tilt', () => {
   }
 });
 
-test('a full bottle starts pouring between 35° and 50°', () => {
+test('a full bottle has headspace: it starts pouring between 60° and 85°', () => {
   for (const sn of SHAPES) {
     const th = P.thetaFor(sn, 4) * 180 / Math.PI;
-    assert.ok(th >= 35 && th <= 50, sn + ' starts at ' + th.toFixed(1));
+    assert.ok(th >= 60 && th <= 85, sn + ' starts at ' + th.toFixed(1));
   }
 });
 
@@ -124,4 +124,15 @@ test('levelsFor mirrors for left pours and caches by signature', () => {
   const b = P.levelsFor('classic', deg(-40), [1, 2.5]);
   a.tops.forEach((y, k) => assert.ok(Math.abs(y - b.tops[k]) < 1e-6));
   assert.equal(P.levelsFor('classic', deg(40), [1, 2.5]), a);
+});
+
+test('simplifyPolygon keeps the exact shape with fewer vertices', () => {
+  for (const sn of SHAPES) {
+    const full = P.interiorPolygon(sn), simple = P.simplifyPolygon(full);
+    assert.ok(simple.n < full.n, sn + ' fewer vertices');
+    for (const L of [-1e9, 30, 60, 90, 150, 200, 220]) {
+      const a = P.areaBelow(full.xs, full.ys, full.n, L), b = P.areaBelow(simple.xs, simple.ys, simple.n, L);
+      assert.ok(Math.abs(a - b) < 1e-6 * Math.max(1, a), `${sn} L=${L}`);
+    }
+  }
 });

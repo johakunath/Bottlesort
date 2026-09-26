@@ -1469,6 +1469,7 @@ const CanvasRenderer = {
   renderBottle() { return this.requestRender(); },
   requestRender() {
     if (!this.ensure()) return this;
+    this.staticGen++;   /* something outside the animation loop changed: rebuild the idle layer */
     if (this.renderQueued || Motion.running) return this;   /* Motion paints every frame anyway */
     this.renderQueued = true;
     FrameGate.request('canvas-render', () => {
@@ -1477,19 +1478,56 @@ const CanvasRenderer = {
     });
     return this;
   },
+  /* Bottles that are not animating are painted once into an offscreen idle
+     layer; while pours run, each frame blits that layer and redraws only the
+     moving bottles. The layer is rebuilt when the moving set changes or when
+     anything outside the animation loop asks for a render. */
+  staticGen: 0,
+  staticKey: null,
+  staticCanvas: null,
   renderNow() {
     if (!this.ensure()) return;
     if (this.rects.length !== slots.length) this.syncLayout();
     this.clear();
     PerfMeter.mark('canvas2d', performance.now());
+    const n = state.length;
+    /* a bottle that started moving stays in the live set until the whole
+       board is still, so the idle layer is rebuilt only when the set grows */
+    const live = this._live || (this._live = new Set());
+    let any = false;
+    for (let i = 0; i < n; i++) if (bottleAnimating(i)) { live.add(i); any = true; }
+    if (!any) live.clear();
+    const act = this._act || (this._act = []);
+    act.length = 0;
+    let key = this.staticGen + ':';
+    for (let i = 0; i < n; i++) if (live.has(i)) { act.push(i); key += i + ','; }
+    if (!act.length) {
+      for (let i = 0; i < n; i++) this.drawBottle(i);
+      this.staticKey = null;
+      return;
+    }
+    const W = this.canvas.width, H = this.canvas.height;
+    if (key !== this.staticKey || !this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) {
+      if (!this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) this.staticCanvas = this.makeLayer(W, H);
+      const sctx = this.staticCanvas.getContext('2d'), main = this.ctx;
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.clearRect(0, 0, W, H);
+      sctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      this.ctx = sctx;
+      try { for (let i = 0; i < n; i++) if (!act.includes(i)) this.drawBottle(i); }
+      finally { this.ctx = main; }
+      this.staticKey = key;
+    }
+    const ctx = this.ctx;
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.staticCanvas, 0, 0); ctx.restore();
     /* bottles in flight are drawn last so they pass over their neighbours */
-    for (let i = 0; i < state.length; i++) if (!flyingSource(i)) this.drawBottle(i);
-    for (let i = 0; i < state.length; i++) if (flyingSource(i)) this.drawBottle(i);
+    for (const i of act) if (!flyingSource(i)) this.drawBottle(i);
+    for (const i of act) if (flyingSource(i)) this.drawBottle(i);
   },
   renderAll() {
     return this.requestRender();
   },
-  setTheme() { this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
+  setTheme() { this.staticGen++; this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
   setQuality(q) { this.quality = q || 'auto'; this.shellCache.clear(); this.backCache.clear(); return this; },
   destroy() { this.renderQueued = false; this.clear(); return this; },
   roundRect(ctx, x, y, w, h, r) {
@@ -1868,13 +1906,11 @@ const CanvasRenderer = {
     if (!r || !slot) return;
     const ctx = this.ctx, shapeName = r.shapeName, sh = SHAPES[shapeName];
     const sx = r.w / 100, sy = r.h / sh.vbH;
-    const inline = slot.btn.style.transform || '';
-    const tMatch = inline.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
-    const rMatch = inline.match(/rotate\((-?[\d.]+)deg\)/);
-    const tx = tMatch ? parseFloat(tMatch[1]) : 0;
-    const selectedLift = !tMatch && slot.el.classList.contains('selected') && !locked.has(i) ? -r.w * 0.22 : 0;
-    const ty = (tMatch ? parseFloat(tMatch[2]) : 0) + selectedLift;
-    const rot = rMatch ? parseFloat(rMatch[1]) * Math.PI / 180 : 0;
+    const pose = poses[i];
+    const tx = pose ? pose.tx : 0;
+    const selectedLift = !pose && slot.el.classList.contains('selected') && !locked.has(i) ? -r.w * 0.22 : 0;
+    const ty = (pose ? pose.ty : 0) + selectedLift;
+    const rot = pose ? pose.a : 0;
     ctx.save();
     ctx.translate(r.x + tx, r.y + ty);
     if (rot) { ctx.translate(r.w / 2, r.h / 2); ctx.rotate(rot); ctx.translate(-r.w / 2, -r.h / 2); }
@@ -1958,7 +1994,7 @@ const CanvasRenderer = {
       const edge = Math.abs(2 * k / N - 1);
       let y = topY;
       if (!wallsOnly) y += upright * ((sample ? sample.h[k] : 0) - Fluid.MENISCUS * Math.pow(edge, 2.2));
-      if (amp > 0.02) y += amp * Math.sin(kx * x - ph);
+      if (amp > 0.05) y += amp * Math.sin(kx * x - ph);
       SX[k] = x; SY[k] = y;
     }
     const allHidden = (hiddenDepth[i] || 0) >= total - 1e-6;
@@ -2586,7 +2622,9 @@ function thawAll() {
     const ice = s.el.querySelector('.ice');
     if (ice) { ice.classList.add('shatter'); setTimeout(() => ice.remove(), 600); }
     if (explicitPrettyEffects()) spawnSparkles(s.el, 8, 0.5);
+    renderer.renderAll();   /* canvas draws the frost overlay from `frozen` */
   }, RM ? 0 : 160 + k * 140));
+  renderer.renderAll();
   updateBottleLabels();
 }
 
@@ -2654,6 +2692,15 @@ let bodyPx = [];          /* per-bottle glass body width in px (cached at layout
 let poses = [];           /* per-bottle live pose { tx, ty, a } while a job moves it */
 function makeBody(i) {
   return { phi: 0, phiV: 0, px: null, pvx: 0, pang: 0, pangV: 0, ripple: 0, rphase: i * 1.7, pouring: false };
+}
+/* does bottle i change from frame to frame right now? (canvas idle-layer split) */
+function bottleAnimating(i) {
+  if (locked.has(i) || poses[i]) return true;
+  const c = corks[i];
+  if (c && c.t < 1) return true;
+  if (Fluid.sims[i]) return true;
+  const b = bodies[i];
+  return !!b && (Math.abs(b.phi) > 0.0015 || Math.abs(b.phiV) > 0.015 || b.ripple > 0.05);
 }
 function flyingSource(i) { for (const j of jobs) if (j.si === i && !j.srcDone) return true; return false; }
 function jobsInto(i) {
@@ -2738,7 +2785,9 @@ function worldPt(h, k, tx, ty, a, u, v) {
 }
 function setPose(i, tx, ty, a) {
   poses[i] = { tx, ty, a };
-  slots[i].btn.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) rotate(' + (a * 180 / Math.PI).toFixed(3) + 'deg)';
+  /* canvas reads poses[] directly; only the SVG fallback moves the DOM
+     (keeps the invisible hit targets home and skips per-frame style work) */
+  if (!isCanvasMode()) slots[i].btn.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) rotate(' + (a * 180 / Math.PI).toFixed(3) + 'deg)';
 }
 function clearPose(i) {
   poses[i] = null;

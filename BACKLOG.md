@@ -11,8 +11,8 @@ Ported from `reference/aliquot.html` (mechanics only; Vessel keeps its look).
 - **Input:** taps commit instantly; animations queue per bottle (`src/pour-queue.js`) and independent pours run in parallel. Undo, restart, hint and menu fast-forward pending pours.
 
 ### Left / follow-ups
-- **Real-device check:** 60 FPS on a mid-range Android is unverified. Headless Chromium with 4× CPU throttle shows the same native raster cost as before the port; JS per frame stays small (see PR #35).
-- **Headspace (decision needed):** the brief asked for capacity at the shoulder and a 35–50° full-bottle start angle. With Vessel's narrow necks these conflict: shoulder caps give 60–79°. Shipped caps are in the upper neck (classic 37, tall 33, flask 33) for 41–43°. Change `SHAPE_GEO.cap` in `src/pour-physics.js` if the look matters more.
+- **Real-device check:** first phone test felt laggy. Since then: idle bottles are cached in an offscreen layer during pours, poses stay in memory in canvas mode (no DOM writes), and the physics polygon is simplified exactly. At 4× CPU throttle headless, frame p50 went from 67 ms to 17 ms. Needs a re-test on the phone.
+- **Headspace:** fill line lowered 20 % of the column after device feedback (classic 74.4, tall 87.2, flask 68.4 in `SHAPE_GEO.cap`); a full bottle now starts pouring at 69–78° instead of ~42°.
 - **SVG fallback** still uses its old tilt heuristic for liquid (not volume-true). Its stream follows the lip, and it has no slosh oscillator.
 - **Colour-blind symbols:** not ported; the `symbols` setting was removed earlier. Element emblems follow the new band geometry.
 - **Frozen timing:** frozen bottles thaw when the completing pour lands (as before), so a very fast tapper can hit a still-frozen bottle once.

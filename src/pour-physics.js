@@ -10,14 +10,14 @@
 
 /* interior extent per shape: `top` is the interior path's first y (the
    mouth), `bottom` its lowest point, `cap` the height 4 layers fill to.
-   The space above `cap` is headspace. Caps are tuned so a full bottle
-   starts pouring at ~42° (classic 43°, tall 42°, flask 41°): the necks
-   are narrow, so capping at the shoulder instead (84/74/131) would push
-   the full-bottle start angle to 60–79°. */
+   The space above `cap` is headspace. Caps sit 20 % of the column lower
+   than the old neck-level line (37 / 33 / 33), so a full bottle reads
+   clearly below the neck; with that headspace a full bottle starts
+   pouring at ~70–78° (classic 69°, tall 78°, flask 74°). */
 const SHAPE_GEO = {
-  classic: { top: 26, bottom: 224, cap: 37 },
-  tall: { top: 24, bottom: 304, cap: 33 },
-  flask: { top: 26, bottom: 210.2, cap: 33 }
+  classic: { top: 26, bottom: 224, cap: 74.4 },
+  tall: { top: 24, bottom: 304, cap: 87.2 },
+  flask: { top: 26, bottom: 210.2, cap: 68.4 }
 };
 const CAP_UNITS = 4;
 const THETA_MAX = 105 * Math.PI / 180;
@@ -94,12 +94,34 @@ function rotateInto(poly, a, ox, oy) {
   }
 }
 
+/* drop vertices that lie on the straight line between their neighbours —
+   same polygon, far fewer points for the area math (straight walls collapse
+   to their end points; curves keep their samples) */
+function simplifyPolygon(poly) {
+  /* repeated points first (the flask meets itself at the bottom), else the
+     collinearity test below would drop both copies */
+  const px = [], py = [];
+  for (let i = 0; i < poly.n; i++) {
+    const j = px.length - 1;
+    if (j >= 0 && Math.abs(px[j] - poly.xs[i]) < 1e-9 && Math.abs(py[j] - poly.ys[i]) < 1e-9) continue;
+    px.push(poly.xs[i]); py.push(poly.ys[i]);
+  }
+  while (px.length > 1 && Math.abs(px[0] - px[px.length - 1]) < 1e-9 && Math.abs(py[0] - py[py.length - 1]) < 1e-9) { px.pop(); py.pop(); }
+  const xs = [], ys = [], n = px.length;
+  for (let i = 0; i < n; i++) {
+    const a = (i + n - 1) % n, b = (i + 1) % n;
+    const cross = (px[i] - px[a]) * (py[b] - py[a]) - (py[i] - py[a]) * (px[b] - px[a]);
+    if (Math.abs(cross) > 1e-9) { xs.push(px[i]); ys.push(py[i]); }
+  }
+  return { xs: Float64Array.from(xs), ys: Float64Array.from(ys), n: xs.length };
+}
+
 const models = {};
 /* per-shape model: polygon, layer area, capacity-vs-tilt table */
 function shapeModel(sn) {
   if (models[sn]) return models[sn];
   const g = SHAPE_GEO[sn];
-  const poly = interiorPolygon(sn, 2);
+  const poly = simplifyPolygon(interiorPolygon(sn, 2));
   const totalA = areaBelow(poly.xs, poly.ys, poly.n, -1e9);
   const unitA = areaBelow(poly.xs, poly.ys, poly.n, g.cap) / CAP_UNITS;
   /* lip = interior top-right corner (pouring right; left is the mirror image) */
@@ -212,6 +234,6 @@ function levelsFor(sn, alpha, cums) {
 
 const PourPhysics = {
   SHAPE_GEO, CAP_UNITS, THETA_MAX,
-  shapeWidthAt, interiorPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor
+  shapeWidthAt, interiorPolygon, simplifyPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor
 };
-export { PourPhysics, SHAPE_GEO, shapeWidthAt, interiorPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor };
+export { PourPhysics, SHAPE_GEO, shapeWidthAt, interiorPolygon, simplifyPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor };
