@@ -962,6 +962,7 @@ const MenuLife = {
 let level = 1, difficulty = save.difficulty || 'normal';
 let mode = 'classic';            /* classic | daily | rush */
 let rushStage = 1, rushTimeLeft = 0, rushTicker = null, rushNextT = null;
+let rushGrace = null;   /* pours the last Rush second is waiting on */
 let usedHint = false, usedAuto = false, autoPlaying = false;
 let undosUsed = 0, perfectStreak = 0;
 let pendingLayout = false;
@@ -2476,9 +2477,14 @@ function loadRushStage() {
 function startRushTimer(sec) {
   rushTimeLeft = sec;
   clearInterval(rushTicker);
+  rushGrace = null;
   rushTicker = setInterval(() => {
-    if (document.hidden || pendingCount() > 0 && rushTimeLeft <= 1) return;
+    if (document.hidden) return;
+    /* last-second grace: the clock waits only for pours committed before it
+       reached the final second — pours queued after that do not stop it */
+    if (rushTimeLeft <= 1 && rushGrace && rushGrace.some(e => !e.finished)) return;
     rushTimeLeft--;
+    if (rushTimeLeft === 1) rushGrace = jobs.map(j => j.entry).filter(Boolean).concat(queue);
     if (rushTimeLeft === 10) AudioFX.ice();
     updateHUD();
     if (rushTimeLeft <= 0) { stopRushTimer(); rushFail(); }
@@ -2616,11 +2622,16 @@ function thawAll() {
   const list = [...frozen];
   frozen.clear();
   AudioFX.thaw();
+  const gen = boardGen;
+  /* the thaw plays out over timers: skip any bottle that undo re-froze (or a
+     board that was replaced) before its timer fired */
+  const stale = i => gen !== boardGen || frozen.has(i) || !slots[i];
   list.forEach((i, k) => setTimeout(() => {
+    if (stale(i)) return;
     const s = slots[i];
     s.el.classList.remove('frozen');
     const ice = s.el.querySelector('.ice');
-    if (ice) { ice.classList.add('shatter'); setTimeout(() => ice.remove(), 600); }
+    if (ice) { ice.classList.add('shatter'); setTimeout(() => { if (!stale(i)) ice.remove(); }, 600); }
     if (explicitPrettyEffects()) spawnSparkles(s.el, 8, 0.5);
     renderer.renderAll();   /* canvas draws the frost overlay from `frozen` */
   }, RM ? 0 : 160 + k * 140));
@@ -3062,7 +3073,7 @@ function commitMove(si, di, lifted) {
     si, di, n, color, srcBefore, dstBefore, srcAfter: state[si].slice(), dstAfter: state[di].slice(),
     lifted: !!lifted, at: performance.now()
   };
-  entry.done = new Promise(r => { entry.resolve = r; });
+  entry.done = new Promise(r => { entry.resolve = () => { entry.finished = true; r(); }; });
   queue.push(entry);
   AudioFX.swap();
   pumpQueue();
