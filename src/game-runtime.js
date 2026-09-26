@@ -4,6 +4,8 @@
    Requires logic.js loaded first.
    ============================================================ */
 'use strict';
+import { PourPhysics } from './pour-physics.js';
+import { startablePours } from './pour-queue.js';
 (function () {
 
 /* ---------------- palette ----------------
@@ -100,6 +102,9 @@ SHAPES.tall.label = { x: 34, y: 196, w: 32, h: 76, rx: 4 };
 let SKIN = 'apothecary', MODE = 'light';
 let RIM_COLOR = 'rgba(255,255,255,0.95)';
 let GLASS_SHADOW = '#3a2410';
+/* completion lid colours: [left, mid, right, top face]; wood on Apothecary,
+   the skin accent elsewhere (what the old DOM .cap used) */
+let LID = ['#c79a5e', '#a9763f', '#7c5026', '#caa06a'];
 
 const RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -144,63 +149,139 @@ if (save.backgroundQualityUserSet !== true) save.backgroundQuality = 'hifi';
 if (!['basic', 'hifi'].includes(save.backgroundQuality)) save.backgroundQuality = 'hifi';
 function persist() { store.save(save); }
 
-/* ---------------- audio ---------------- */
+/* ---------------- audio ----------------
+   Aliquot-style graph: every voice → master gain → compressor → out, with a
+   short filtered delay send for bells. One shared noise buffer, made once. */
+const PENTA = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51, 1567.98, 1760];
 const AudioFX = {
-  ctx: null,
-  ensure() {
-    if (!save.sound) return null;
-    try {
-      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      if (this.ctx.state === 'suspended') this.ctx.resume();
-    } catch (e) { this.ctx = null; }
-    return this.ctx;
-  },
-  tone(freq, dur, type, vol, slideTo, delay) {
-    const ctx = this.ensure(); if (!ctx) return;
-    const t0 = ctx.currentTime + (delay || 0);
-    const osc = ctx.createOscillator(), g = ctx.createGain();
-    osc.type = type || 'sine';
-    osc.frequency.setValueAtTime(freq, t0);
-    if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol || 0.15, t0 + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g).connect(ctx.destination);
-    osc.start(t0); osc.stop(t0 + dur + 0.05);
-  },
-  noise(dur, f0, f1, vol) {
-    const ctx = this.ensure(); if (!ctx) return;
-    const t0 = ctx.currentTime;
-    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  ctx: null, master: null, wet: null, noiseBuf: null,
+  voices: new Set(),
+  init() {
+    if (this.ctx) return this.ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    let ctx;
+    try { ctx = new AC(); } catch (e) { return null; }
+    const master = ctx.createGain();
+    master.gain.value = save.sound ? 0.9 : 0;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.2;
+    master.connect(comp); comp.connect(ctx.destination);
+    const wet = ctx.createGain(); wet.gain.value = 0.25;
+    const d = ctx.createDelay(0.5); d.delayTime.value = 0.12;
+    const fb = ctx.createGain(); fb.gain.value = 0.3;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
+    wet.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(master);
+    const len = Math.floor(ctx.sampleRate * 2);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const ch = buf.getChannelData(0);
     for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
-    const src = ctx.createBufferSource(); src.buffer = buf;
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.1;
-    bp.frequency.setValueAtTime(f0, t0);
-    bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.05);
-    g.gain.setValueAtTime(vol, t0 + dur * 0.7);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(bp).connect(g).connect(ctx.destination);
-    src.start(t0); src.stop(t0 + dur + 0.05);
+    this.ctx = ctx; this.master = master; this.wet = wet; this.noiseBuf = buf;
+    return ctx;
   },
-  select()  { this.tone(520, 0.08, 'sine', 0.10, 660); },
-  swap()    { this.tone(440, 0.07, 'sine', 0.08, 520); },
-  invalid() { this.tone(150, 0.13, 'square', 0.05, 110); },
-  pour(dur) { this.noise(dur, 950, 380, 0.085); },
-  cap()     { this.tone(640, 0.10, 'triangle', 0.18, 330); this.tone(1280, 0.05, 'sine', 0.08, 1180, 0.02); },
-  undo()    { this.tone(360, 0.09, 'sine', 0.08, 300); },
-  reveal()  { this.tone(980, 0.14, 'sine', 0.09, 1480); },
-  ice()     { this.tone(1850, 0.07, 'sine', 0.07, 1700); this.tone(120, 0.08, 'square', 0.03); },
-  thaw()    { this.noise(0.3, 2600, 700, 0.07); this.tone(1320, 0.22, 'sine', 0.08, 880, 0.05); },
-  win() {
-    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.34, 'triangle', 0.13, f, i * 0.11));
-    this.tone(1568, 0.5, 'sine', 0.06, 1568, 0.46);
-  }
+  /* called from user gestures: creates/unlocks the context */
+  ensure() {
+    const ctx = this.init();
+    if (ctx && ctx.state === 'suspended' && !document.hidden) ctx.resume().catch(() => {});
+    return save.sound ? ctx : null;
+  },
+  ok() { return !!this.ctx && save.sound && this.ctx.state === 'running'; },
+  suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {}); },
+  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); },
+  /* mute/unmute follows save.sound; the master ramp makes it instant and click-free */
+  syncMute() {
+    if (!this.master) return;
+    this.master.gain.setTargetAtTime(save.sound ? 0.9 : 0, this.ctx.currentTime, 0.015);
+    if (!save.sound) this.stopAllPours();
+  },
+  env(g, t0, a, peak, d) {
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t0 + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + d);
+  },
+  tone(f0, f1, dur, peak, when, send, type) {
+    const ctx = this.ctx, t0 = ctx.currentTime + (when || 0);
+    const o = ctx.createOscillator(); o.type = type || 'sine';
+    o.frequency.setValueAtTime(f0, t0);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+    const g = ctx.createGain(); this.env(g, t0, 0.004, peak, dur);
+    o.connect(g); g.connect(this.master); if (send) g.connect(this.wet);
+    o.start(t0); o.stop(t0 + dur + 0.06);
+  },
+  bell(f, peak, when) {
+    this.tone(f, f, 1.1, peak, when, true);
+    this.tone(f * 2.76, f * 2.76, 0.45, peak * 0.28, when, true);
+    this.tone(f * 5.4, f * 5.4, 0.2, peak * 0.09, when, true);
+  },
+  /* band-passed slice of the shared noise buffer; optional f1 sweeps the band */
+  burst(freq, q, dur, peak, when, f1) {
+    const ctx = this.ctx, t0 = ctx.currentTime + (when || 0);
+    const s = ctx.createBufferSource(); s.buffer = this.noiseBuf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = q;
+    bp.frequency.setValueAtTime(freq, t0);
+    if (f1 && f1 !== freq) bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+    const g = ctx.createGain(); this.env(g, t0, 0.003, peak, dur);
+    s.connect(bp); bp.connect(g); g.connect(this.master);
+    s.start(t0, Math.random() * 1.5); s.stop(t0 + dur + 0.06);
+  },
+  select()  { if (!this.ok()) return; this.tone(1780, 1960, 0.07, 0.05, 0, true); this.tone(2700, 2700, 0.045, 0.014); },
+  swap()    { if (!this.ok()) return; this.tone(1500, 1250, 0.06, 0.03); },
+  invalid() { if (!this.ok()) return; this.tone(220, 160, 0.09, 0.12); this.tone(185, 125, 0.11, 0.09, 0.1); },
+  land()    { if (!this.ok()) return; this.tone(150, 92, 0.09, 0.1); this.tone(2350, 2350, 0.12, 0.022, 0.004, true); },
+  undo()    { if (!this.ok()) return; this.tone(980, 620, 0.09, 0.04); this.burst(3000, 1.2, 0.05, 0.025); },
+  /* k = bottles completed this level so far: each cork climbs the pentatonic scale */
+  cap(k)    {
+    if (!this.ok()) return;
+    this.burst(1500, 1.8, 0.045, 0.2); this.tone(950, 320, 0.07, 0.1);
+    this.bell(PENTA[(k || 0) % PENTA.length], 0.05, 0.05);
+  },
+  reveal()  { if (!this.ok()) return; this.tone(980, 1480, 0.14, 0.07, 0, true); this.bell(1975.5, 0.018, 0.08); },
+  ice()     { if (!this.ok()) return; this.tone(1850, 1700, 0.07, 0.06, 0, true); this.tone(120, 110, 0.08, 0.025, 0, false, 'square'); },
+  thaw()    { if (!this.ok()) return; this.burst(2600, 1.1, 0.3, 0.07, 0, 700); this.tone(1320, 880, 0.22, 0.07, 0.05, true); },
+  win(when) { if (!this.ok()) return; [0, 2, 4, 5, 7].forEach((k, i) => this.bell(PENTA[k], 0.07, (when || 0) + i * 0.085)); },
+  /* continuous pour voice: noise through a resonant band that rises with the
+     receiver's fill, a low body, and random gurgle blips while flow is strong */
+  startPour() {
+    if (!this.ok()) return null;
+    const ctx = this.ctx, t0 = ctx.currentTime;
+    const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 5; bp.frequency.value = 600;
+    const g = ctx.createGain(); g.gain.value = 0.0001;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
+    const g2 = ctx.createGain(); g2.gain.value = 0.0001;
+    src.connect(bp); bp.connect(g); g.connect(this.master);
+    src.connect(lp); lp.connect(g2); g2.connect(this.master);
+    src.start(t0, Math.random() * 1.5);
+    const v = { src, bp, g, g2, blip: 0 };
+    this.voices.add(v);
+    return v;
+  },
+  updatePour(v, flow, fill, dt) {
+    if (!v || !this.ctx || !this.voices.has(v)) return;
+    const t = this.ctx.currentTime;
+    fill = Math.max(0, Math.min(1, fill)); flow = Math.max(0, Math.min(1, flow));
+    v.bp.frequency.setTargetAtTime(480 + 1500 * Math.pow(fill, 1.25), t, 0.03);
+    v.g.gain.setTargetAtTime(0.0001 + 0.17 * flow, t, 0.025);
+    v.g2.gain.setTargetAtTime(0.0001 + 0.1 * flow, t, 0.03);
+    v.blip -= dt;
+    if (v.blip <= 0 && flow > 0.15 && this.ok()) {
+      v.blip = 0.05 + Math.random() * 0.09;
+      const f = (300 + 650 * fill) * (0.85 + Math.random() * 0.3);
+      this.tone(f, f * 1.55, 0.05, 0.045 * flow);
+    }
+  },
+  stopPour(v) {
+    if (!v || !this.ctx || !this.voices.has(v)) return;
+    this.voices.delete(v);
+    const t = this.ctx.currentTime;
+    v.g.gain.setTargetAtTime(0.0001, t, 0.03); v.g2.gain.setTargetAtTime(0.0001, t, 0.03);
+    try { v.src.stop(t + 0.3); } catch (e) {}
+  },
+  stopAllPours() { for (const v of [...this.voices]) this.stopPour(v); }
 };
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) AudioFX.suspend(); else AudioFX.resume();
+});
 function buzz(p) { try { if (save.haptics && navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
 
 /* ---------------- helpers ---------------- */
@@ -244,6 +325,21 @@ function boltPath(cx, cy, hh) {
     ` L${(cx + w * 0.02).toFixed(1)},${(cy - hh * 0.10).toFixed(1)} Z`;
 }
 
+/* Layout box of `el` relative to `root`, ignoring CSS transforms. Bounding
+   rects include in-flight transforms (the slots' entrance animation, a
+   selection lift), which made the canvas draw the board at the animation's
+   start pose — 26 px low and 8 % small — away from the hit targets and the
+   pour geometry. */
+function layoutBox(el, root) {
+  let x = 0, y = 0, e = el;
+  while (e && e !== root) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; }
+  if (e !== root) {   /* root is not in the offsetParent chain: fall back */
+    const r = el.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    return { x: r.left - rr.left, y: r.top - rr.top, w: r.width, h: r.height };
+  }
+  return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+}
+
 /* ---------------- gameplay renderer quality profiles ---------------- */
 const RENDER_PROFILES = {
   low: {
@@ -253,7 +349,7 @@ const RENDER_PROFILES = {
     settleMs: 70, streamGlow: false
   },
   normal: {
-    id: 'normal', label: 'Normal', targetFps: 30, dprCap: 1.5,
+    id: 'normal', label: 'Normal', targetFps: 60, dprCap: 1.5,
     fluidSamples: 11, particleScale: 0.75, glowStrength: 0.75,
     idleAnimations: true, celebrationIntensity: 0.75,
     settleMs: 120, streamGlow: true
@@ -585,6 +681,38 @@ function tween(dur, fn) {
   });
 }
 
+/* ---------------- Motion: the single rAF loop for board animation ----------------
+   Tasks are fn(dt, now) → true while they still need frames. After the tasks
+   run, the canvas backend paints once, so every moving thing shares a frame. */
+/* ?slowmo=N slows board motion N× (QA aid for inspecting pours frame by frame) */
+const SLOWMO = Math.max(1, Number(new URLSearchParams(location.search).get('slowmo')) || 1);
+const Motion = {
+  tasks: new Set(),
+  running: false,
+  last: 0,
+  add(fn) { this.tasks.add(fn); this.start(); },
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.last = performance.now();
+    FrameGate.reset('motion');
+    FrameGate.request('motion', now => this.frame(now));
+  },
+  frame(now) {
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.last) / 1000)) / SLOWMO;
+    this.last = now;
+    PerfMeter.mark(isCanvasMode() ? 'canvas-motion' : 'svg-motion', now);
+    for (const fn of [...this.tasks]) {
+      let keep = false;
+      try { keep = fn(dt, now); } catch (e) { console.error(e); }
+      if (!keep) this.tasks.delete(fn);
+    }
+    if (isCanvasMode() && state.length) renderer.backend.renderNow();
+    if (this.tasks.size) FrameGate.request('motion', t => this.frame(t));
+    else { this.running = false; FrameGate.reset('motion'); }
+  }
+};
+
 /* ---------------- shared SVG defs (theme-aware, rebuildable) ---------------- */
 function buildDefs() {
   const old = document.getElementById('vessel-defs');
@@ -637,6 +765,10 @@ function buildDefs() {
   ck.appendChild(svgEl('stop', { offset: '0.42', 'stop-color': '#a9763f' }));
   ck.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#7c5026' }));
   defs.appendChild(ck);
+  /* gameplay completion lid (colours follow the skin, see LID) */
+  const ld = svgEl('linearGradient', { id: 'lidGrad', x1: 0, y1: 0, x2: 1, y2: 0 });
+  [[0, LID[0]], [0.42, LID[1]], [1, LID[2]]].forEach(([o, c]) => ld.appendChild(svgEl('stop', { offset: String(o), 'stop-color': c })));
+  defs.appendChild(ld);
   /* parchment label */
   const lb = svgEl('linearGradient', { id: 'lblGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
   lb.appendChild(svgEl('stop', { offset: '0', 'stop-color': MODE === 'dark' ? '#e8dcc2' : '#f7ecd3' }));
@@ -701,6 +833,12 @@ function buildBottleSVG(shapeName, opts) {
   if (opts.cork && sh.cork) {
     svg.appendChild(buildCork(sh.cork));
   }
+  /* gameplay completion lid: hidden until a cork animation drives it */
+  if (opts.lid && sh.cork) {
+    const lid = buildLid(sh.cork);
+    lid.setAttribute('opacity', '0');
+    svg.appendChild(lid);
+  }
   return svg;
 }
 
@@ -727,6 +865,69 @@ function buildCork(c) {
     g.appendChild(svgEl('line', { x1: c.x + 3, y1: c.y + c.h * f, x2: c.x + c.w - 3, y2: c.y + c.h * f,
       stroke: 'rgba(90,55,25,0.28)', 'stroke-width': 0.7 })));
   return g;
+}
+
+function buildLid(c) {
+  const g = svgEl('g', { class: 'lid-g' });
+  g.appendChild(svgEl('rect', { x: c.x, y: c.y, width: c.w, height: c.h, rx: c.r,
+    fill: 'url(#lidGrad)', stroke: 'rgba(60,35,15,0.5)', 'stroke-width': 1 }));
+  const top = svgEl('ellipse', { cx: c.x + c.w / 2, cy: c.y + 2.5, rx: (c.w - 5) / 2, ry: 2.4,
+    fill: LID[3], stroke: 'rgba(60,35,15,0.35)', 'stroke-width': 0.7 });
+  top.setAttribute('class', 'lid-top');
+  g.appendChild(top);
+  return g;
+}
+
+/* ---------------- completion corks ----------------
+   corks[i] = null | { t: 0..1, popped, note }. The lid falls into the mouth
+   in 340 ms: quadratic drop for 70 %, one small bounce, fade-in over 18 %.
+   Contact (70 %) fires the pop sound, haptic, ripple and sparkles. */
+let corks = [];
+const CORK_MS = 340;
+function corkBodyW(sh) { return sh.box[1] - sh.box[0]; }
+/* vertical offset (viewBox units) and opacity of a cork at progress t */
+function corkPose(t, bodyW) {
+  const off = t < 0.7 ? -0.9 * bodyW * (1 - (t / 0.7) * (t / 0.7))
+    : -0.07 * bodyW * Math.sin(Math.PI * (t - 0.7) / 0.3);
+  return { off, alpha: Math.min(1, t / 0.18) };
+}
+function corkContact(i) {
+  const c = corks[i];
+  if (!c || c.popped) return;
+  c.popped = true;
+  const slot = slots[i];
+  slot.el.classList.add('capped');
+  AudioFX.cap(c.note); buzz([15, 40, 25]);
+  Fluid.drop(i, -1.6); Fluid.start();
+  if (!RM) spawnSparkles(slot.el, 8, 0.55);
+  if (!isCanvasMode()) sweepSheen(slot.svg);
+}
+function paintCorkSvg(i) {
+  const slot = slots[i], c = corks[i];
+  const lid = slot && slot.svg && slot.svg.querySelector('.lid-g');
+  if (!lid) return;
+  if (!c) { lid.setAttribute('opacity', '0'); lid.removeAttribute('transform'); return; }
+  const pose = corkPose(c.t, corkBodyW(slot.sh));
+  lid.setAttribute('opacity', pose.alpha.toFixed(3));
+  lid.setAttribute('transform', 'translate(0,' + pose.off.toFixed(2) + ')');
+}
+function startCork(i) {
+  corks[i] = { t: RM ? 1 : 0, popped: false, note: capsThisLevel++ };
+  if (RM) { corkContact(i); paintCorkSvg(i); renderer.renderAll(); return; }
+  Motion.add(dt => {
+    const c = corks[i];
+    if (!c || c.t >= 1) return false;
+    c.t = Math.min(1, c.t + dt * 1000 / CORK_MS);
+    if (c.t >= 0.7) corkContact(i);
+    paintCorkSvg(i);
+    return c.t < 1;
+  });
+}
+/* seat corks on every complete bottle, remove them from broken ones (undo,
+   restart, board setup). Instant: no fall, no sound. */
+function seatCorkNow(i) {
+  corks[i] = { t: 1, popped: true, note: 0 };
+  paintCorkSvg(i);
 }
 
 /* ---------------- finite sheen sweeps (replaces the always-on CSS loop) ---------------- */
@@ -776,14 +977,17 @@ const MenuLife = {
 let level = 1, difficulty = save.difficulty || 'normal';
 let mode = 'classic';            /* classic | daily | rush */
 let rushStage = 1, rushTimeLeft = 0, rushTicker = null, rushNextT = null;
+let rushGrace = null;   /* pours the last Rush second is waiting on */
 let usedHint = false, usedAuto = false, autoPlaying = false;
 let undosUsed = 0, perfectStreak = 0;
 let pendingLayout = false;
 let state = [], visual = [], par = 0, undosAllowed = Infinity, undosLeft = Infinity;
-let moves = 0, undoHistory = [], sel = null, activePours = 0;
+let moves = 0, undoHistory = [], sel = null;
 let shapesByBottle = [], hiddenDepth = [], veiled = [];
 let frozen = new Set();
 let needCaps = 0;
+let capsThisLevel = 0;   /* completions this level — drives the cork pop's rising pitch */
+/* bottles claimed by a running or queued pour (refreshBusy keeps it current) */
 const locked = new Set();
 let ELEMENT_MAP = {};
 let slots = [];
@@ -800,43 +1004,8 @@ function mergeRuns(bottle) {
 }
 
 /* ---- volume-realistic liquid heights ---- */
-function shapeWidthAt(sn, y) {
-  if (sn === 'classic') {
-    if (y <= 54) return 24;
-    if (y <= 84) return 24 + (y - 54) / 30 * 32;
-    if (y <= 204) return 56;
-    return Math.max(4, 56 - (y - 204) / 17 * 36);
-  } else if (sn === 'tall') {
-    if (y <= 50) return 20;
-    if (y <= 74) return 20 + (y - 50) / 24 * 20;
-    if (y <= 286) return 40;
-    return Math.max(4, 40 - (y - 286) / 15 * 30);
-  } else if (sn === 'flask') {
-    if (y <= 131) return 16;
-    const dy = y - 170.2;
-    return 2 * Math.sqrt(Math.max(0, 1600 - dy * dy));
-  }
-  return 50;
-}
-
-function buildVolMap(sn, sh) {
-  const N = 400, yB = sh.B, yT = sh.T, step = (yB - yT) / N;
-  const ys = [], cv = [0];
-  for (let k = 0; k <= N; k++) {
-    const y = yB - k * step;
-    ys.push(y);
-    if (k > 0) cv.push(cv[k - 1] + (shapeWidthAt(sn, ys[k - 1]) + shapeWidthAt(sn, y)) * 0.5 * step);
-  }
-  const tot = cv[N];
-  return function(frac) {
-    if (frac <= 0) return yB;
-    if (frac >= 1) return yT;
-    const target = frac * tot;
-    let lo = 0, hi = N;
-    while (lo < hi - 1) { const m = (lo + hi) >> 1; if (cv[m] <= target) lo = m; else hi = m; }
-    return ys[lo] + ((target - cv[lo]) / (cv[hi] - cv[lo])) * (ys[hi] - ys[lo]);
-  };
-}
+/* interior width + volume maps live in the pure physics module */
+const shapeWidthAt = PourPhysics.shapeWidthAt;
 
 /* ---- liquid element visual effects ----
    Purely cosmetic per-colour badges (icy/electric/boiling/toxic) — unrelated
@@ -998,37 +1167,25 @@ const Fluid = {
     d += ' L' + right.toFixed(1) + ',' + (bottomY).toFixed(1) + ' Z';
     return d;
   },
+  /* stepped by the shared Motion loop; canvas paints there, SVG rewrites paths here */
   start() {
     if (this.running || !this.hasSims()) return;
     this.running = true;
-    let last = performance.now();
-    const key = 'fluid';
-    FrameGate.reset(key);
-    const loop = (now) => {
-      if (!this.running) return;
-      if (document.hidden) { last = now; FrameGate.request(key, loop); return; }
-      PerfMeter.mark(isCanvasMode() ? 'canvas-fluid' : 'svg-fluid', now);
-      let dt = (now - last) / 1000; last = now;
-      if (dt > 0.05) dt = 0.05;                               /* clamp after stalls */
-      /* sub-step for stability */
-      const sub = 2; dt /= sub;
-      for (let s = 0; s < sub; s++) this.step(dt);
-      /* paint: SVG rewrites surface paths; Canvas reads samples during render. */
-      if (isCanvasMode()) {
-        renderer.renderAll();
-      } else {
+    Motion.add(dt => {
+      if (!this.running) return false;
+      const sub = 2, h = dt / sub;
+      for (let k = 0; k < sub; k++) this.step(h);
+      if (!isCanvasMode()) {
         for (let i = 0; i < slots.length; i++) {
           const sl = slots[i]; if (!sl || !sl.surf) continue;
           const m = sl.surf;
-          const d = this.pathFor(i, m.surfY, m.halfW, m.bottomY);
-          m.path.setAttribute('d', d);
+          m.path.setAttribute('d', this.pathFor(i, m.surfY, m.halfW, m.bottomY));
           if (m.crest) m.crest.setAttribute('d', this.crestFor(i, m.surfY, m.halfW));
         }
       }
-      if (!this.hasSims()) { this.running = false; FrameGate.reset(key); return; }
-      FrameGate.request(key, loop);
-    };
-    FrameGate.request(key, loop);
+      if (!this.hasSims()) { this.running = false; return false; }
+      return true;
+    });
   },
   crestFor(i, surfY, halfW) {
     const s = this.sample(i), n = this.N;
@@ -1069,8 +1226,10 @@ const SvgRenderer = {
       pgrad.appendChild(stop);
     });
     pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
+    const paths = [];
     const mkPath = (stroke, width, opacity) => {
       const path = document.createElementNS(NS, 'path');
+      paths.push(path);
       path.setAttribute('d', arcD); path.setAttribute('fill', 'none');
       path.setAttribute('stroke', stroke); path.setAttribute('stroke-width', width);
       path.setAttribute('stroke-linecap', 'round');
@@ -1085,14 +1244,6 @@ const SvgRenderer = {
     pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));
     pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6));
     fx.appendChild(pourSVG);
-    let steamEl = null;
-    if (!RM && SKIN === 'apothecary') {
-      steamEl = document.createElement('div');
-      steamEl.className = 'steam-wisp';
-      steamEl.style.left = (sx - 7 + side * 6) + 'px';
-      steamEl.style.top = (sy - 30) + 'px';
-      fx.appendChild(steamEl);
-    }
     const rippleEls = [];
     if (!RM) {
       for (let r = 0; r < 2; r++) {
@@ -1134,9 +1285,16 @@ const SvgRenderer = {
       bubbleTimer = setInterval(spawnPearlBubble, 180);
     }
     if (!this.pourFxMap) this.pourFxMap = new Map();
-    this.pourFxMap.set(si, { pourSVG, steamEl, rippleEls, dropTimer, bubbleTimer });
+    this.pourFxMap.set(si, { pourSVG, paths, grad: pgrad, rippleEls, dropTimer, bubbleTimer });
   },
-  updatePour() {},
+  /* the source keeps re-aiming during the pour — follow it */
+  updatePour(info) {
+    const fx = this.pourFxMap && this.pourFxMap.get(info && info.si);
+    if (!fx || !fx.paths) return;
+    const d = `M ${info.sx.toFixed(1)} ${info.sy.toFixed(1)} Q ${info.cpx.toFixed(1)} ${info.cpy.toFixed(1)} ${info.tx.toFixed(1)} ${info.ty.toFixed(1)}`;
+    fx.paths.forEach(p => p.setAttribute('d', d));
+    if (fx.grad) { fx.grad.setAttribute('x1', info.sx); fx.grad.setAttribute('y1', info.sy); fx.grad.setAttribute('x2', info.tx); fx.grad.setAttribute('y2', info.ty); }
+  },
   endPour(info) {
     if (!this.pourFxMap) return;
     const fx = this.pourFxMap.get(info && info.si);
@@ -1144,7 +1302,6 @@ const SvgRenderer = {
     if (fx.dropTimer) clearInterval(fx.dropTimer);
     if (fx.bubbleTimer) clearInterval(fx.bubbleTimer);
     if (fx.pourSVG) fx.pourSVG.remove();
-    if (fx.steamEl) fx.steamEl.remove();
     fx.rippleEls.forEach(e => e.remove());
     this.pourFxMap.delete(info.si);
   },
@@ -1314,10 +1471,7 @@ const CanvasRenderer = {
     }
     this.canvas.style.width = sr.width + 'px';
     this.canvas.style.height = sr.height + 'px';
-    this.rects = slots.map((slot, i) => {
-      const r = slot.btn.getBoundingClientRect();
-      return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height, shapeName: shapesByBottle[i] };
-    });
+    this.rects = slots.map((slot, i) => Object.assign(layoutBox(slot.slot, stage), { shapeName: shapesByBottle[i] }));
     return true;
   },
   clear() {
@@ -1328,7 +1482,8 @@ const CanvasRenderer = {
   renderBottle() { return this.requestRender(); },
   requestRender() {
     if (!this.ensure()) return this;
-    if (this.renderQueued) return this;
+    this.staticGen++;   /* something outside the animation loop changed: rebuild the idle layer */
+    if (this.renderQueued || Motion.running) return this;   /* Motion paints every frame anyway */
     this.renderQueued = true;
     FrameGate.request('canvas-render', () => {
       this.renderQueued = false;
@@ -1336,18 +1491,56 @@ const CanvasRenderer = {
     });
     return this;
   },
+  /* Bottles that are not animating are painted once into an offscreen idle
+     layer; while pours run, each frame blits that layer and redraws only the
+     moving bottles. The layer is rebuilt when the moving set changes or when
+     anything outside the animation loop asks for a render. */
+  staticGen: 0,
+  staticKey: null,
+  staticCanvas: null,
   renderNow() {
     if (!this.ensure()) return;
     if (this.rects.length !== slots.length) this.syncLayout();
     this.clear();
     PerfMeter.mark('canvas2d', performance.now());
-    state.forEach((b, i) => this.drawBottle(i));
-    this.drawPourEffects(this.ctx);
+    const n = state.length;
+    /* a bottle that started moving stays in the live set until the whole
+       board is still, so the idle layer is rebuilt only when the set grows */
+    const live = this._live || (this._live = new Set());
+    let any = false;
+    for (let i = 0; i < n; i++) if (bottleAnimating(i)) { live.add(i); any = true; }
+    if (!any) live.clear();
+    const act = this._act || (this._act = []);
+    act.length = 0;
+    let key = this.staticGen + ':';
+    for (let i = 0; i < n; i++) if (live.has(i)) { act.push(i); key += i + ','; }
+    if (!act.length) {
+      for (let i = 0; i < n; i++) this.drawBottle(i);
+      this.staticKey = null;
+      return;
+    }
+    const W = this.canvas.width, H = this.canvas.height;
+    if (key !== this.staticKey || !this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) {
+      if (!this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) this.staticCanvas = this.makeLayer(W, H);
+      const sctx = this.staticCanvas.getContext('2d'), main = this.ctx;
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.clearRect(0, 0, W, H);
+      sctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      this.ctx = sctx;
+      try { for (let i = 0; i < n; i++) if (!act.includes(i)) this.drawBottle(i); }
+      finally { this.ctx = main; }
+      this.staticKey = key;
+    }
+    const ctx = this.ctx;
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.staticCanvas, 0, 0); ctx.restore();
+    /* bottles in flight are drawn last so they pass over their neighbours */
+    for (const i of act) if (!flyingSource(i)) this.drawBottle(i);
+    for (const i of act) if (flyingSource(i)) this.drawBottle(i);
   },
   renderAll() {
     return this.requestRender();
   },
-  setTheme() { this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
+  setTheme() { this.staticGen++; this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
   setQuality(q) { this.quality = q || 'auto'; this.shellCache.clear(); this.backCache.clear(); return this; },
   destroy() { this.renderQueued = false; this.clear(); return this; },
   roundRect(ctx, x, y, w, h, r) {
@@ -1464,9 +1657,9 @@ const CanvasRenderer = {
     this.glowCache.set(color, cv);
     return cv;
   },
-  shellLayer(shapeName, complete) {
+  shellLayer(shapeName) {
     const sh = SHAPES[shapeName];
-    const key = [shapeName, SKIN, MODE, RIM_COLOR, complete ? 'cap' : 'open', this.dpr].join(':');
+    const key = [shapeName, SKIN, MODE, RIM_COLOR, this.dpr].join(':');
     const cached = this.shellCache.get(key);
     if (cached) return cached;
     const scale = Math.max(1, Math.min(2, this.dpr || 1));
@@ -1556,25 +1749,30 @@ const CanvasRenderer = {
     neckG.addColorStop(1, 'rgba(8,10,28,0)');
     ctx.fillStyle = neckG;
     ctx.fillRect(lip.x + 3, lip.mouthCy, lip.w - 6, 9);
-    if (complete && sh.cork) {
-      const c = sh.cork;
-      const wood = ctx.createLinearGradient(c.x, 0, c.x + c.w, 0);
-      wood.addColorStop(0, '#c79a5e');
-      wood.addColorStop(0.42, '#a9763f');
-      wood.addColorStop(1, '#7c5026');
-      ctx.fillStyle = wood;
-      this.roundRect(ctx, c.x, c.y, c.w, c.h, c.r);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(90,55,25,0.5)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = '#caa06a';
-      ctx.beginPath();
-      ctx.ellipse(c.x + c.w / 2, c.y + 2.5, (c.w - 5) / 2, 2.4, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
     this.shellCache.set(key, cv);
     return cv;
+  },
+  /* completion lid in bottle-local viewBox units, so it follows lift and tilt */
+  drawCork(ctx, sh, c) {
+    if (c.t <= 0) return;
+    const k = sh.cork, pose = corkPose(c.t, corkBodyW(sh));
+    const key = 'lid:' + LID.join(',') + ':' + k.x + ':' + k.w;
+    let wood = this.gradientCache.get(key);
+    if (!wood) {
+      wood = ctx.createLinearGradient(k.x, 0, k.x + k.w, 0);
+      wood.addColorStop(0, LID[0]); wood.addColorStop(0.42, LID[1]); wood.addColorStop(1, LID[2]);
+      this.gradientCache.set(key, wood);
+    }
+    ctx.save();
+    ctx.globalAlpha = pose.alpha;
+    ctx.translate(0, pose.off);
+    ctx.fillStyle = wood;
+    this.roundRect(ctx, k.x, k.y, k.w, k.h, k.r);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,35,15,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = LID[3];
+    ctx.beginPath(); ctx.ellipse(k.x + k.w / 2, k.y + 2.5, (k.w - 5) / 2, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   },
   /* liquid element badges — small legible emblems instead of the old scribbles */
   drawElement(ctx, elem, y, h) {
@@ -1626,127 +1824,93 @@ const CanvasRenderer = {
     }
     ctx.restore();
   },
-  beginPour(info) {
-    if (!this.pourMap) this.pourMap = new Map();
-    this.pourMap.set(info.si, Object.assign({ t: 0, particles: [], rippleAge: 0 }, info));
-    if (this.effectsEnabled()) {
-      Fluid.drop(info.di, -1.8);
-      Fluid.start();
-    }
-    this.renderAll();
-  },
-  updatePour(info = {}) {
-    if (!this.pourMap) return;
-    const p = this.pourMap.get(info.si);
-    if (!p) return;
-    Object.assign(p, info);
-    const now = performance.now();
-    if (this.prettyEffectsEnabled() && (!p.lastParticle || now - p.lastParticle > 70)) {
-      p.lastParticle = now;
-      for (let k = 0; k < 2; k++) p.particles.push({
-        x: p.tx + (Math.random() * 14 - 7), y: p.ty,
-        vx: Math.random() * 70 - 35, vy: -(35 + Math.random() * 60),
-        age: 0, life: 0.52 + Math.random() * 0.18, r: 2 + Math.random() * 2
-      });
-    }
-    this.requestRender();
-  },
-  endPour(info) {
-    if (this.pourMap) { this.pourMap.delete(info && info.si); }
-    this.renderAll();
-  },
   effectsEnabled() { return !RM && activeRenderProfile().id !== 'low'; },
   prettyEffectsEnabled() { return !RM && activeRenderProfile().id === 'pretty'; },
-  drawPourEffects(ctx) {
-    if (!this.pourMap || !this.pourMap.size) return;
-    for (const p of this.pourMap.values()) this._drawOnePour(ctx, p);
-  },
-  _drawOnePour(ctx, p) {
+  /* Aliquot stream: quadratic bezier from the source rim to the receiver
+     surface; width follows the flow that left the lip tf·sqrt(u) earlier,
+     so the head falls and the tail detaches. Stage coordinates. */
+  drawStream(ctx, job) {
+    const st = job.streamFx;
+    if (!st) return;
+    const sx = st.sx, sy = st.sy, ex = st.tx, ey = st.ty;
+    if (ey <= sy) return;
+    const s = job.s, tp = job.t - job.T1;
+    const cx = sx + s * job.w * 0.16, cy = sy + (ey - sy) * 0.08;
+    const N = 16, L = this._sL || (this._sL = new Float64Array(2 * N + 2)), Rr = this._sR || (this._sR = new Float64Array(2 * N + 2));
+    const Cx = this._sC || (this._sC = new Float64Array(2 * N + 2));
+    let any = false;
+    for (let k = 0; k <= N; k++) {
+      const u = k / N, iu = 1 - u;
+      const x = iu * iu * sx + 2 * iu * u * cx + u * u * ex, y = iu * iu * sy + 2 * iu * u * cy + u * u * ey;
+      let dx = 2 * iu * (cx - sx) + 2 * u * (ex - cx), dy = 2 * iu * (cy - sy) + 2 * u * (ey - cy);
+      const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+      const e = tp - job.tf * Math.sqrt(u);
+      const f = e > 0 && e < job.T2 ? flowN(e / job.T2) : 0;
+      const hw = f > 0 ? job.maxW * Math.sqrt(f) * (1 - 0.3 * u) * 0.5 : 0;
+      if (hw > 0.2) any = true;
+      L[2 * k] = x - dy * hw; L[2 * k + 1] = y + dx * hw;
+      Rr[2 * k] = x + dy * hw; Rr[2 * k + 1] = y - dx * hw;
+      Cx[2 * k] = x; Cx[2 * k + 1] = y;
+    }
+    if (!any) return;
+    const c0 = COLORS[job.color][0], c1 = COLORS[job.color][1];
     ctx.save();
-    const t = Math.max(0, Math.min(1, p.progress == null ? 1 : p.progress));
-    const sx = p.sx, sy = p.sy, tx = p.tx, ty = p.ty, cpx = p.cpx, cpy = p.cpy;
-    /* sample the gravity arc once; every pass shares the polyline. The stream
-       reaches the surface in the first ~15% of the pour, then holds. */
-    const reach = Math.min(1, t / 0.15);
-    const N = 16;
-    const qx = [], qy = [], nx = [], ny = [];
-    for (let k = 0; k <= N; k++) {
-      const u = (k / N) * reach, a = 1 - u;
-      qx.push(a * a * sx + 2 * a * u * cpx + u * u * tx);
-      qy.push(a * a * sy + 2 * a * u * cpy + u * u * ty);
-    }
-    for (let k = 0; k <= N; k++) {
-      const k0 = Math.max(0, k - 1), k1 = Math.min(N, k + 1);
-      const dx = qx[k1] - qx[k0], dy = qy[k1] - qy[k0];
-      const len = Math.hypot(dx, dy) || 1;
-      nx.push(-dy / len); ny.push(dx / len);
-    }
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    const polyline = () => { ctx.beginPath(); ctx.moveTo(qx[0], qy[0]); for (let k = 1; k <= N; k++) ctx.lineTo(qx[k], qy[k]); };
-    /* soft glow: layered wide strokes — ctx.filter blur was a mobile slow path */
-    if (activeRenderProfile().streamGlow) {
-      ctx.globalAlpha = 0.10 * activeRenderProfile().glowStrength; ctx.strokeStyle = p.c0; ctx.lineWidth = 14; polyline(); ctx.stroke();
-      ctx.globalAlpha = 0.18 * activeRenderProfile().glowStrength; ctx.lineWidth = 8; polyline(); ctx.stroke();
+    /* theme glow: wide soft strokes along the centreline (no blur filter) */
+    const prof = activeRenderProfile();
+    if (prof.streamGlow) {
+      ctx.strokeStyle = c0;
+      ctx.beginPath(); ctx.moveTo(Cx[0], Cx[1]);
+      for (let k = 1; k <= N; k++) ctx.lineTo(Cx[2 * k], Cx[2 * k + 1]);
+      ctx.globalAlpha = 0.10 * prof.glowStrength; ctx.lineWidth = job.maxW * 1.9; ctx.stroke();
+      ctx.globalAlpha = 0.18 * prof.glowStrength; ctx.lineWidth = job.maxW * 1.15; ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    /* tapered liquid body — wide at the lip, narrowing as it falls */
-    const grad = ctx.createLinearGradient(sx, sy, tx, ty); grad.addColorStop(0, p.c0); grad.addColorStop(1, p.c1);
-    const w0 = 3.4, w1 = 1.6;
-    ctx.beginPath();
-    for (let k = 0; k <= N; k++) {
-      const w = w0 + (w1 - w0) * (k / N);
-      const fx = qx[k] + nx[k] * w, fy = qy[k] + ny[k] * w;
-      if (k) ctx.lineTo(fx, fy); else ctx.moveTo(fx, fy);
-    }
-    for (let k = N; k >= 0; k--) {
-      const w = w0 + (w1 - w0) * (k / N);
-      ctx.lineTo(qx[k] - nx[k] * w, qy[k] - ny[k] * w);
-    }
-    ctx.closePath();
+    const grad = ctx.createLinearGradient(sx, sy, ex, ey); grad.addColorStop(0, c0); grad.addColorStop(1, c1);
     ctx.fillStyle = grad;
-    ctx.fill();
-    /* highlight streak riding the inner edge */
-    ctx.globalAlpha = 0.55; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(L[0], L[1]);
+    for (let k = 1; k <= N; k++) ctx.lineTo(L[2 * k], L[2 * k + 1]);
+    for (let k = N; k >= 0; k--) ctx.lineTo(Rr[2 * k], Rr[2 * k + 1]);
+    ctx.closePath(); ctx.fill();
+    /* highlight streak on the lit edge, only where the stream is wide */
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1, job.maxW * 0.14);
     ctx.beginPath();
+    let started = false;
     for (let k = 0; k <= N; k++) {
-      const w = (w0 + (w1 - w0) * (k / N)) * 0.4;
-      const fx = qx[k] + nx[k] * w, fy = qy[k] + ny[k] * w;
-      if (k) ctx.lineTo(fx, fy); else ctx.moveTo(fx, fy);
+      const x = L[2 * k] * 0.7 + Rr[2 * k] * 0.3, y = L[2 * k + 1] * 0.7 + Rr[2 * k + 1] * 0.3;
+      if (Math.hypot(L[2 * k] - Rr[2 * k], L[2 * k + 1] - Rr[2 * k + 1]) > 3) { if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; } }
+      else started = false;
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
-    /* impact glint where the stream meets the surface */
-    if (reach >= 1) {
-      ctx.globalAlpha = 0.6;
-      ctx.drawImage(this.glowDot('#ffffff'), tx - 8, ty - 5, 16, 10);
-      ctx.globalAlpha = 1;
-    }
-    if (this.effectsEnabled()) {
-      const age = ((performance.now() - (p.started || performance.now())) / 1000);
-      for (let r = 0; r < 2; r++) {
-        const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
-        ctx.globalAlpha = (1 - u) * 0.65; ctx.strokeStyle = p.c0; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.ellipse(tx, ty, p.receiverW * (0.12 + u * 0.45), p.receiverW * (0.04 + u * 0.12), 0, 0, Math.PI * 2); ctx.stroke();
-      }
-      if (prettyTidepoolEffects()) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.76)';
-        ctx.fillStyle = 'rgba(210,255,248,0.16)';
-        ctx.lineWidth = 1;
-        for (let k = 0; k < 3; k++) {
-          const u = (age * 0.9 + k * 0.31) % 1;
-          const bx = tx + Math.sin(age * 1.7 + k * 2.1) * p.receiverW * 0.16;
-          const by = ty + p.receiverW * 0.08 - u * p.receiverW * 0.62;
-          const br = p.receiverW * (0.045 + u * 0.045);
-          ctx.globalAlpha = (1 - u) * 0.58;
-          ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    const fl = job.flowD || 0;
+    if (fl > 0.05) {
+      /* impact glint + expanding rings where the stream meets the surface */
+      ctx.globalAlpha = 0.6 * Math.min(1, fl * 2);
+      ctx.drawImage(this.glowDot('#ffffff'), ex - 8, ey - 5, 16, 10);
+      if (this.effectsEnabled()) {
+        const age = job.t - job.T1 - job.tf;
+        for (let r = 0; r < 2; r++) {
+          const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
+          ctx.globalAlpha = (1 - u) * 0.55 * Math.min(1, fl * 2); ctx.strokeStyle = c0; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.ellipse(ex, ey, job.wD * (0.12 + u * 0.3), job.wD * (0.035 + u * 0.08), 0, 0, Math.PI * 2); ctx.stroke();
+        }
+        if (prettyTidepoolEffects()) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.76)'; ctx.fillStyle = 'rgba(210,255,248,0.16)'; ctx.lineWidth = 1;
+          for (let k = 0; k < 3; k++) {
+            const u = (age * 0.9 + k * 0.31) % 1; if (u < 0) continue;
+            const bx = ex + Math.sin(age * 1.7 + k * 2.1) * job.wD * 0.16;
+            const by = ey + job.wD * 0.08 - u * job.wD * 0.62;
+            ctx.globalAlpha = (1 - u) * 0.58;
+            ctx.beginPath(); ctx.arc(bx, by, job.wD * (0.045 + u * 0.045), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          }
         }
       }
-      if (this.prettyEffectsEnabled() && SKIN === 'apothecary') {
-        ctx.globalAlpha = 0.35; ctx.strokeStyle = 'rgba(240,245,255,0.75)'; ctx.lineWidth = 2;
-        for (let k = 0; k < 2; k++) { const u = (age * 0.8 + k * 0.45) % 1; ctx.beginPath(); ctx.moveTo(sx + p.side * 6, sy - 12 - u * 28); ctx.bezierCurveTo(sx + 10, sy - 20 - u * 30, sx - 8, sy - 26 - u * 36, sx + 6, sy - 38 - u * 40); ctx.stroke(); }
-      }
-      const dt = 1 / 60; const glow = this.glowDot(p.c0);
-      p.particles = (p.particles || []).filter(d => { d.age += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vy += 190 * dt; const a = 1 - d.age / d.life; if (a <= 0) return false; ctx.globalAlpha = a * 0.8; ctx.drawImage(glow, d.x - d.r * 2.4, d.y - d.r * 2.4, d.r * 4.8, d.r * 4.8); ctx.globalAlpha = a; ctx.fillStyle = p.c0; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); return true; });
+    }
+    /* splash droplets (stepped in stepJob) */
+    if (job.drops.length) {
+      ctx.fillStyle = c0;
+      for (const d of job.drops) { ctx.globalAlpha = Math.min(1, d.life * 5); ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.restore();
   },
@@ -1755,13 +1919,11 @@ const CanvasRenderer = {
     if (!r || !slot) return;
     const ctx = this.ctx, shapeName = r.shapeName, sh = SHAPES[shapeName];
     const sx = r.w / 100, sy = r.h / sh.vbH;
-    const inline = slot.btn.style.transform || '';
-    const tMatch = inline.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
-    const rMatch = inline.match(/rotate\((-?[\d.]+)deg\)/);
-    const tx = tMatch ? parseFloat(tMatch[1]) : 0;
-    const selectedLift = !tMatch && slot.el.classList.contains('selected') ? -r.w * 0.22 : 0;
-    const ty = (tMatch ? parseFloat(tMatch[2]) : 0) + selectedLift;
-    const rot = rMatch ? parseFloat(rMatch[1]) * Math.PI / 180 : 0;
+    const pose = poses[i];
+    const tx = pose ? pose.tx : 0;
+    const selectedLift = !pose && slot.el.classList.contains('selected') && !locked.has(i) ? -r.w * 0.22 : 0;
+    const ty = (pose ? pose.ty : 0) + selectedLift;
+    const rot = pose ? pose.a : 0;
     ctx.save();
     ctx.translate(r.x + tx, r.y + ty);
     if (rot) { ctx.translate(r.w / 2, r.h / 2); ctx.rotate(rot); ctx.translate(-r.w / 2, -r.h / 2); }
@@ -1789,57 +1951,132 @@ const CanvasRenderer = {
     }
     ctx.drawImage(this.backLayer(shapeName), -P, -P, 100 + 2 * P, sh.vbH + 2 * P);
     ctx.save(); ctx.clip(interior);
-    if (rot) {
-      ctx.translate(50, sh.vbH / 2);
-      ctx.rotate(-rot);
-      ctx.translate(-50, -sh.vbH / 2);
-    }
-    let cum = 0;
-    for (const seg of segs) {
-      const yBot = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
-      const yTop = sh.volToY ? sh.volToY((cum + seg.u) / 4) : sh.B - (cum + seg.u) * sh.unit;
-      const h = yBot - yTop;
-      const isTop = seg === segs[segs.length - 1] && Fluid.active() && !locked.has(i) && h > Fluid.AMP + Fluid.MENISCUS + 7;
-      ctx.fillStyle = this.liquidGradient(ctx, seg.c, shapeName);
-      if (isTop) {
-        const halfW = Math.max(5, shapeWidthAt(shapeName, yTop) / 2);
-        const sample = Fluid.sample(i);
-        const n = Fluid.N, left = 50 - halfW, span = 2 * halfW;
-        ctx.beginPath(); ctx.moveTo(-160, yBot + 1.2); ctx.lineTo(-160, yTop);
-        for (let k = 0; k < n; k++) {
-          const x = left + (k / (n - 1)) * span;
-          const edge = Math.abs((k / (n - 1)) * 2 - 1);
-          const y = yTop + (sample ? sample.h[k] : 0) - Fluid.MENISCUS * Math.pow(edge, 2.2);
-          ctx.lineTo(x, y);
-        }
-        ctx.lineTo(260, yTop); ctx.lineTo(260, yBot + 1.2); ctx.closePath(); ctx.fill();
-      } else ctx.fillRect(-160, yTop, 420, h + 1.2);
-      if (ELEMENT_MAP[seg.c]) this.drawElement(ctx, ELEMENT_MAP[seg.c], yTop, h);
-      cum += seg.u;
-    }
-    if (segs.length && cum > 0.01) {
-      /* vertical depth shading over the whole liquid column */
-      const liqTop = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
-      ctx.fillStyle = this.depthOverlay(ctx, shapeName);
-      ctx.fillRect(-160, liqTop, 420, sh.B - liqTop + 2);
-    }
-    if (segs.length) {
-      const topY = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
-      const halfW = Math.max(5, shapeWidthAt(shapeName, topY) / 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(50 - halfW, topY - Fluid.MENISCUS + 0.4); ctx.quadraticCurveTo(50, topY + Fluid.MENISCUS + 0.4, 50 + halfW, topY - Fluid.MENISCUS + 0.4); ctx.stroke();
-    }
-    const hid = hiddenDepth[i] || 0;
-    for (let u = 0; u < hid && u < cum; u++) {
-      const yBot = sh.volToY ? sh.volToY(u / 4) : sh.B - u * sh.unit;
-      const yTop = sh.volToY ? sh.volToY((u + 1) / 4) : sh.B - (u + 1) * sh.unit;
-      ctx.fillStyle = this.liquidGradient(ctx, 'hidden', shapeName); ctx.fillRect(-160, yTop, 420, yBot - yTop + 1.2);
-      ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 50, (yTop + yBot) / 2);
-    }
+    this.drawLiquid(ctx, i, shapeName, sh, segs, rot);
     ctx.restore();
-    ctx.drawImage(this.shellLayer(shapeName, slot.el.classList.contains('capped')), 0, 0, 100, sh.vbH);
+    /* streams pour between the receiver's liquid and its glass */
+    const jobs = jobsInto(i);
+    if (jobs) {
+      ctx.save();
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      for (const job of jobs) this.drawStream(ctx, job);
+      ctx.restore();
+    }
+    ctx.drawImage(this.shellLayer(shapeName), 0, 0, 100, sh.vbH);
+    if (corks[i] && sh.cork) this.drawCork(ctx, sh, corks[i]);
     if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✦', 50, sh.vbH * 0.38); }
     if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('❄', 50, sh.vbH * 0.72); }
     ctx.restore();
+  },
+  /* Volume-true liquid (Aliquot method). The interior polygon is rotated by
+     alpha = bottle tilt − slosh; cut lines come from area, so volume is
+     conserved and the surface meets the lip. Fills are built in the surface
+     frame and mapped back to the bottle frame, so the cylinder gradients stay
+     on the glass; glyphs are drawn upright in the surface frame. Bands are
+     painted top-down, each from its top line to the bottom (no seams). */
+  drawLiquid(ctx, i, shapeName, sh, segs, rot) {
+    const cums = this._cums || (this._cums = []);
+    cums.length = 0;
+    const cols = this._cols || (this._cols = []);
+    cols.length = 0;
+    let total = 0;
+    for (const seg of segs) { if (seg.u <= 0.001) continue; total += seg.u; cums.push(total); cols.push(seg.c); }
+    const m = cums.length;
+    if (!m) return;
+    const body = bodies[i];
+    const alpha = rot - (body ? body.phi : 0);
+    const lv = PourPhysics.levelsFor(shapeName, alpha, cums);
+    const c = Math.cos(alpha), s = Math.sin(alpha);
+    const x0 = lv.x0, x1 = lv.x1, yb = lv.yb;
+    const topY = lv.tops[m - 1];
+    /* surface-frame (x, y) → bottle viewBox (pivot at (50, 0)) */
+    const lineTo = (x, y, move) => { const bx = 50 + c * x + s * y, by = -s * x + c * y; if (move) ctx.moveTo(bx, by); else ctx.lineTo(bx, by); };
+    const quad = (yTop) => { ctx.beginPath(); lineTo(x0, yTop, true); lineTo(x1, yTop); lineTo(x1, yb); lineTo(x0, yb); ctx.closePath(); };
+    /* top surface: the Fluid wave + wall meniscus fade out as the bottle
+       tilts (0 → 20°); a decaying sine ripple rides on top */
+    const span = lv.span || { xl: x0, xr: x1 };
+    const upright = Math.max(0, Math.min(1, 1 - Math.abs(rot) / 0.35));
+    const sample = upright > 0 && Fluid.active() ? Fluid.sample(i) : null;
+    const N = Math.max(6, (sample ? sample.h.length : Fluid.N) - 1);
+    const bodyW = corkBodyW(sh);
+    const amp = body ? Math.min(body.ripple, Math.max(0, (yb - 2 - topY) * 0.3)) : 0;
+    const kx = 2 * Math.PI / (bodyW * 0.85), ph = body ? body.rphase : 0;
+    const SX = this._sx || (this._sx = new Float64Array(40)), SY = this._sy || (this._sy = new Float64Array(40));
+    const wallsOnly = span.xr - span.xl < 3;   /* nearly empty: no meniscus to speak of */
+    for (let k = 0; k <= N; k++) {
+      const x = span.xl + (span.xr - span.xl) * k / N;
+      const edge = Math.abs(2 * k / N - 1);
+      let y = topY;
+      if (!wallsOnly) y += upright * ((sample ? sample.h[k] : 0) - Fluid.MENISCUS * Math.pow(edge, 2.2));
+      if (amp > 0.05) y += amp * Math.sin(kx * x - ph);
+      SX[k] = x; SY[k] = y;
+    }
+    const allHidden = (hiddenDepth[i] || 0) >= total - 1e-6;
+    ctx.fillStyle = this.liquidGradient(ctx, allHidden ? 'hidden' : cols[m - 1], shapeName);
+    ctx.beginPath();
+    lineTo(x0, yb, true); lineTo(x0, SY[0]);
+    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k]);
+    lineTo(x1, SY[N]); lineTo(x1, yb); ctx.closePath(); ctx.fill();
+    for (let j = allHidden ? -1 : m - 2; j >= 0; j--) {
+      ctx.fillStyle = this.liquidGradient(ctx, cols[j], shapeName);
+      quad(lv.tops[j]); ctx.fill();
+    }
+    /* mystery bottles: the bottom `hid` layers read as one hidden fill */
+    const hid = Math.min(hiddenDepth[i] || 0, total);
+    let unitLv = null;
+    if (hid > 0.001) {
+      if (!allHidden) {
+        const units = this._units || (this._units = []);
+        units.length = 0;
+        for (let u = 1; u <= Math.ceil(hid - 1e-6); u++) units.push(Math.min(u, hid));
+        unitLv = PourPhysics.levelsFor(shapeName, alpha, units);
+        ctx.fillStyle = this.liquidGradient(ctx, 'hidden', shapeName);
+        quad(unitLv.tops[unitLv.tops.length - 1]); ctx.fill();
+      } else {
+        const units = [];
+        for (let u = 1; u <= Math.ceil(hid - 1e-6); u++) units.push(Math.min(u, hid));
+        unitLv = PourPhysics.levelsFor(shapeName, alpha, units);
+      }
+    }
+    /* vertical depth shading over the whole column (bottle-frame gradient) */
+    ctx.fillStyle = this.depthOverlay(ctx, shapeName);
+    ctx.beginPath(); lineTo(x0, yb, true); lineTo(x0, SY[0]);
+    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k]);
+    lineTo(x1, SY[N]); lineTo(x1, yb); ctx.closePath(); ctx.fill();
+    /* meniscus highlight along the live surface */
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k] + 0.4, k === 0);
+    ctx.stroke();
+    /* glyphs (element emblems, '?' marks): upright in the surface frame, on
+       the bottle axis, fading out between 0° and 20° of tilt */
+    const gA = upright;
+    if (gA > 0.01) {
+      const ta = Math.tan(alpha);
+      ctx.save();
+      ctx.translate(50, 0); ctx.rotate(-alpha);
+      ctx.globalAlpha = gA;
+      /* hidden units keep their secrets: emblems cover only the visible part */
+      const hidTop = unitLv ? unitLv.tops[unitLv.tops.length - 1] : Infinity;
+      for (let j = 0; j < m; j++) {
+        const elem = ELEMENT_MAP[cols[j]];
+        if (!elem || cums[j] <= hid + 1e-6) continue;
+        const yT = lv.tops[j], yB = Math.min(j ? lv.tops[j - 1] : yb - 2, hidTop);
+        const my = (yT + yB) / 2;
+        ctx.save(); ctx.translate(-my * ta - 50, 0);
+        this.drawElement(ctx, elem, yT, yB - yT);
+        ctx.restore();
+      }
+      if (unitLv) {
+        ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        for (let u = 0; u < unitLv.tops.length; u++) {
+          const yT = unitLv.tops[u], yB = u ? unitLv.tops[u - 1] : yb - 2;
+          if (yB - yT < 6) continue;
+          const my = (yT + yB) / 2;
+          ctx.fillText('?', -my * ta, my);
+        }
+      }
+      ctx.restore();
+    }
   }
 };
 
@@ -1876,6 +2113,7 @@ const renderer = {
     layoutStage();
     this.chooseBackend();
     if (this.backend.syncLayout) this.backend.syncLayout();
+    cacheBodyPx();
     return this;
   },
   renderBottle(i, opts = {}, wob = null) {
@@ -1905,8 +2143,8 @@ const renderer = {
   }
 };
 
-function revealMystery(i) {
-  const maxHid = Math.max(0, state[i].length - 1);
+function revealMystery(i, len) {
+  const maxHid = Math.max(0, (len == null ? state[i].length : len) - 1);
   if ((hiddenDepth[i] || 0) > maxHid) {
     hiddenDepth[i] = maxHid;
     if (slots[i] && explicitPrettyEffects()) spawnSparkles(slots[i].el, 5, 0.4);
@@ -1918,19 +2156,32 @@ function syncCaps() {
   state.forEach((b, i) => {
     const capped = window.isBottleComplete(b) && !locked.has(i);
     if (capped && hiddenDepth[i]) { hiddenDepth[i] = 0; renderer.renderBottle(i, 0); }
+    if (capped && !corks[i]) seatCorkNow(i);
+    else if (!capped && corks[i]) { corks[i] = null; paintCorkSvg(i); }
     const has = slots[i].el.classList.contains('capped');
     if (capped && !has) slots[i].el.classList.add('capped');
     else if (!capped && has) slots[i].el.classList.remove('capped');
   });
+  if (isCanvasMode()) renderer.renderAll();
 }
 
+/* Undo snapshot of the logical board. Specials resolve when a pour's job
+   completes, so fold in the effects of pours that are still animating or
+   queued — otherwise undo could re-hide a layer or re-freeze a bottle. */
 function snapshotBoard() {
+  const hd = hiddenDepth.slice();
+  let fr = [...frozen];
+  const pending = jobs.map(j => j.entry).filter(Boolean).concat(queue);
+  for (const e of pending) {
+    hd[e.si] = Math.min(hd[e.si] || 0, Math.max(0, e.srcAfter.length - 1));
+    if (window.isBottleComplete(e.dstAfter)) { hd[e.di] = 0; fr = []; }
+  }
   return {
     state: window.cloneState(state),
     moves,
-    hiddenDepth: hiddenDepth.slice(),
+    hiddenDepth: hd,
     veiled: veiled.slice(),
-    frozen: [...frozen]
+    frozen: fr
   };
 }
 
@@ -2115,7 +2366,7 @@ function handleGameKey(e) {
   else if (k.toLowerCase() === 'u') { e.preventDefault(); undo(); }
   else if (k.toLowerCase() === 'r') {
     e.preventDefault();
-    if (activePours === 0 && !autoPlaying && confirm('Restart this level?')) restartCurrent();
+    if (!autoPlaying && confirm('Restart this level?')) { flushAll(); restartCurrent(); }
   } else if (k.toLowerCase() === 'h') { e.preventDefault(); showHint(); }
 }
 
@@ -2125,8 +2376,13 @@ function setupBoard(gen) {
   par = gen.par;
   undosAllowed = gen.undos; undosLeft = gen.undos;
   visual = state.map(mergeRuns);
-  moves = 0; undoHistory = []; sel = null; locked.clear(); activePours = 0;
+  discardPours();
+  moves = 0; undoHistory = []; sel = null; locked.clear();
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
+  capsThisLevel = 0;
+  corks = state.map(() => null);
+  jobs = []; poses = []; bodies = state.map((b, i) => makeBody(i));
+  AudioFX.stopAllPours();
   Fluid.resetAll();
   clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
@@ -2151,13 +2407,13 @@ function setupBoard(gen) {
     btn.className = 'bottle';
     btn.type = 'button';
     /* no decorative cork in gameplay — an upright open bottle reads as unsolved;
-       completion is shown by the .cap drop (see syncCaps). Canvas mode keeps the
+       completion is shown by the cork lid (see startCork / syncCaps). Canvas mode keeps the
        SVG as an invisible proxy, so skip building sheen DOM for it. */
-    const svg = buildBottleSVG(shapeName, { cork: false, label: true, sheen: !isCanvasMode() });
+    const svg = buildBottleSVG(shapeName, { cork: false, lid: true, label: true, sheen: !isCanvasMode() });
     btn.appendChild(svg);
-    const cap = document.createElement('span'); cap.className = 'cap';
     const ring = document.createElement('span'); ring.className = 'ring';
-    btn.appendChild(cap); btn.appendChild(ring);
+    ring.style.top = (sh.mouthFrac * 100).toFixed(1) + '%';
+    btn.appendChild(ring);
     slot.appendChild(glow); slot.appendChild(shadow); slot.appendChild(btn);
     if (frozen.has(i)) {
       slot.classList.add('frozen');
@@ -2233,9 +2489,14 @@ function loadRushStage() {
 function startRushTimer(sec) {
   rushTimeLeft = sec;
   clearInterval(rushTicker);
+  rushGrace = null;
   rushTicker = setInterval(() => {
-    if (document.hidden || activePours > 0 && rushTimeLeft <= 1) return;
+    if (document.hidden) return;
+    /* last-second grace: the clock waits only for pours committed before it
+       reached the final second — pours queued after that do not stop it */
+    if (rushTimeLeft <= 1 && rushGrace && rushGrace.some(e => !e.finished)) return;
     rushTimeLeft--;
+    if (rushTimeLeft === 1) rushGrace = jobs.map(j => j.entry).filter(Boolean).concat(queue);
     if (rushTimeLeft === 10) AudioFX.ice();
     updateHUD();
     if (rushTimeLeft <= 0) { stopRushTimer(); rushFail(); }
@@ -2326,11 +2587,11 @@ function updateHUD() {
   }
   subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
-  undoBtn.disabled = undoHistory.length === 0 || activePours > 0 || undosLeft <= 0 || autoPlaying;
+  undoBtn.disabled = undoHistory.length === 0 || undosLeft <= 0 || autoPlaying;
   const badge = $('#undo-badge');
   if (undosAllowed !== Infinity) { badge.classList.remove('hidden'); badge.textContent = undosLeft; }
   else badge.classList.add('hidden');
-  $('#btn-restart').disabled = activePours > 0 || autoPlaying;
+  $('#btn-restart').disabled = autoPlaying;
   $('#btn-hint').disabled = autoPlaying || solutionPending;
   updateBottleLabels();
 }
@@ -2342,6 +2603,7 @@ function setSelected(i) {
   sel = i;
   if (i !== null) {
     slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start();   /* lift sloshes the liquid */
+    kickSlosh(i, (Math.random() < 0.5 ? -1 : 1) * 0.9);
     if (!isCanvasMode()) sweepSheen(slots[i].svg);
   }
   updateBottleLabels();
@@ -2372,20 +2634,26 @@ function thawAll() {
   const list = [...frozen];
   frozen.clear();
   AudioFX.thaw();
+  const gen = boardGen;
+  /* the thaw plays out over timers: skip any bottle that undo re-froze (or a
+     board that was replaced) before its timer fired */
+  const stale = i => gen !== boardGen || frozen.has(i) || !slots[i];
   list.forEach((i, k) => setTimeout(() => {
+    if (stale(i)) return;
     const s = slots[i];
     s.el.classList.remove('frozen');
     const ice = s.el.querySelector('.ice');
-    if (ice) { ice.classList.add('shatter'); setTimeout(() => ice.remove(), 600); }
+    if (ice) { ice.classList.add('shatter'); setTimeout(() => { if (!stale(i)) ice.remove(); }, 600); }
     if (explicitPrettyEffects()) spawnSparkles(s.el, 8, 0.5);
+    renderer.renderAll();   /* canvas draws the frost overlay from `frozen` */
   }, RM ? 0 : 160 + k * 140));
+  renderer.renderAll();
   updateBottleLabels();
 }
 
 function onTap(i) {
   AudioFX.ensure();
   if (autoPlaying) return;
-  if (locked.has(i)) return;
   if (frozen.has(i)) { shake(i); AudioFX.ice(); buzz([8, 20, 8]); return; }
   if (veiled[i]) { unveil(i); return; }
   if (sel === null) {
@@ -2396,7 +2664,7 @@ function onTap(i) {
   if (sel === i) { setSelected(null); AudioFX.swap(); return; }
   if (window.canPour(state, sel, i)) {
     const s = sel; setSelected(null);
-    doPour(s, i);
+    commitMove(s, i, !locked.has(s));
   } else if (canBeSource(i)) {
     setSelected(i); AudioFX.swap();
   } else {
@@ -2424,150 +2692,535 @@ function fillSnapshot(snap, color, q) {
   return out;
 }
 
-/* ---------------- pour choreography (rAF-driven) ---------------- */
-function liveBottleMouthPoint(i, angleDeg) {
-  const stageRect = $('#stage').getBoundingClientRect();
-  const rect = slots[i].slot.getBoundingClientRect();
-  const sh = slots[i].sh;
-  const bw = rect.width, bh = rect.height;
-  const inline = slots[i].btn.style.transform || '';
-  const tMatch = inline.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
-  const tx = tMatch ? parseFloat(tMatch[1]) : 0;
-  const ty = tMatch ? parseFloat(tMatch[2]) : 0;
-  const a = (angleDeg || 0) * Math.PI / 180;
-  const cx = bw / 2, cy = bh / 2;
-  const mx = bw / 2, my = sh.mouthFrac * bh;
-  const rx = Math.cos(a) * (mx - cx) - Math.sin(a) * (my - cy);
-  const ry = Math.sin(a) * (mx - cx) + Math.cos(a) * (my - cy);
-  return { x: rect.left + tx + cx + rx - stageRect.left, y: rect.top + ty + cy + ry - stageRect.top };
+/* ---------------- pour choreography (Aliquot port) ----------------
+   A pour is a job stepped by the Motion loop:
+     travel T1 — lip eases to the pour point on an arc while the bottle tips
+                 to thStart (the angle where its liquid just meets the lip)
+     pour   T2 — the source drains; its angle follows thetaFor(volume) and
+                 the pose is solved every frame so the lip stays on target
+     return T3 — back home, touchdown thud + slosh
+   The receiver fills at the same rate, delayed by the stream's fall time tf.
+   Poses are written as CSS translate+rotate on the bottle button (rotation
+   about the element centre), which the canvas renderer reads back. */
+const clampN = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerpN = (a, b, t) => a + (b - a) * t;
+const ease3 = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeSine = t => -(Math.cos(Math.PI * t) - 1) / 2;
+const smoothstep = t => { t = clampN(t, 0, 1); return t * t * (3 - 2 * t); };
+const flowN = t => (t > 0 && t < 1) ? 4 * t * (1 - t) : 0;
+
+let jobs = [];            /* running pour jobs */
+let bodies = [];          /* per-bottle slosh oscillator + surface ripple */
+let bodyPx = [];          /* per-bottle glass body width in px (cached at layout) */
+let poses = [];           /* per-bottle live pose { tx, ty, a } while a job moves it */
+function makeBody(i) {
+  return { phi: 0, phiV: 0, px: null, pvx: 0, pang: 0, pangV: 0, ripple: 0, rphase: i * 1.7, pouring: false };
 }
-async function doPour(si, di) {
-  locked.add(si); locked.add(di); activePours++;
+/* does bottle i change from frame to frame right now? (canvas idle-layer split) */
+function bottleAnimating(i) {
+  if (locked.has(i) || poses[i]) return true;
+  const c = corks[i];
+  if (c && c.t < 1) return true;
+  if (Fluid.sims[i]) return true;
+  const b = bodies[i];
+  return !!b && (Math.abs(b.phi) > 0.0015 || Math.abs(b.phiV) > 0.015 || b.ripple > 0.05);
+}
+function flyingSource(i) { for (const j of jobs) if (j.si === i && !j.srcDone) return true; return false; }
+function jobsInto(i) {
+  let out = null;
+  for (const j of jobs) if (j.di === i && !j.dstDone && j.streamFx) (out || (out = [])).push(j);
+  return out;
+}
+function cacheBodyPx() {
+  bodyPx = slots.map(sl => sl ? sl.slot.offsetWidth * corkBodyW(sl.sh) / 100 : 40);
+}
+
+/* per-shape pour geometry in viewBox units: lip corner, rim, outline samples
+   for clearance, and the receiver's outer top profile (topAt[|dx|]) */
+const pourGeoCache = {};
+function pourGeo(sn) {
+  if (pourGeoCache[sn]) return pourGeoCache[sn];
+  const sh = SHAPES[sn], g = PourPhysics.SHAPE_GEO[sn];
+  const lipHalf = shapeWidthAt(sn, g.top) / 2;
+  const rimHalf = sh.lip.w / 2, rimTop = sh.lip.y, rimBot = sh.lip.y + sh.lip.h;
+  const bodyW = corkBodyW(sh);
+  const outer = y => shapeWidthAt(sn, y) / 2 + 3;
+  const S = [];
+  for (let y = rimBot; y <= g.bottom; y += 6) S.push(50 - outer(y), y, 50 + outer(y), y);
+  S.push(sh.lip.x, rimTop, sh.lip.x + sh.lip.w, rimTop, sh.lip.x, rimBot, sh.lip.x + sh.lip.w, rimBot);
+  for (let x = -bodyW / 2 + 6; x <= bodyW / 2 - 6; x += 6) S.push(50 + x, g.bottom + 3);
+  const topAt = new Float64Array(61);
+  for (let d = 0; d <= 60; d++) {
+    if (d <= rimHalf) { topAt[d] = rimTop; continue; }
+    let y = Infinity;
+    for (let yy = rimBot; yy <= g.bottom; yy += 1) if (outer(yy) >= d) { y = yy; break; }
+    topAt[d] = y;
+  }
+  return (pourGeoCache[sn] = { top: g.top, lipHalf, rimHalf, rimTop, rimBot, bodyW, samples: S, topAt });
+}
+function receiverTop(gD, du) {
+  if (du <= 0) return gD.topAt[0];
+  if (du >= 60) return Infinity;
+  return gD.topAt[Math.ceil(du)];
+}
+
+/* where the lip must sit at tilt th: over the receiver mouth, high enough
+   that no part of the tilted source dips into the receiver's outline */
+function pourPoint(job, th, s) {
+  s = s == null ? job.s : s;
+  const { hd, kD, kS, gD, gS, w } = job;
+  const dCx = hd.x + hd.w / 2, rimTop = hd.y + gD.rimTop * kD;
+  const px = dCx - s * w * 0.14;
+  let py = rimTop - w * 0.2;
+  const a = s * th, c = Math.cos(a), sn = Math.sin(a);
+  const lipU = 50 + s * gS.lipHalf, lipV = gS.top;
+  const margin = w * 0.08 / kD, gap = w * 0.1, S = gS.samples;
+  for (let i = 0; i < S.length; i += 2) {
+    const dx = (S[i] - lipU) * kS, dy = (S[i + 1] - lipV) * kS;
+    const wx = px + dx * c - dy * sn;
+    const topU = receiverTop(gD, Math.abs(wx - dCx) / kD - margin);
+    if (!isFinite(topU)) continue;
+    const req = hd.y + topU * kD - gap - (dx * sn + dy * c);
+    if (req < py) py = req;
+  }
+  return { x: px, y: Math.max(py, 6 - job.stageTop) };
+}
+/* how far the tilted source would stick out of the stage when pouring to side s */
+function overflowFor(job, s) {
+  const { kS, gS } = job;
+  const lipU = 50 + s * gS.lipHalf, lipV = gS.top, S = gS.samples;
+  let worst = 0;
+  for (const th of [job.thStart, job.thEnd]) {
+    const P = pourPoint(job, th, s), a = s * th, c = Math.cos(a), sn = Math.sin(a);
+    for (let i = 0; i < S.length; i += 2) {
+      const wx = P.x + (S[i] - lipU) * kS * c - (S[i + 1] - lipV) * kS * sn;
+      if (wx < 2) worst = Math.max(worst, 2 - wx);
+      if (wx > job.stageW - 2) worst = Math.max(worst, wx - job.stageW + 2);
+    }
+  }
+  return worst;
+}
+
+/* bottle-local viewBox point (u, v) → stage px under pose (tx, ty, a) */
+function worldPt(h, k, tx, ty, a, u, v) {
+  const cx = h.w / 2, cy = h.h / 2, lx = u * k - cx, ly = v * k - cy, c = Math.cos(a), s = Math.sin(a);
+  return { x: h.x + tx + cx + lx * c - ly * s, y: h.y + ty + cy + lx * s + ly * c };
+}
+function setPose(i, tx, ty, a) {
+  poses[i] = { tx, ty, a };
+  /* canvas reads poses[] directly; only the SVG fallback moves the DOM
+     (keeps the invisible hit targets home and skips per-frame style work) */
+  if (!isCanvasMode()) slots[i].btn.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) rotate(' + (a * 180 / Math.PI).toFixed(3) + 'deg)';
+}
+function clearPose(i) {
+  poses[i] = null;
+  if (!slots[i]) return;
+  slots[i].btn.style.transform = '';
+  slots[i].btn.style.transition = '';
+  slots[i].el.classList.remove('pouring');
+}
+/* pose that puts the source's lip corner at (lipX, lipY) with angle a */
+function poseSourceLip(job, lipX, lipY, a) {
+  const h = job.hs, k = job.kS, cx = h.w / 2, cy = h.h / 2;
+  const lx = job.lipU * k - cx, ly = job.lipV * k - cy, c = Math.cos(a), s = Math.sin(a);
+  const tx = lipX - (h.x + cx + lx * c - ly * s), ty = lipY - (h.y + cy + lx * s + ly * c);
+  setPose(job.si, tx, ty, a);
+  job.pose = { tx, ty, a };
+}
+
+function createJob(si, di, n, color, srcBefore, dstBefore, srcAfter, dstAfter, lifted) {
+  const stage = $('#stage'), sr = stage.getBoundingClientRect();
+  const home = i => layoutBox(slots[i].slot, stage);
+  const hs = home(si), hd = home(di);
+  const snS = shapesByBottle[si], snD = shapesByBottle[di];
+  const gS = pourGeo(snS), gD = pourGeo(snD);
+  const kS = hs.w / 100, kD = hd.w / 100;
+  const job = {
+    si, di, n, color, snS, snD, gS, gD, hs, hd, kS, kD,
+    w: gS.bodyW * kS, wD: gD.bodyW * kD, stageW: sr.width, stageTop: sr.top,
+    V0: srcBefore.length, dstUnits0: dstBefore.length,
+    snapS: mergeRuns(srcBefore), snapD: mergeRuns(dstBefore),
+    afterS: mergeRuns(srcAfter), afterD: mergeRuns(dstAfter),
+    dstComplete: window.isBottleComplete(dstAfter),
+    t: 0, srcDone: false, dstDone: false, retStarted: false, voice: null,
+    streamOrigin: null, streamFx: null, svgStream: false, drops: [], flowD: 0, done: false
+  };
+  job.maxW = 0.55 * Math.min(gS.lipHalf * 2 * kS, gD.lipHalf * 2 * kD);
+  job.thStart = PourPhysics.thetaFor(snS, job.V0);
+  job.thEnd = PourPhysics.thetaFor(snS, job.V0 - n);
+  const sCx = hs.x + hs.w / 2, dCx = hd.x + hd.w / 2;
+  let s = dCx >= sCx ? 1 : -1;
+  if (Math.abs(dCx - sCx) < 1) s = dCx < sr.width / 2 ? -1 : 1;
+  const o1 = overflowFor(job, s), o2 = overflowFor(job, -s);
+  if (o1 > 0 && o2 < o1) s = -s;
+  job.s = s;
+  job.lipU = 50 + s * gS.lipHalf; job.lipV = gS.top;
+  job.lip0 = { x: hs.x + job.lipU * kS, y: hs.y + job.lipV * kS + (lifted ? -0.22 * hs.w : 0) };
+  const P = pourPoint(job, job.thStart);
+  const dist = Math.hypot(P.x - job.lip0.x, P.y - job.lip0.y);
+  job.T1 = clampN(0.2 + dist / (job.w * 22), 0.24, 0.42);
+  job.T2 = 0.16 + 0.1 * n;
+  const fall = (hd.y + PourPhysics.uprightLevel(snD, job.dstUnits0) * kD) - P.y;
+  job.tf = clampN(0.045 + fall / (job.w * 18), 0.07, 0.15);
+  job.T3 = 0.28;
+  job.arc = Math.min(job.w * 0.55, dist * 0.12);
+  job.lipEnd = null; job.angEnd = s * job.thEnd;
+  return job;
+}
+
+function streamTarget(job) {
+  let units = 0;
+  for (const seg of visual[job.di]) units += seg.u;
+  return {
+    x: job.hd.x + job.hd.w / 2 + job.s * job.w * 0.03,
+    y: job.hd.y + PourPhysics.uprightLevel(job.snD, units) * job.kD + 1
+  };
+}
+
+function stepJob(job, dt) {
+  job.t += dt;
+  const { si, di, s, w } = job, t = job.t;
+  const bS = bodies[si], bD = bodies[di];
+  const svg = !isCanvasMode();
+  if (!job.srcDone) {
+    let lipX = 0, lipY = 0, ang = 0;
+    if (t < job.T1) {
+      const u = t / job.T1, e = ease3(u);
+      ang = s * job.thStart * easeSine(u);
+      const P = pourPoint(job, job.thStart);
+      lipX = lerpN(job.lip0.x, P.x, e);
+      lipY = lerpN(job.lip0.y, P.y, e) - Math.sin(Math.PI * e) * job.arc;
+      if (bS) bS.pouring = false;
+    } else if (t < job.T1 + job.T2) {
+      const E = smoothstep((t - job.T1) / job.T2);
+      visual[si] = drainSnapshot(job.snapS, job.n * E);
+      ang = s * PourPhysics.thetaFor(job.snS, job.V0 - job.n * E);
+      const P = pourPoint(job, Math.abs(ang));
+      lipX = P.x; lipY = P.y;
+      if (bS) bS.pouring = true;
+      job.lipEnd = { x: lipX, y: lipY }; job.angEnd = ang;
+    } else {
+      if (!job.retStarted) {
+        job.retStarted = true;
+        if (bS) bS.pouring = false;
+        visual[si] = job.afterS.map(x => ({ c: x.c, u: x.u }));
+        if (!job.lipEnd) { const P = pourPoint(job, job.thEnd); job.lipEnd = { x: P.x, y: P.y }; }
+      }
+      const u = (t - job.T1 - job.T2) / job.T3;
+      if (u >= 1) {
+        job.srcDone = true;
+        clearPose(si);
+        if (bS) { bS.ripple = Math.max(bS.ripple, job.gS.bodyW * 0.06); bS.phiV -= s * 0.55; }
+        AudioFX.land();
+        if (svg) renderer.renderBottle(si, 0);
+      } else {
+        const e = ease3(u);
+        ang = job.angEnd * (1 - easeSine(u));
+        const lift = sel === si ? -0.22 * job.hs.w : 0;
+        const hx = job.hs.x + job.lipU * job.kS, hy = job.hs.y + job.lipV * job.kS + lift;
+        lipX = lerpN(job.lipEnd.x, hx, e);
+        lipY = lerpN(job.lipEnd.y, hy, e) - Math.sin(Math.PI * e) * w * 0.25;
+      }
+    }
+    if (!job.srcDone) {
+      poseSourceLip(job, lipX, lipY, ang);
+      /* the stream leaves from the outer rim; it freezes once the source
+         stops pouring so the tail falls straight */
+      if (t >= job.T1 && !job.retStarted) {
+        job.streamOrigin = worldPt(job.hs, job.kS, job.pose.tx, job.pose.ty, ang, 50 + s * job.gS.rimHalf, job.gS.rimBot);
+      }
+      if (svg) renderer.renderBottle(si, ang * 180 / Math.PI);
+    }
+  }
+  if (!job.dstDone) {
+    const td = t - job.T1 - job.tf;
+    if (td > 0) {
+      const u = td / job.T2, E = smoothstep(u), fl = flowN(u);
+      visual[di] = fillSnapshot(job.snapD, job.color, job.n * E);
+      job.flowD = fl;
+      if (bD) bD.ripple = Math.max(bD.ripple, job.gD.bodyW * (0.018 + 0.05 * fl));
+      if (!job.voice && u < 0.9) { job.voice = AudioFX.startPour(); buzz(12); }
+      if (job.voice) AudioFX.updatePour(job.voice, fl, (job.dstUnits0 + job.n * E) / 4, dt);
+      if (fl > 0.3 && CanvasRenderer.effectsEnabled() && Math.random() < dt * 26 * fl) spawnDrop(job);
+      if (u >= 1) {
+        job.dstDone = true;
+        visual[di] = job.afterD.map(x => ({ c: x.c, u: x.u }));
+        AudioFX.stopPour(job.voice); job.voice = null;
+        job.flowD = 0;
+        if (bD) bD.phiV += s * 0.5;
+        if (job.svgStream) { renderer.endPour({ si, di }); job.svgStream = false; }
+        if (explicitPrettyEffects()) spawnSparkles(slots[di].el, 4, 0.25);
+        if (job.dstComplete) completeReceiver(di);
+      }
+    }
+    if (job.streamOrigin && !job.dstDone) {
+      const tg = streamTarget(job);
+      job.streamFx = { sx: job.streamOrigin.x, sy: job.streamOrigin.y, tx: tg.x, ty: tg.y };
+      if (svg) {
+        const info = {
+          si, di, color: job.color, c0: COLORS[job.color][0], c1: COLORS[job.color][1],
+          sx: job.streamOrigin.x, sy: job.streamOrigin.y, tx: tg.x, ty: tg.y,
+          cpx: job.streamOrigin.x + s * w * 0.16, cpy: job.streamOrigin.y + (tg.y - job.streamOrigin.y) * 0.08,
+          side: s, receiverW: job.hd.w
+        };
+        if (!job.svgStream) { renderer.beginPour(info); job.svgStream = true; }
+        else renderer.updatePour(info);
+      }
+    }
+    if (svg) renderer.renderBottle(di, 0);
+  }
+  for (const d of job.drops) { d.life -= dt; d.vy += w * 38 * dt; d.x += d.vx * dt; d.y += d.vy * dt; }
+  if (job.drops.length) job.drops = job.drops.filter(d => d.life > 0);
+  if (job.srcDone && job.dstDone && !job.drops.length) job.done = true;
+}
+function spawnDrop(job) {
+  const tg = streamTarget(job), w = job.w;
+  job.drops.push({
+    x: tg.x + (Math.random() - 0.5) * w * 0.1, y: tg.y - 1,
+    vx: (Math.random() - 0.5) * w * 2.2, vy: -w * (2 + Math.random() * 2.2),
+    life: 0.22 + Math.random() * 0.1, r: Math.max(1, w * 0.035)
+  });
+}
+/* the receiver just finished filling and is complete: reveal, then cork it */
+function completeReceiver(di, quiet) {
+  if (hiddenDepth[di]) { hiddenDepth[di] = 0; if (!quiet) AudioFX.reveal(); }
+  if (quiet) { seatCorkNow(di); slots[di].el.classList.add('capped'); }
+  else startCork(di);
+  if (!isCanvasMode()) renderer.renderBottle(di, 0);
+}
+/* jump a job to its end state (reduced motion, fast-forward) */
+function finishJob(job, quiet) {
+  AudioFX.stopPour(job.voice); job.voice = null;
+  if (job.svgStream) { renderer.endPour({ si: job.si, di: job.di }); job.svgStream = false; }
+  if (!job.srcDone) {
+    job.srcDone = true;
+    visual[job.si] = job.afterS.map(x => ({ c: x.c, u: x.u }));
+    clearPose(job.si);
+    if (!quiet) AudioFX.land();
+  }
+  if (!job.dstDone) {
+    job.dstDone = true;
+    visual[job.di] = job.afterD.map(x => ({ c: x.c, u: x.u }));
+    if (job.dstComplete) completeReceiver(job.di, quiet);
+  }
+  job.streamFx = null; job.drops = [];
+  job.done = true;
+  if (bodies[job.si]) bodies[job.si].pouring = false;
+}
+
+/* one Motion task steps every pour job and every bottle's slosh */
+let boardTicking = false;
+function ensureBoardTick() {
+  if (boardTicking || !state.length) return;
+  boardTicking = true;
+  Motion.add(dt => {
+    const alive = boardTick(dt);
+    if (!alive) boardTicking = false;
+    return alive;
+  });
+}
+const SLOSH_K = 230;
+function boardTick(dt) {
+  let active = jobs.length > 0;
+  for (const job of jobs) {
+    try { stepJob(job, dt); }
+    catch (e) { console.error(e); finishJob(job, true); }   /* never leave a pour hanging */
+  }
+  if (afterJobsStep()) active = true;
+  /* slosh: the surface is a damped oscillator driven by the bottle's
+     horizontal and angular acceleration */
+  for (let i = 0; i < bodies.length; i++) {
+    const b = bodies[i];
+    if (!b) continue;
+    const p = poses[i], x = p ? p.tx : 0, ang = p ? p.a : 0;
+    if (b.px === null) { b.px = x; b.pvx = 0; b.pang = ang; b.pangV = 0; }
+    const vx = (x - b.px) / dt, ax = (vx - b.pvx) / dt; b.px = x; b.pvx = vx;
+    const av = (ang - b.pang) / dt, aa = (av - b.pangV) / dt; b.pang = ang; b.pangV = av;
+    const axn = clampN(ax / (bodyPx[i] || 40), -70, 70), aan = clampN(aa, -120, 120);
+    const damp = b.pouring ? 16 : 6.2, sub = 3, h = dt / sub;
+    for (let k = 0; k < sub; k++) {
+      const acc = -SLOSH_K * b.phi - damp * b.phiV + 0.42 * axn - 0.08 * aan;
+      b.phiV += acc * h; b.phi += b.phiV * h;
+    }
+    b.phi = clampN(b.phi, -0.2, 0.2);
+    b.ripple *= Math.exp(-dt * 2.8); b.rphase += dt * 15;
+    if (Math.abs(b.phi) > 0.0015 || Math.abs(b.phiV) > 0.015 || b.ripple > 0.05) active = true;
+    else if (!p) { b.phi = 0; b.phiV = 0; if (b.ripple <= 0.05) b.ripple = 0; }
+  }
+  return active || pendingCount() > 0;
+}
+function kickSlosh(i, v) {
+  if (RM || !bodies[i]) return;
+  bodies[i].phiV += v;
+  ensureBoardTick();
+}
+
+/* ---------------- instant-commit input queue ----------------
+   A legal tap commits the move to `state` at once (undo snapshot, moves,
+   HUD) and queues its animation. A queued pour starts when neither of its
+   bottles is claimed by a running pour or an earlier queued one, so each
+   bottle's pours play in order and independent pours run side by side.
+   Specials (mystery reveal, orb, thaw) fire when the pour's job completes. */
+let queue = [];
+let settleArmed = false;   /* a pour finished since the board last settled */
+let boardGen = 0;          /* bumps on every board setup; stale timers check it */
+function pendingCount() { return jobs.length + queue.length; }
+function refreshBusy() {
+  locked.clear();
+  for (const j of jobs) { locked.add(j.si); locked.add(j.di); }
+  for (const q of queue) { locked.add(q.si); locked.add(q.di); }
+  slots.forEach((sl, i) => { if (sl) sl.el.classList.toggle('busy', locked.has(i)); });
+}
+
+function commitMove(si, di, lifted) {
   undoHistory.push(snapshotBoard());
   if (undoHistory.length > 300) undoHistory.shift();
   const n = window.pourAmount(state, si, di);
   const color = state[si][state[si].length - 1];
+  const srcBefore = state[si].slice(), dstBefore = state[di].slice();
   window.applyPour(state, si, di);
   moves++;
   if (!save.seenHint) { save.seenHint = true; persist(); $('#hint').style.opacity = 0; }
-  updateHUD();
-
-  const stage = $('#stage');
-  const stageRect = stage.getBoundingClientRect();
-  const sRect = slots[si].slot.getBoundingClientRect();
-  const dRect = slots[di].slot.getBoundingClientRect();
-  const shS = slots[si].sh, shD = slots[di].sh;
-  const bwS = sRect.width, bhS = sRect.height;
-  const bwD = dRect.width, bhD = dRect.height;
-  const side = dRect.left + bwD / 2 >= sRect.left + bwS / 2 ? 1 : -1;
-  const A = side * (78 + Math.random() * 6);
-  const aR = A * Math.PI / 180;
-
-  const Pm = { x: dRect.left + bwD / 2, y: dRect.top + shD.mouthFrac * bhD };
-  const Q = { x: Pm.x, y: Pm.y - bwS * 0.6 };
-  const C = { x: bwS / 2, y: bhS / 2 };
-  const M = { x: bwS / 2, y: shS.mouthFrac * bhS };
-  const rx = Math.cos(aR) * (M.x - C.x) - Math.sin(aR) * (M.y - C.y);
-  const ry = Math.sin(aR) * (M.x - C.x) + Math.cos(aR) * (M.y - C.y);
-  const dxF = Q.x - (sRect.left + C.x + rx);
-  const dyF = Q.y - (sRect.top + C.y + ry);
-  const lift = bwS * 0.3;
-
-  const slotEl = slots[si].el, bottleEl = slots[si].btn;
-  slotEl.classList.add('pouring');
-  bottleEl.style.transition = 'none';
-
-  /* phase 1: lift, travel, tilt — carry-acceleration slosh */
-  if (!RM) {
-    setTimeout(() => { Fluid.slosh(si, 1.4, -side); Fluid.start(); }, 60);  /* initial surge backward */
-    setTimeout(() => { Fluid.slosh(si, 0.9, side); Fluid.start(); }, 210);   /* arc-peak settles forward */
-  }
+  const entry = {
+    si, di, n, color, srcBefore, dstBefore, srcAfter: state[si].slice(), dstAfter: state[di].slice(),
+    lifted: !!lifted, at: performance.now()
+  };
+  entry.done = new Promise(r => { entry.resolve = () => { entry.finished = true; r(); }; });
+  queue.push(entry);
   AudioFX.swap();
-  await tween(RM ? 0 : 360, p => {
-    const ang = A * p;
-    const arc = -Math.sin(p * Math.PI) * lift;
-    bottleEl.style.transform = 'translate(' + (dxF * p).toFixed(1) + 'px,' + (dyF * p + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
-    renderer.renderBottle(si, ang);
-  });
-  bottleEl.style.transform = 'translate(' + dxF.toFixed(1) + 'px,' + dyF.toFixed(1) + 'px) rotate(' + A.toFixed(2) + 'deg)';
-  renderer.renderBottle(si, A);
+  pumpQueue();
+  refreshBusy();
+  updateHUD();
+  ensureBoardTick();   /* also runs the settle check when reduced motion finished the pour already */
+  return entry.done;
+}
 
-  /* phase 2: arc stream + drain */
-  const dur = RM ? 40 : 260 + activeRenderProfile().settleMs + 150 * n;
-  const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
-  /* volume-true surface height — the linear sh.unit estimate left the landing
-     ripple floating above (or sunk below) the real liquid surface */
-  const surfVb = shD.volToY ? shD.volToY(dstUnits0 / 4) : shD.B - dstUnits0 * shD.unit;
-  const surfaceY = dRect.top + (surfVb / shD.vbH) * bhD;
-  const c0 = COLORS[color][0], c1 = COLORS[color][1];
+function pumpQueue() {
+  let progressed = true;
+  while (progressed && queue.length) {
+    progressed = false;
+    const start = new Set(startablePours(jobs, queue));
+    const ready = queue.filter((q, k) => start.has(k));
+    queue = queue.filter((q, k) => !start.has(k));
+    /* reduced motion finishes pours synchronously, which can free later ones */
+    for (const q of ready) if (startEntry(q)) progressed = true;
+  }
+}
 
-  /* Gravity arc metadata for the active renderer. */
-  const mouth0 = liveBottleMouthPoint(si, A);
-  let sx = mouth0.x, sy = mouth0.y;
-  const tx = Pm.x - stageRect.left, ty = surfaceY - stageRect.top;
-  let cpx = sx + (tx - sx) * 0.35 + side * 8;
-  let cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
-  renderer.beginPour({ si, di, color, c0, c1, sx, sy, tx, ty, cpx, cpy, side, receiverW: bwD, progress: 0, started: performance.now() });
-  AudioFX.pour(dur / 1000 + 0.1);
-  buzz(12);
+/* start a queued pour; returns true when it finished synchronously (reduced motion) */
+function startEntry(q) {
+  /* the source only starts lifted if it was still up from its selection */
+  const lifted = q.lifted && performance.now() - q.at < 40;
+  const job = createJob(q.si, q.di, q.n, q.color, q.srcBefore, q.dstBefore, q.srcAfter, q.dstAfter, lifted);
+  job.entry = q;
+  visual[job.si] = job.snapS.map(x => ({ c: x.c, u: x.u }));
+  visual[job.di] = job.snapD.map(x => ({ c: x.c, u: x.u }));
+  slots[job.si].el.classList.add('pouring');
+  slots[job.si].btn.style.transition = 'none';
+  if (RM) {
+    finishJob(job, false);
+    postJob(job, false);
+    renderer.renderAll();
+    return true;
+  }
+  jobs.push(job);
+  ensureBoardTick();
+  return false;
+}
 
-  const snapS = visual[si].map(s => ({ c: s.c, u: s.u }));
-  const snapD = visual[di].map(s => ({ c: s.c, u: s.u }));
-  await tween(dur, p => {
-    visual[si] = drainSnapshot(snapS, n * p);
-    visual[di] = fillSnapshot(snapD, color, n * p);
-    const mouth = liveBottleMouthPoint(si, A);
-    sx = mouth.x; sy = mouth.y;
-    cpx = sx + (tx - sx) * 0.35 + side * 8;
-    cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
-    renderer.updatePour({ si, progress: p, sx, sy, tx, ty, cpx, cpy });
-    renderer.renderBottle(si, A);
-    renderer.renderBottle(di, 0);
-  });
-  renderer.endPour({ si, di });
-  if (explicitPrettyEffects()) spawnSparkles(slots[di].el, 4, 0.25);
-
-  /* phase 3: return */
-  await tween(RM ? 0 : activeRenderProfile().settleMs + 160, p => {
-    const q = 1 - p;
-    const ang = A * q;
-    const arc = -Math.sin(p * Math.PI) * lift * 0.5;
-    bottleEl.style.transform = 'translate(' + (dxF * q).toFixed(1) + 'px,' + (dyF * q + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
-    renderer.renderBottle(si, ang);
-  });
-  bottleEl.style.transform = '';
-  bottleEl.style.transition = '';
-  slotEl.classList.remove('pouring');
-
-  visual[si] = mergeRuns(state[si]);
-  visual[di] = mergeRuns(state[di]);
-  revealMystery(si);
-  renderer.renderBottle(si, 0); renderer.renderBottle(di, 0);
-
-  if (window.isBottleComplete(state[di])) {
-    /* a complete bottle holds no secrets — reveal any hidden bands under the cap */
-    if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderer.renderBottle(di, 0); AudioFX.reveal(); }
-    slots[di].el.classList.add('capped');
-    if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
-    if (!isCanvasMode()) sweepSheen(slots[di].svg);
-    AudioFX.cap(); buzz([15, 40, 25]);
-    orbUpdate(true);
+/* bookkeeping when a pour's animation is over (or fast-forwarded) */
+function postJob(job, quiet) {
+  if (job.posted) return;
+  job.posted = true;
+  const { si, di } = job;
+  revealMystery(si, job.entry ? job.entry.srcAfter.length : state[si].length);
+  if (job.dstComplete) {
+    orbUpdate(!quiet);
     if (frozen.size) thawAll();
   }
+  if (!quiet) { sloshBottle(di, Math.min(2, job.n)); sloshBottle(si, 0.5); }
+  if (!isCanvasMode()) { renderer.renderBottle(si, 0); renderer.renderBottle(di, 0); }
+  settleArmed = true;
+  if (job.entry) job.entry.resolve();
+}
 
-  locked.delete(si); locked.delete(di); activePours--;
-  sloshBottle(di, Math.min(2, n));
-  sloshBottle(si, 0.5);
-  updateHUD();
-  updateBottleLabels();
-  if (pendingLayout && activePours === 0) { pendingLayout = false; renderer.syncLayout(); }
-  if (activePours === 0 && window.isSolved(state)) {
-    await wait(RM ? 100 : 550);
-    onWin();
-  } else if (activePours === 0 && !autoPlaying && !anyUsefulMove()) {
+/* called by boardTick every frame: finished jobs → post, start what can start */
+function afterJobsStep() {
+  if (jobs.some(j => j.done)) {
+    const done = jobs.filter(j => j.done);
+    jobs = jobs.filter(j => !j.done);
+    refreshBusy();
+    for (const j of done) postJob(j, false);
+    pumpQueue();
+    refreshBusy();
+    updateHUD();
+    updateBottleLabels();
+  }
+  if (settleArmed && !pendingCount() && corks.every(c => !c || c.t >= 1)) {
+    settleArmed = false;
+    onBoardSettled();
+  }
+  return settleArmed;
+}
+
+/* nothing running, nothing queued, every cork seated: layout, win, stuck */
+function onBoardSettled() {
+  visual = state.map(mergeRuns);
+  renderer.renderAll();
+  if (pendingLayout) { pendingLayout = false; renderer.syncLayout(); }
+  if (window.isSolved(state)) {
+    const gen = boardGen;
+    wait(RM ? 100 : 350).then(() => {
+      if (gen !== boardGen || pendingCount() || !window.isSolved(state) || $('#overlay').classList.contains('show')) return;
+      onWin();
+    });
+  } else if (!autoPlaying && !anyUsefulMove()) {
     toastMsg('No moves left — undo ↩ or restart ⟳', 3200);
     AudioFX.invalid();
   }
+}
+
+/* fast-forward every running and queued pour to its end state (visual =
+   state), stop pour voices, seat corks — before undo, restart, hint, menu */
+function flushAll() {
+  const had = pendingCount() > 0 || corks.some(c => c && c.t < 1);
+  for (const job of jobs) { finishJob(job, true); postJob(job, true); }
+  jobs = [];
+  for (const q of queue) {
+    revealMystery(q.si, q.srcAfter.length);
+    if (window.isBottleComplete(q.dstAfter)) {
+      hiddenDepth[q.di] = 0;
+      if (frozen.size) thawAll();
+    }
+    q.resolve();
+  }
+  queue = [];
+  corks.forEach((c, i) => { if (c && c.t < 1) { c.t = 1; c.popped = true; paintCorkSvg(i); if (slots[i]) slots[i].el.classList.add('capped'); } });
+  AudioFX.stopAllPours();
+  settleArmed = false;
+  if (!had) return;
+  slots.forEach((sl, i) => clearPose(i));
+  visual = state.map(mergeRuns);
+  refreshBusy();
+  syncCaps();
+  orbUpdate(false);
+  renderer.renderAll();
+  updateHUD();
+}
+
+/* board teardown (new level): drop everything without effects */
+function discardPours() {
+  for (const job of jobs) AudioFX.stopPour(job.voice);
+  for (const job of jobs) if (job.entry) job.entry.resolve();
+  for (const q of queue) q.resolve();
+  jobs = []; queue = []; settleArmed = false; boardGen++;
+  AudioFX.stopAllPours();
+  if (SvgRenderer.pourFxMap) for (const si of [...SvgRenderer.pourFxMap.keys()]) SvgRenderer.endPour({ si });
+}
+
+/* autoplay (and QA) path: commit a pour and resolve when its animation ends */
+function doPour(si, di) {
+  return commitMove(si, di, false);
 }
 
 /* a position is stuck when no pour between usable bottles is legal */
@@ -2622,11 +3275,13 @@ function spawnSparkles(host, count, spread) {
 
 /* ---------------- undo / restart ---------------- */
 function undo() {
-  if (!undoHistory.length || activePours > 0 || undosLeft <= 0 || autoPlaying) return;
+  if (!undoHistory.length || undosLeft <= 0 || autoPlaying) return;
+  flushAll();
   const snap = undoHistory.pop();
   undosUsed++;
   if (undosAllowed !== Infinity) undosLeft--;
   setSelected(null);
+  AudioFX.stopAllPours();
   restoreBoardSnapshot(snap);
   AudioFX.undo();
   updateBottleLabels();
@@ -2755,7 +3410,9 @@ function clearHintGlow() {
 
 let hintGlowT = null;
 async function showHint() {
-  if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
+  if (autoPlaying || solutionPending || !state.length) return;
+  flushAll();
+  if (window.isSolved(state)) return;
   if (mode === 'rush') { toastMsg('Hints are paused in Rush for timer fairness ⚡', 2200); AudioFX.invalid(); return; }
   AudioFX.ensure();
   toastMsg('Thinking…', 1200);
@@ -2790,7 +3447,9 @@ async function showHint() {
    "skip the puzzle" feature. Keep it that way unless a deliberate design
    decision adds an auto-solve control to the HUD. */
 async function autoSolve() {
-  if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
+  if (autoPlaying || solutionPending || !state.length) return;
+  flushAll();
+  if (window.isSolved(state)) return;
   if (mode === 'rush') { toastMsg('Auto-solve is paused in Rush for timer fairness ⚡', 2400); AudioFX.invalid(); return; }
   AudioFX.ensure();
   toastMsg('Thinking…', 1200);
@@ -2907,6 +3566,16 @@ function applyTheme() {
   HIDDEN_FILL = t.hidden;
   RIM_COLOR = t.modes ? t.rim[MODE] : t.rim.light;
   GLASS_SHADOW = t.shadow;
+  if (SKIN === 'apothecary') LID = ['#c79a5e', '#a9763f', '#7c5026', '#caa06a'];
+  else {
+    const cs = getComputedStyle(document.body);
+    const acc = (cs.getPropertyValue('--accent') || '#f0c074').trim();
+    const deep = (cs.getPropertyValue('--accent-deep') || '#d18b34').trim();
+    const ok = c => /^#[0-9a-f]{6}$/i.test(c);
+    const a = ok(acc) ? acc : '#f0c074', d = ok(deep) ? deep : '#d18b34';
+    LID = [mixHex(a, '#ffffff', 0.45), a, d, mixHex(a, '#ffffff', 0.6)];
+  }
+  document.querySelectorAll('.lid-top').forEach(el => el.setAttribute('fill', LID[3]));
   applyBackgroundQuality();
   buildDefs();
   const k = $('#brand-kicker'), tg = $('#brand-tag');
@@ -3304,7 +3973,9 @@ function buildHeroBottles() {
 
 /* ---------------- wiring ---------------- */
 function goMenu() {
+  flushAll();
   stopRushTimer();
+  AudioFX.stopAllPours();
   autoPlaying = false;
   setSelected(null);
   $('#overlay').classList.remove('show');
@@ -3380,8 +4051,11 @@ function closeModal(modalEl) {
 
 function init() {
   for (const k in SHAPES) {
+    /* liquid spans the interior bottom up to the capacity line (physics module) */
+    const geo = PourPhysics.SHAPE_GEO[k];
+    SHAPES[k].B = geo.bottom; SHAPES[k].T = geo.cap;
     SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
-    SHAPES[k].volToY = buildVolMap(k, SHAPES[k]);
+    SHAPES[k].volToY = frac => PourPhysics.uprightLevel(k, frac * 4);
   }
   Fluid.enabled = save.fluid !== false;
   applyRenderQuality();
@@ -3399,13 +4073,13 @@ function init() {
       AudioFX.select(); renderMenu();
     }));
   $('#btn-sound-menu').addEventListener('click', () => {
-    save.sound = !save.sound; persist(); renderMenu(); AudioFX.select();
+    save.sound = !save.sound; persist(); AudioFX.syncMute(); renderMenu(); AudioFX.select();
   });
   $('#btn-back').addEventListener('click', () => { AudioFX.swap(); exitToMenu(); });
   $('#btn-undo').addEventListener('click', undo);
-  $('#btn-restart').addEventListener('click', () => { if (activePours === 0 && !autoPlaying) { AudioFX.swap(); restartCurrent(); } });
+  $('#btn-restart').addEventListener('click', () => { if (!autoPlaying) { AudioFX.swap(); flushAll(); restartCurrent(); } });
   $('#btn-sound').addEventListener('click', () => {
-    save.sound = !save.sound; persist();
+    save.sound = !save.sound; persist(); AudioFX.syncMute();
     $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
     AudioFX.select();
   });
@@ -3439,7 +4113,7 @@ function init() {
       if (m.id === 'settings-modal') renderMenu();
     });
   });
-  $('#sw-sound').addEventListener('click', () => { save.sound = !save.sound; persist(); renderSettings(); AudioFX.select(); });
+  $('#sw-sound').addEventListener('click', () => { save.sound = !save.sound; persist(); AudioFX.syncMute(); renderSettings(); AudioFX.select(); });
   $('#sw-haptics').addEventListener('click', () => { save.haptics = !save.haptics; persist(); renderSettings(); buzz(15); });
   $('#sw-fluid').addEventListener('click', () => {
     save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; resetFluidRuntime(); persist(); renderSettings(); AudioFX.select();
@@ -3466,6 +4140,7 @@ function init() {
     if (!confirm('Erase all progress, stars and achievements?')) return;
     save = JSON.parse(JSON.stringify(DEFAULT_SAVE));
     persist();
+    AudioFX.syncMute();
     applyRenderQuality();
     applyTheme();
     renderSettings();
@@ -3474,11 +4149,13 @@ function init() {
   });
 
   let rT;
-  const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (activePours === 0) renderer.syncLayout(); else pendingLayout = true; }, 120); };
+  const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (pendingCount() === 0) renderer.syncLayout(); else pendingLayout = true; }, 120); };
   window.addEventListener('resize', relayout);
   window.addEventListener('orientationchange', relayout);
   $('#game').addEventListener('keydown', handleGameKey);
-  window.addEventListener('pointerdown', () => AudioFX.ensure(), { once: true });
+  /* every gesture may (re)unlock audio — iOS suspends the context after interruptions */
+  document.addEventListener('pointerdown', () => AudioFX.ensure(), true);
+  document.addEventListener('keydown', () => AudioFX.ensure(), true);
   /* device/browser Back while in a level returns to the menu, never off-page */
   window.addEventListener('popstate', () => {
     if (!$('#game').classList.contains('hidden')) goMenu();
@@ -3493,13 +4170,16 @@ window.__vessel = {
   get autoPlaying() { return autoPlaying; },
   get state() { return state; },
   get moves() { return moves; },
-  get activePours() { return activePours; },
+  get activePours() { return pendingCount(); },
+  get queued() { return queue.length; },
   get slots() { return slots; },
   get hiddenDepth() { return hiddenDepth; },
   get shapes() { return shapesByBottle; },
   get veiled() { return veiled; },
   get frozen() { return frozen; },
-  get orbFrac() { return orbFrac; }
+  get orbFrac() { return orbFrac; },
+  get corks() { return corks; },
+  get jobs() { return jobs; }
 };
 
 window.__vesselRenderer = renderer;
