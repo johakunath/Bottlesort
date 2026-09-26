@@ -144,63 +144,139 @@ if (save.backgroundQualityUserSet !== true) save.backgroundQuality = 'hifi';
 if (!['basic', 'hifi'].includes(save.backgroundQuality)) save.backgroundQuality = 'hifi';
 function persist() { store.save(save); }
 
-/* ---------------- audio ---------------- */
+/* ---------------- audio ----------------
+   Aliquot-style graph: every voice → master gain → compressor → out, with a
+   short filtered delay send for bells. One shared noise buffer, made once. */
+const PENTA = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51, 1567.98, 1760];
 const AudioFX = {
-  ctx: null,
-  ensure() {
-    if (!save.sound) return null;
-    try {
-      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      if (this.ctx.state === 'suspended') this.ctx.resume();
-    } catch (e) { this.ctx = null; }
-    return this.ctx;
-  },
-  tone(freq, dur, type, vol, slideTo, delay) {
-    const ctx = this.ensure(); if (!ctx) return;
-    const t0 = ctx.currentTime + (delay || 0);
-    const osc = ctx.createOscillator(), g = ctx.createGain();
-    osc.type = type || 'sine';
-    osc.frequency.setValueAtTime(freq, t0);
-    if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol || 0.15, t0 + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g).connect(ctx.destination);
-    osc.start(t0); osc.stop(t0 + dur + 0.05);
-  },
-  noise(dur, f0, f1, vol) {
-    const ctx = this.ensure(); if (!ctx) return;
-    const t0 = ctx.currentTime;
-    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  ctx: null, master: null, wet: null, noiseBuf: null,
+  voices: new Set(),
+  init() {
+    if (this.ctx) return this.ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    let ctx;
+    try { ctx = new AC(); } catch (e) { return null; }
+    const master = ctx.createGain();
+    master.gain.value = save.sound ? 0.9 : 0;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.2;
+    master.connect(comp); comp.connect(ctx.destination);
+    const wet = ctx.createGain(); wet.gain.value = 0.25;
+    const d = ctx.createDelay(0.5); d.delayTime.value = 0.12;
+    const fb = ctx.createGain(); fb.gain.value = 0.3;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
+    wet.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(master);
+    const len = Math.floor(ctx.sampleRate * 2);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const ch = buf.getChannelData(0);
     for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
-    const src = ctx.createBufferSource(); src.buffer = buf;
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.1;
-    bp.frequency.setValueAtTime(f0, t0);
-    bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.05);
-    g.gain.setValueAtTime(vol, t0 + dur * 0.7);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(bp).connect(g).connect(ctx.destination);
-    src.start(t0); src.stop(t0 + dur + 0.05);
+    this.ctx = ctx; this.master = master; this.wet = wet; this.noiseBuf = buf;
+    return ctx;
   },
-  select()  { this.tone(520, 0.08, 'sine', 0.10, 660); },
-  swap()    { this.tone(440, 0.07, 'sine', 0.08, 520); },
-  invalid() { this.tone(150, 0.13, 'square', 0.05, 110); },
-  pour(dur) { this.noise(dur, 950, 380, 0.085); },
-  cap()     { this.tone(640, 0.10, 'triangle', 0.18, 330); this.tone(1280, 0.05, 'sine', 0.08, 1180, 0.02); },
-  undo()    { this.tone(360, 0.09, 'sine', 0.08, 300); },
-  reveal()  { this.tone(980, 0.14, 'sine', 0.09, 1480); },
-  ice()     { this.tone(1850, 0.07, 'sine', 0.07, 1700); this.tone(120, 0.08, 'square', 0.03); },
-  thaw()    { this.noise(0.3, 2600, 700, 0.07); this.tone(1320, 0.22, 'sine', 0.08, 880, 0.05); },
-  win() {
-    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.34, 'triangle', 0.13, f, i * 0.11));
-    this.tone(1568, 0.5, 'sine', 0.06, 1568, 0.46);
-  }
+  /* called from user gestures: creates/unlocks the context */
+  ensure() {
+    const ctx = this.init();
+    if (ctx && ctx.state === 'suspended' && !document.hidden) ctx.resume().catch(() => {});
+    return save.sound ? ctx : null;
+  },
+  ok() { return !!this.ctx && save.sound && this.ctx.state === 'running'; },
+  suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {}); },
+  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); },
+  /* mute/unmute follows save.sound; the master ramp makes it instant and click-free */
+  syncMute() {
+    if (!this.master) return;
+    this.master.gain.setTargetAtTime(save.sound ? 0.9 : 0, this.ctx.currentTime, 0.015);
+    if (!save.sound) this.stopAllPours();
+  },
+  env(g, t0, a, peak, d) {
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t0 + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + d);
+  },
+  tone(f0, f1, dur, peak, when, send, type) {
+    const ctx = this.ctx, t0 = ctx.currentTime + (when || 0);
+    const o = ctx.createOscillator(); o.type = type || 'sine';
+    o.frequency.setValueAtTime(f0, t0);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+    const g = ctx.createGain(); this.env(g, t0, 0.004, peak, dur);
+    o.connect(g); g.connect(this.master); if (send) g.connect(this.wet);
+    o.start(t0); o.stop(t0 + dur + 0.06);
+  },
+  bell(f, peak, when) {
+    this.tone(f, f, 1.1, peak, when, true);
+    this.tone(f * 2.76, f * 2.76, 0.45, peak * 0.28, when, true);
+    this.tone(f * 5.4, f * 5.4, 0.2, peak * 0.09, when, true);
+  },
+  /* band-passed slice of the shared noise buffer; optional f1 sweeps the band */
+  burst(freq, q, dur, peak, when, f1) {
+    const ctx = this.ctx, t0 = ctx.currentTime + (when || 0);
+    const s = ctx.createBufferSource(); s.buffer = this.noiseBuf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = q;
+    bp.frequency.setValueAtTime(freq, t0);
+    if (f1 && f1 !== freq) bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+    const g = ctx.createGain(); this.env(g, t0, 0.003, peak, dur);
+    s.connect(bp); bp.connect(g); g.connect(this.master);
+    s.start(t0, Math.random() * 1.5); s.stop(t0 + dur + 0.06);
+  },
+  select()  { if (!this.ok()) return; this.tone(1780, 1960, 0.07, 0.05, 0, true); this.tone(2700, 2700, 0.045, 0.014); },
+  swap()    { if (!this.ok()) return; this.tone(1500, 1250, 0.06, 0.03); },
+  invalid() { if (!this.ok()) return; this.tone(220, 160, 0.09, 0.12); this.tone(185, 125, 0.11, 0.09, 0.1); },
+  land()    { if (!this.ok()) return; this.tone(150, 92, 0.09, 0.1); this.tone(2350, 2350, 0.12, 0.022, 0.004, true); },
+  undo()    { if (!this.ok()) return; this.tone(980, 620, 0.09, 0.04); this.burst(3000, 1.2, 0.05, 0.025); },
+  /* k = bottles completed this level so far: each cork climbs the pentatonic scale */
+  cap(k)    {
+    if (!this.ok()) return;
+    this.burst(1500, 1.8, 0.045, 0.2); this.tone(950, 320, 0.07, 0.1);
+    this.bell(PENTA[(k || 0) % PENTA.length], 0.05, 0.05);
+  },
+  reveal()  { if (!this.ok()) return; this.tone(980, 1480, 0.14, 0.07, 0, true); this.bell(1975.5, 0.018, 0.08); },
+  ice()     { if (!this.ok()) return; this.tone(1850, 1700, 0.07, 0.06, 0, true); this.tone(120, 110, 0.08, 0.025, 0, false, 'square'); },
+  thaw()    { if (!this.ok()) return; this.burst(2600, 1.1, 0.3, 0.07, 0, 700); this.tone(1320, 880, 0.22, 0.07, 0.05, true); },
+  win(when) { if (!this.ok()) return; [0, 2, 4, 5, 7].forEach((k, i) => this.bell(PENTA[k], 0.07, (when || 0) + i * 0.085)); },
+  /* continuous pour voice: noise through a resonant band that rises with the
+     receiver's fill, a low body, and random gurgle blips while flow is strong */
+  startPour() {
+    if (!this.ok()) return null;
+    const ctx = this.ctx, t0 = ctx.currentTime;
+    const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 5; bp.frequency.value = 600;
+    const g = ctx.createGain(); g.gain.value = 0.0001;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
+    const g2 = ctx.createGain(); g2.gain.value = 0.0001;
+    src.connect(bp); bp.connect(g); g.connect(this.master);
+    src.connect(lp); lp.connect(g2); g2.connect(this.master);
+    src.start(t0, Math.random() * 1.5);
+    const v = { src, bp, g, g2, blip: 0 };
+    this.voices.add(v);
+    return v;
+  },
+  updatePour(v, flow, fill, dt) {
+    if (!v || !this.ctx || !this.voices.has(v)) return;
+    const t = this.ctx.currentTime;
+    fill = Math.max(0, Math.min(1, fill)); flow = Math.max(0, Math.min(1, flow));
+    v.bp.frequency.setTargetAtTime(480 + 1500 * Math.pow(fill, 1.25), t, 0.03);
+    v.g.gain.setTargetAtTime(0.0001 + 0.17 * flow, t, 0.025);
+    v.g2.gain.setTargetAtTime(0.0001 + 0.1 * flow, t, 0.03);
+    v.blip -= dt;
+    if (v.blip <= 0 && flow > 0.15 && this.ok()) {
+      v.blip = 0.05 + Math.random() * 0.09;
+      const f = (300 + 650 * fill) * (0.85 + Math.random() * 0.3);
+      this.tone(f, f * 1.55, 0.05, 0.045 * flow);
+    }
+  },
+  stopPour(v) {
+    if (!v || !this.ctx || !this.voices.has(v)) return;
+    this.voices.delete(v);
+    const t = this.ctx.currentTime;
+    v.g.gain.setTargetAtTime(0.0001, t, 0.03); v.g2.gain.setTargetAtTime(0.0001, t, 0.03);
+    try { v.src.stop(t + 0.3); } catch (e) {}
+  },
+  stopAllPours() { for (const v of [...this.voices]) this.stopPour(v); }
 };
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) AudioFX.suspend(); else AudioFX.resume();
+});
 function buzz(p) { try { if (save.haptics && navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
 
 /* ---------------- helpers ---------------- */
@@ -784,6 +860,7 @@ let moves = 0, undoHistory = [], sel = null, activePours = 0;
 let shapesByBottle = [], hiddenDepth = [], veiled = [];
 let frozen = new Set();
 let needCaps = 0;
+let capsThisLevel = 0;   /* completions this level — drives the cork pop's rising pitch */
 const locked = new Set();
 let ELEMENT_MAP = {};
 let slots = [];
@@ -2127,6 +2204,8 @@ function setupBoard(gen) {
   visual = state.map(mergeRuns);
   moves = 0; undoHistory = []; sel = null; locked.clear(); activePours = 0;
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
+  capsThisLevel = 0;
+  AudioFX.stopAllPours();
   Fluid.resetAll();
   clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
@@ -2510,8 +2589,8 @@ async function doPour(si, di) {
   let cpx = sx + (tx - sx) * 0.35 + side * 8;
   let cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
   renderer.beginPour({ si, di, color, c0, c1, sx, sy, tx, ty, cpx, cpy, side, receiverW: bwD, progress: 0, started: performance.now() });
-  AudioFX.pour(dur / 1000 + 0.1);
   buzz(12);
+  let voice = null, lastP = 0, lastT = performance.now();
 
   const snapS = visual[si].map(s => ({ c: s.c, u: s.u }));
   const snapD = visual[di].map(s => ({ c: s.c, u: s.u }));
@@ -2523,9 +2602,19 @@ async function doPour(si, di) {
     cpx = sx + (tx - sx) * 0.35 + side * 8;
     cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
     renderer.updatePour({ si, progress: p, sx, sy, tx, ty, cpx, cpy });
+    /* pour voice starts when the stream reaches the receiver (canvas stream
+       reach = first 15% of the pour); flow = normalised drain rate */
+    const now = performance.now(), dt = Math.max(0.001, (now - lastT) / 1000);
+    if (!voice && p > 0.12 && p < 0.9) voice = AudioFX.startPour();
+    if (voice) {
+      const flow = Math.min(1, ((p - lastP) / dt) * (dur / 1000) * 0.5);
+      AudioFX.updatePour(voice, flow, (dstUnits0 + n * p) / 4, dt);
+    }
+    lastP = p; lastT = now;
     renderer.renderBottle(si, A);
     renderer.renderBottle(di, 0);
   });
+  AudioFX.stopPour(voice);
   renderer.endPour({ si, di });
   if (explicitPrettyEffects()) spawnSparkles(slots[di].el, 4, 0.25);
 
@@ -2540,6 +2629,7 @@ async function doPour(si, di) {
   bottleEl.style.transform = '';
   bottleEl.style.transition = '';
   slotEl.classList.remove('pouring');
+  AudioFX.land();
 
   visual[si] = mergeRuns(state[si]);
   visual[di] = mergeRuns(state[di]);
@@ -2552,7 +2642,7 @@ async function doPour(si, di) {
     slots[di].el.classList.add('capped');
     if (!RM) spawnSparkles(slots[di].el, 8, 0.55);
     if (!isCanvasMode()) sweepSheen(slots[di].svg);
-    AudioFX.cap(); buzz([15, 40, 25]);
+    AudioFX.cap(capsThisLevel++); buzz([15, 40, 25]);
     orbUpdate(true);
     if (frozen.size) thawAll();
   }
@@ -2629,6 +2719,7 @@ function undo() {
   undosUsed++;
   if (undosAllowed !== Infinity) undosLeft--;
   setSelected(null);
+  AudioFX.stopAllPours();
   restoreBoardSnapshot(snap);
   AudioFX.undo();
   updateBottleLabels();
@@ -3307,6 +3398,7 @@ function buildHeroBottles() {
 /* ---------------- wiring ---------------- */
 function goMenu() {
   stopRushTimer();
+  AudioFX.stopAllPours();
   autoPlaying = false;
   setSelected(null);
   $('#overlay').classList.remove('show');
@@ -3401,13 +3493,13 @@ function init() {
       AudioFX.select(); renderMenu();
     }));
   $('#btn-sound-menu').addEventListener('click', () => {
-    save.sound = !save.sound; persist(); renderMenu(); AudioFX.select();
+    save.sound = !save.sound; persist(); AudioFX.syncMute(); renderMenu(); AudioFX.select();
   });
   $('#btn-back').addEventListener('click', () => { AudioFX.swap(); exitToMenu(); });
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-restart').addEventListener('click', () => { if (activePours === 0 && !autoPlaying) { AudioFX.swap(); restartCurrent(); } });
   $('#btn-sound').addEventListener('click', () => {
-    save.sound = !save.sound; persist();
+    save.sound = !save.sound; persist(); AudioFX.syncMute();
     $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
     AudioFX.select();
   });
@@ -3441,7 +3533,7 @@ function init() {
       if (m.id === 'settings-modal') renderMenu();
     });
   });
-  $('#sw-sound').addEventListener('click', () => { save.sound = !save.sound; persist(); renderSettings(); AudioFX.select(); });
+  $('#sw-sound').addEventListener('click', () => { save.sound = !save.sound; persist(); AudioFX.syncMute(); renderSettings(); AudioFX.select(); });
   $('#sw-haptics').addEventListener('click', () => { save.haptics = !save.haptics; persist(); renderSettings(); buzz(15); });
   $('#sw-fluid').addEventListener('click', () => {
     save.fluid = !save.fluid; Fluid.enabled = !!save.fluid; resetFluidRuntime(); persist(); renderSettings(); AudioFX.select();
@@ -3468,6 +3560,7 @@ function init() {
     if (!confirm('Erase all progress, stars and achievements?')) return;
     save = JSON.parse(JSON.stringify(DEFAULT_SAVE));
     persist();
+    AudioFX.syncMute();
     applyRenderQuality();
     applyTheme();
     renderSettings();
@@ -3480,7 +3573,9 @@ function init() {
   window.addEventListener('resize', relayout);
   window.addEventListener('orientationchange', relayout);
   $('#game').addEventListener('keydown', handleGameKey);
-  window.addEventListener('pointerdown', () => AudioFX.ensure(), { once: true });
+  /* every gesture may (re)unlock audio — iOS suspends the context after interruptions */
+  document.addEventListener('pointerdown', () => AudioFX.ensure(), true);
+  document.addEventListener('keydown', () => AudioFX.ensure(), true);
   /* device/browser Back while in a level returns to the menu, never off-page */
   window.addEventListener('popstate', () => {
     if (!$('#game').classList.contains('hidden')) goMenu();
