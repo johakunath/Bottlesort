@@ -4,6 +4,7 @@
    Requires logic.js loaded first.
    ============================================================ */
 'use strict';
+import { PourPhysics } from './pour-physics.js';
 (function () {
 
 /* ---------------- palette ----------------
@@ -667,6 +668,8 @@ function tween(dur, fn) {
 /* ---------------- Motion: the single rAF loop for board animation ----------------
    Tasks are fn(dt, now) → true while they still need frames. After the tasks
    run, the canvas backend paints once, so every moving thing shares a frame. */
+/* ?slowmo=N slows board motion N× (QA aid for inspecting pours frame by frame) */
+const SLOWMO = Math.max(1, Number(new URLSearchParams(location.search).get('slowmo')) || 1);
 const Motion = {
   tasks: new Set(),
   running: false,
@@ -680,7 +683,7 @@ const Motion = {
     FrameGate.request('motion', now => this.frame(now));
   },
   frame(now) {
-    const dt = Math.min(0.05, Math.max(0.001, (now - this.last) / 1000));
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.last) / 1000)) / SLOWMO;
     this.last = now;
     PerfMeter.mark(isCanvasMode() ? 'canvas-motion' : 'svg-motion', now);
     for (const fn of [...this.tasks]) {
@@ -983,43 +986,8 @@ function mergeRuns(bottle) {
 }
 
 /* ---- volume-realistic liquid heights ---- */
-function shapeWidthAt(sn, y) {
-  if (sn === 'classic') {
-    if (y <= 54) return 24;
-    if (y <= 84) return 24 + (y - 54) / 30 * 32;
-    if (y <= 204) return 56;
-    return Math.max(4, 56 - (y - 204) / 17 * 36);
-  } else if (sn === 'tall') {
-    if (y <= 50) return 20;
-    if (y <= 74) return 20 + (y - 50) / 24 * 20;
-    if (y <= 286) return 40;
-    return Math.max(4, 40 - (y - 286) / 15 * 30);
-  } else if (sn === 'flask') {
-    if (y <= 131) return 16;
-    const dy = y - 170.2;
-    return 2 * Math.sqrt(Math.max(0, 1600 - dy * dy));
-  }
-  return 50;
-}
-
-function buildVolMap(sn, sh) {
-  const N = 400, yB = sh.B, yT = sh.T, step = (yB - yT) / N;
-  const ys = [], cv = [0];
-  for (let k = 0; k <= N; k++) {
-    const y = yB - k * step;
-    ys.push(y);
-    if (k > 0) cv.push(cv[k - 1] + (shapeWidthAt(sn, ys[k - 1]) + shapeWidthAt(sn, y)) * 0.5 * step);
-  }
-  const tot = cv[N];
-  return function(frac) {
-    if (frac <= 0) return yB;
-    if (frac >= 1) return yT;
-    const target = frac * tot;
-    let lo = 0, hi = N;
-    while (lo < hi - 1) { const m = (lo + hi) >> 1; if (cv[m] <= target) lo = m; else hi = m; }
-    return ys[lo] + ((target - cv[lo]) / (cv[hi] - cv[lo])) * (ys[hi] - ys[lo]);
-  };
-}
+/* interior width + volume maps live in the pure physics module */
+const shapeWidthAt = PourPhysics.shapeWidthAt;
 
 /* ---- liquid element visual effects ----
    Purely cosmetic per-colour badges (icy/electric/boiling/toxic) — unrelated
@@ -1181,37 +1149,25 @@ const Fluid = {
     d += ' L' + right.toFixed(1) + ',' + (bottomY).toFixed(1) + ' Z';
     return d;
   },
+  /* stepped by the shared Motion loop; canvas paints there, SVG rewrites paths here */
   start() {
     if (this.running || !this.hasSims()) return;
     this.running = true;
-    let last = performance.now();
-    const key = 'fluid';
-    FrameGate.reset(key);
-    const loop = (now) => {
-      if (!this.running) return;
-      if (document.hidden) { last = now; FrameGate.request(key, loop); return; }
-      PerfMeter.mark(isCanvasMode() ? 'canvas-fluid' : 'svg-fluid', now);
-      let dt = (now - last) / 1000; last = now;
-      if (dt > 0.05) dt = 0.05;                               /* clamp after stalls */
-      /* sub-step for stability */
-      const sub = 2; dt /= sub;
-      for (let s = 0; s < sub; s++) this.step(dt);
-      /* paint: SVG rewrites surface paths; Canvas reads samples during render. */
-      if (isCanvasMode()) {
-        renderer.renderAll();
-      } else {
+    Motion.add(dt => {
+      if (!this.running) return false;
+      const sub = 2, h = dt / sub;
+      for (let k = 0; k < sub; k++) this.step(h);
+      if (!isCanvasMode()) {
         for (let i = 0; i < slots.length; i++) {
           const sl = slots[i]; if (!sl || !sl.surf) continue;
           const m = sl.surf;
-          const d = this.pathFor(i, m.surfY, m.halfW, m.bottomY);
-          m.path.setAttribute('d', d);
+          m.path.setAttribute('d', this.pathFor(i, m.surfY, m.halfW, m.bottomY));
           if (m.crest) m.crest.setAttribute('d', this.crestFor(i, m.surfY, m.halfW));
         }
       }
-      if (!this.hasSims()) { this.running = false; FrameGate.reset(key); return; }
-      FrameGate.request(key, loop);
-    };
-    FrameGate.request(key, loop);
+      if (!this.hasSims()) { this.running = false; return false; }
+      return true;
+    });
   },
   crestFor(i, surfY, halfW) {
     const s = this.sample(i), n = this.N;
@@ -1252,8 +1208,10 @@ const SvgRenderer = {
       pgrad.appendChild(stop);
     });
     pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
+    const paths = [];
     const mkPath = (stroke, width, opacity) => {
       const path = document.createElementNS(NS, 'path');
+      paths.push(path);
       path.setAttribute('d', arcD); path.setAttribute('fill', 'none');
       path.setAttribute('stroke', stroke); path.setAttribute('stroke-width', width);
       path.setAttribute('stroke-linecap', 'round');
@@ -1268,14 +1226,6 @@ const SvgRenderer = {
     pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));
     pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6));
     fx.appendChild(pourSVG);
-    let steamEl = null;
-    if (!RM && SKIN === 'apothecary') {
-      steamEl = document.createElement('div');
-      steamEl.className = 'steam-wisp';
-      steamEl.style.left = (sx - 7 + side * 6) + 'px';
-      steamEl.style.top = (sy - 30) + 'px';
-      fx.appendChild(steamEl);
-    }
     const rippleEls = [];
     if (!RM) {
       for (let r = 0; r < 2; r++) {
@@ -1317,9 +1267,16 @@ const SvgRenderer = {
       bubbleTimer = setInterval(spawnPearlBubble, 180);
     }
     if (!this.pourFxMap) this.pourFxMap = new Map();
-    this.pourFxMap.set(si, { pourSVG, steamEl, rippleEls, dropTimer, bubbleTimer });
+    this.pourFxMap.set(si, { pourSVG, paths, grad: pgrad, rippleEls, dropTimer, bubbleTimer });
   },
-  updatePour() {},
+  /* the source keeps re-aiming during the pour — follow it */
+  updatePour(info) {
+    const fx = this.pourFxMap && this.pourFxMap.get(info && info.si);
+    if (!fx || !fx.paths) return;
+    const d = `M ${info.sx.toFixed(1)} ${info.sy.toFixed(1)} Q ${info.cpx.toFixed(1)} ${info.cpy.toFixed(1)} ${info.tx.toFixed(1)} ${info.ty.toFixed(1)}`;
+    fx.paths.forEach(p => p.setAttribute('d', d));
+    if (fx.grad) { fx.grad.setAttribute('x1', info.sx); fx.grad.setAttribute('y1', info.sy); fx.grad.setAttribute('x2', info.tx); fx.grad.setAttribute('y2', info.ty); }
+  },
   endPour(info) {
     if (!this.pourFxMap) return;
     const fx = this.pourFxMap.get(info && info.si);
@@ -1327,7 +1284,6 @@ const SvgRenderer = {
     if (fx.dropTimer) clearInterval(fx.dropTimer);
     if (fx.bubbleTimer) clearInterval(fx.bubbleTimer);
     if (fx.pourSVG) fx.pourSVG.remove();
-    if (fx.steamEl) fx.steamEl.remove();
     fx.rippleEls.forEach(e => e.remove());
     this.pourFxMap.delete(info.si);
   },
@@ -1498,7 +1454,7 @@ const CanvasRenderer = {
     this.canvas.style.width = sr.width + 'px';
     this.canvas.style.height = sr.height + 'px';
     this.rects = slots.map((slot, i) => {
-      const r = slot.btn.getBoundingClientRect();
+      const r = slot.slot.getBoundingClientRect();   /* home rect: the button may be mid-pour */
       return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height, shapeName: shapesByBottle[i] };
     });
     return true;
@@ -1511,7 +1467,7 @@ const CanvasRenderer = {
   renderBottle() { return this.requestRender(); },
   requestRender() {
     if (!this.ensure()) return this;
-    if (this.renderQueued) return this;
+    if (this.renderQueued || Motion.running) return this;   /* Motion paints every frame anyway */
     this.renderQueued = true;
     FrameGate.request('canvas-render', () => {
       this.renderQueued = false;
@@ -1524,8 +1480,9 @@ const CanvasRenderer = {
     if (this.rects.length !== slots.length) this.syncLayout();
     this.clear();
     PerfMeter.mark('canvas2d', performance.now());
-    state.forEach((b, i) => this.drawBottle(i));
-    this.drawPourEffects(this.ctx);
+    /* bottles in flight are drawn last so they pass over their neighbours */
+    for (let i = 0; i < state.length; i++) if (!flyingSource(i)) this.drawBottle(i);
+    for (let i = 0; i < state.length; i++) if (flyingSource(i)) this.drawBottle(i);
   },
   renderAll() {
     return this.requestRender();
@@ -1814,127 +1771,93 @@ const CanvasRenderer = {
     }
     ctx.restore();
   },
-  beginPour(info) {
-    if (!this.pourMap) this.pourMap = new Map();
-    this.pourMap.set(info.si, Object.assign({ t: 0, particles: [], rippleAge: 0 }, info));
-    if (this.effectsEnabled()) {
-      Fluid.drop(info.di, -1.8);
-      Fluid.start();
-    }
-    this.renderAll();
-  },
-  updatePour(info = {}) {
-    if (!this.pourMap) return;
-    const p = this.pourMap.get(info.si);
-    if (!p) return;
-    Object.assign(p, info);
-    const now = performance.now();
-    if (this.prettyEffectsEnabled() && (!p.lastParticle || now - p.lastParticle > 70)) {
-      p.lastParticle = now;
-      for (let k = 0; k < 2; k++) p.particles.push({
-        x: p.tx + (Math.random() * 14 - 7), y: p.ty,
-        vx: Math.random() * 70 - 35, vy: -(35 + Math.random() * 60),
-        age: 0, life: 0.52 + Math.random() * 0.18, r: 2 + Math.random() * 2
-      });
-    }
-    this.requestRender();
-  },
-  endPour(info) {
-    if (this.pourMap) { this.pourMap.delete(info && info.si); }
-    this.renderAll();
-  },
   effectsEnabled() { return !RM && activeRenderProfile().id !== 'low'; },
   prettyEffectsEnabled() { return !RM && activeRenderProfile().id === 'pretty'; },
-  drawPourEffects(ctx) {
-    if (!this.pourMap || !this.pourMap.size) return;
-    for (const p of this.pourMap.values()) this._drawOnePour(ctx, p);
-  },
-  _drawOnePour(ctx, p) {
+  /* Aliquot stream: quadratic bezier from the source rim to the receiver
+     surface; width follows the flow that left the lip tf·sqrt(u) earlier,
+     so the head falls and the tail detaches. Stage coordinates. */
+  drawStream(ctx, job) {
+    const st = job.streamFx;
+    if (!st) return;
+    const sx = st.sx, sy = st.sy, ex = st.tx, ey = st.ty;
+    if (ey <= sy) return;
+    const s = job.s, tp = job.t - job.T1;
+    const cx = sx + s * job.w * 0.16, cy = sy + (ey - sy) * 0.08;
+    const N = 16, L = this._sL || (this._sL = new Float64Array(2 * N + 2)), Rr = this._sR || (this._sR = new Float64Array(2 * N + 2));
+    const Cx = this._sC || (this._sC = new Float64Array(2 * N + 2));
+    let any = false;
+    for (let k = 0; k <= N; k++) {
+      const u = k / N, iu = 1 - u;
+      const x = iu * iu * sx + 2 * iu * u * cx + u * u * ex, y = iu * iu * sy + 2 * iu * u * cy + u * u * ey;
+      let dx = 2 * iu * (cx - sx) + 2 * u * (ex - cx), dy = 2 * iu * (cy - sy) + 2 * u * (ey - cy);
+      const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+      const e = tp - job.tf * Math.sqrt(u);
+      const f = e > 0 && e < job.T2 ? flowN(e / job.T2) : 0;
+      const hw = f > 0 ? job.maxW * Math.sqrt(f) * (1 - 0.3 * u) * 0.5 : 0;
+      if (hw > 0.2) any = true;
+      L[2 * k] = x - dy * hw; L[2 * k + 1] = y + dx * hw;
+      Rr[2 * k] = x + dy * hw; Rr[2 * k + 1] = y - dx * hw;
+      Cx[2 * k] = x; Cx[2 * k + 1] = y;
+    }
+    if (!any) return;
+    const c0 = COLORS[job.color][0], c1 = COLORS[job.color][1];
     ctx.save();
-    const t = Math.max(0, Math.min(1, p.progress == null ? 1 : p.progress));
-    const sx = p.sx, sy = p.sy, tx = p.tx, ty = p.ty, cpx = p.cpx, cpy = p.cpy;
-    /* sample the gravity arc once; every pass shares the polyline. The stream
-       reaches the surface in the first ~15% of the pour, then holds. */
-    const reach = Math.min(1, t / 0.15);
-    const N = 16;
-    const qx = [], qy = [], nx = [], ny = [];
-    for (let k = 0; k <= N; k++) {
-      const u = (k / N) * reach, a = 1 - u;
-      qx.push(a * a * sx + 2 * a * u * cpx + u * u * tx);
-      qy.push(a * a * sy + 2 * a * u * cpy + u * u * ty);
-    }
-    for (let k = 0; k <= N; k++) {
-      const k0 = Math.max(0, k - 1), k1 = Math.min(N, k + 1);
-      const dx = qx[k1] - qx[k0], dy = qy[k1] - qy[k0];
-      const len = Math.hypot(dx, dy) || 1;
-      nx.push(-dy / len); ny.push(dx / len);
-    }
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    const polyline = () => { ctx.beginPath(); ctx.moveTo(qx[0], qy[0]); for (let k = 1; k <= N; k++) ctx.lineTo(qx[k], qy[k]); };
-    /* soft glow: layered wide strokes — ctx.filter blur was a mobile slow path */
-    if (activeRenderProfile().streamGlow) {
-      ctx.globalAlpha = 0.10 * activeRenderProfile().glowStrength; ctx.strokeStyle = p.c0; ctx.lineWidth = 14; polyline(); ctx.stroke();
-      ctx.globalAlpha = 0.18 * activeRenderProfile().glowStrength; ctx.lineWidth = 8; polyline(); ctx.stroke();
+    /* theme glow: wide soft strokes along the centreline (no blur filter) */
+    const prof = activeRenderProfile();
+    if (prof.streamGlow) {
+      ctx.strokeStyle = c0;
+      ctx.beginPath(); ctx.moveTo(Cx[0], Cx[1]);
+      for (let k = 1; k <= N; k++) ctx.lineTo(Cx[2 * k], Cx[2 * k + 1]);
+      ctx.globalAlpha = 0.10 * prof.glowStrength; ctx.lineWidth = job.maxW * 1.9; ctx.stroke();
+      ctx.globalAlpha = 0.18 * prof.glowStrength; ctx.lineWidth = job.maxW * 1.15; ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    /* tapered liquid body — wide at the lip, narrowing as it falls */
-    const grad = ctx.createLinearGradient(sx, sy, tx, ty); grad.addColorStop(0, p.c0); grad.addColorStop(1, p.c1);
-    const w0 = 3.4, w1 = 1.6;
-    ctx.beginPath();
-    for (let k = 0; k <= N; k++) {
-      const w = w0 + (w1 - w0) * (k / N);
-      const fx = qx[k] + nx[k] * w, fy = qy[k] + ny[k] * w;
-      if (k) ctx.lineTo(fx, fy); else ctx.moveTo(fx, fy);
-    }
-    for (let k = N; k >= 0; k--) {
-      const w = w0 + (w1 - w0) * (k / N);
-      ctx.lineTo(qx[k] - nx[k] * w, qy[k] - ny[k] * w);
-    }
-    ctx.closePath();
+    const grad = ctx.createLinearGradient(sx, sy, ex, ey); grad.addColorStop(0, c0); grad.addColorStop(1, c1);
     ctx.fillStyle = grad;
-    ctx.fill();
-    /* highlight streak riding the inner edge */
-    ctx.globalAlpha = 0.55; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(L[0], L[1]);
+    for (let k = 1; k <= N; k++) ctx.lineTo(L[2 * k], L[2 * k + 1]);
+    for (let k = N; k >= 0; k--) ctx.lineTo(Rr[2 * k], Rr[2 * k + 1]);
+    ctx.closePath(); ctx.fill();
+    /* highlight streak on the lit edge, only where the stream is wide */
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1, job.maxW * 0.14);
     ctx.beginPath();
+    let started = false;
     for (let k = 0; k <= N; k++) {
-      const w = (w0 + (w1 - w0) * (k / N)) * 0.4;
-      const fx = qx[k] + nx[k] * w, fy = qy[k] + ny[k] * w;
-      if (k) ctx.lineTo(fx, fy); else ctx.moveTo(fx, fy);
+      const x = L[2 * k] * 0.7 + Rr[2 * k] * 0.3, y = L[2 * k + 1] * 0.7 + Rr[2 * k + 1] * 0.3;
+      if (Math.hypot(L[2 * k] - Rr[2 * k], L[2 * k + 1] - Rr[2 * k + 1]) > 3) { if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; } }
+      else started = false;
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
-    /* impact glint where the stream meets the surface */
-    if (reach >= 1) {
-      ctx.globalAlpha = 0.6;
-      ctx.drawImage(this.glowDot('#ffffff'), tx - 8, ty - 5, 16, 10);
-      ctx.globalAlpha = 1;
-    }
-    if (this.effectsEnabled()) {
-      const age = ((performance.now() - (p.started || performance.now())) / 1000);
-      for (let r = 0; r < 2; r++) {
-        const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
-        ctx.globalAlpha = (1 - u) * 0.65; ctx.strokeStyle = p.c0; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.ellipse(tx, ty, p.receiverW * (0.12 + u * 0.45), p.receiverW * (0.04 + u * 0.12), 0, 0, Math.PI * 2); ctx.stroke();
-      }
-      if (prettyTidepoolEffects()) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.76)';
-        ctx.fillStyle = 'rgba(210,255,248,0.16)';
-        ctx.lineWidth = 1;
-        for (let k = 0; k < 3; k++) {
-          const u = (age * 0.9 + k * 0.31) % 1;
-          const bx = tx + Math.sin(age * 1.7 + k * 2.1) * p.receiverW * 0.16;
-          const by = ty + p.receiverW * 0.08 - u * p.receiverW * 0.62;
-          const br = p.receiverW * (0.045 + u * 0.045);
-          ctx.globalAlpha = (1 - u) * 0.58;
-          ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    const fl = job.flowD || 0;
+    if (fl > 0.05) {
+      /* impact glint + expanding rings where the stream meets the surface */
+      ctx.globalAlpha = 0.6 * Math.min(1, fl * 2);
+      ctx.drawImage(this.glowDot('#ffffff'), ex - 8, ey - 5, 16, 10);
+      if (this.effectsEnabled()) {
+        const age = job.t - job.T1 - job.tf;
+        for (let r = 0; r < 2; r++) {
+          const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
+          ctx.globalAlpha = (1 - u) * 0.55 * Math.min(1, fl * 2); ctx.strokeStyle = c0; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.ellipse(ex, ey, job.wD * (0.12 + u * 0.3), job.wD * (0.035 + u * 0.08), 0, 0, Math.PI * 2); ctx.stroke();
+        }
+        if (prettyTidepoolEffects()) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.76)'; ctx.fillStyle = 'rgba(210,255,248,0.16)'; ctx.lineWidth = 1;
+          for (let k = 0; k < 3; k++) {
+            const u = (age * 0.9 + k * 0.31) % 1; if (u < 0) continue;
+            const bx = ex + Math.sin(age * 1.7 + k * 2.1) * job.wD * 0.16;
+            const by = ey + job.wD * 0.08 - u * job.wD * 0.62;
+            ctx.globalAlpha = (1 - u) * 0.58;
+            ctx.beginPath(); ctx.arc(bx, by, job.wD * (0.045 + u * 0.045), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          }
         }
       }
-      if (this.prettyEffectsEnabled() && SKIN === 'apothecary') {
-        ctx.globalAlpha = 0.35; ctx.strokeStyle = 'rgba(240,245,255,0.75)'; ctx.lineWidth = 2;
-        for (let k = 0; k < 2; k++) { const u = (age * 0.8 + k * 0.45) % 1; ctx.beginPath(); ctx.moveTo(sx + p.side * 6, sy - 12 - u * 28); ctx.bezierCurveTo(sx + 10, sy - 20 - u * 30, sx - 8, sy - 26 - u * 36, sx + 6, sy - 38 - u * 40); ctx.stroke(); }
-      }
-      const dt = 1 / 60; const glow = this.glowDot(p.c0);
-      p.particles = (p.particles || []).filter(d => { d.age += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vy += 190 * dt; const a = 1 - d.age / d.life; if (a <= 0) return false; ctx.globalAlpha = a * 0.8; ctx.drawImage(glow, d.x - d.r * 2.4, d.y - d.r * 2.4, d.r * 4.8, d.r * 4.8); ctx.globalAlpha = a; ctx.fillStyle = p.c0; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); return true; });
+    }
+    /* splash droplets (stepped in stepJob) */
+    if (job.drops.length) {
+      ctx.fillStyle = c0;
+      for (const d of job.drops) { ctx.globalAlpha = Math.min(1, d.life * 5); ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.restore();
   },
@@ -1977,58 +1900,132 @@ const CanvasRenderer = {
     }
     ctx.drawImage(this.backLayer(shapeName), -P, -P, 100 + 2 * P, sh.vbH + 2 * P);
     ctx.save(); ctx.clip(interior);
-    if (rot) {
-      ctx.translate(50, sh.vbH / 2);
-      ctx.rotate(-rot);
-      ctx.translate(-50, -sh.vbH / 2);
-    }
-    let cum = 0;
-    for (const seg of segs) {
-      const yBot = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
-      const yTop = sh.volToY ? sh.volToY((cum + seg.u) / 4) : sh.B - (cum + seg.u) * sh.unit;
-      const h = yBot - yTop;
-      const isTop = seg === segs[segs.length - 1] && Fluid.active() && !locked.has(i) && h > Fluid.AMP + Fluid.MENISCUS + 7;
-      ctx.fillStyle = this.liquidGradient(ctx, seg.c, shapeName);
-      if (isTop) {
-        const halfW = Math.max(5, shapeWidthAt(shapeName, yTop) / 2);
-        const sample = Fluid.sample(i);
-        const n = Fluid.N, left = 50 - halfW, span = 2 * halfW;
-        ctx.beginPath(); ctx.moveTo(-160, yBot + 1.2); ctx.lineTo(-160, yTop);
-        for (let k = 0; k < n; k++) {
-          const x = left + (k / (n - 1)) * span;
-          const edge = Math.abs((k / (n - 1)) * 2 - 1);
-          const y = yTop + (sample ? sample.h[k] : 0) - Fluid.MENISCUS * Math.pow(edge, 2.2);
-          ctx.lineTo(x, y);
-        }
-        ctx.lineTo(260, yTop); ctx.lineTo(260, yBot + 1.2); ctx.closePath(); ctx.fill();
-      } else ctx.fillRect(-160, yTop, 420, h + 1.2);
-      if (ELEMENT_MAP[seg.c]) this.drawElement(ctx, ELEMENT_MAP[seg.c], yTop, h);
-      cum += seg.u;
-    }
-    if (segs.length && cum > 0.01) {
-      /* vertical depth shading over the whole liquid column */
-      const liqTop = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
-      ctx.fillStyle = this.depthOverlay(ctx, shapeName);
-      ctx.fillRect(-160, liqTop, 420, sh.B - liqTop + 2);
-    }
-    if (segs.length) {
-      const topY = sh.volToY ? sh.volToY(cum / 4) : sh.B - cum * sh.unit;
-      const halfW = Math.max(5, shapeWidthAt(shapeName, topY) / 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(50 - halfW, topY - Fluid.MENISCUS + 0.4); ctx.quadraticCurveTo(50, topY + Fluid.MENISCUS + 0.4, 50 + halfW, topY - Fluid.MENISCUS + 0.4); ctx.stroke();
-    }
-    const hid = hiddenDepth[i] || 0;
-    for (let u = 0; u < hid && u < cum; u++) {
-      const yBot = sh.volToY ? sh.volToY(u / 4) : sh.B - u * sh.unit;
-      const yTop = sh.volToY ? sh.volToY((u + 1) / 4) : sh.B - (u + 1) * sh.unit;
-      ctx.fillStyle = this.liquidGradient(ctx, 'hidden', shapeName); ctx.fillRect(-160, yTop, 420, yBot - yTop + 1.2);
-      ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 50, (yTop + yBot) / 2);
-    }
+    this.drawLiquid(ctx, i, shapeName, sh, segs, rot);
     ctx.restore();
+    /* streams pour between the receiver's liquid and its glass */
+    const jobs = jobsInto(i);
+    if (jobs) {
+      ctx.save();
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      for (const job of jobs) this.drawStream(ctx, job);
+      ctx.restore();
+    }
     ctx.drawImage(this.shellLayer(shapeName), 0, 0, 100, sh.vbH);
     if (corks[i] && sh.cork) this.drawCork(ctx, sh, corks[i]);
     if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✦', 50, sh.vbH * 0.38); }
     if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('❄', 50, sh.vbH * 0.72); }
     ctx.restore();
+  },
+  /* Volume-true liquid (Aliquot method). The interior polygon is rotated by
+     alpha = bottle tilt − slosh; cut lines come from area, so volume is
+     conserved and the surface meets the lip. Fills are built in the surface
+     frame and mapped back to the bottle frame, so the cylinder gradients stay
+     on the glass; glyphs are drawn upright in the surface frame. Bands are
+     painted top-down, each from its top line to the bottom (no seams). */
+  drawLiquid(ctx, i, shapeName, sh, segs, rot) {
+    const cums = this._cums || (this._cums = []);
+    cums.length = 0;
+    const cols = this._cols || (this._cols = []);
+    cols.length = 0;
+    let total = 0;
+    for (const seg of segs) { if (seg.u <= 0.001) continue; total += seg.u; cums.push(total); cols.push(seg.c); }
+    const m = cums.length;
+    if (!m) return;
+    const body = bodies[i];
+    const alpha = rot - (body ? body.phi : 0);
+    const lv = PourPhysics.levelsFor(shapeName, alpha, cums);
+    const c = Math.cos(alpha), s = Math.sin(alpha);
+    const x0 = lv.x0, x1 = lv.x1, yb = lv.yb;
+    const topY = lv.tops[m - 1];
+    /* surface-frame (x, y) → bottle viewBox (pivot at (50, 0)) */
+    const lineTo = (x, y, move) => { const bx = 50 + c * x + s * y, by = -s * x + c * y; if (move) ctx.moveTo(bx, by); else ctx.lineTo(bx, by); };
+    const quad = (yTop) => { ctx.beginPath(); lineTo(x0, yTop, true); lineTo(x1, yTop); lineTo(x1, yb); lineTo(x0, yb); ctx.closePath(); };
+    /* top surface: the Fluid wave + wall meniscus fade out as the bottle
+       tilts (0 → 20°); a decaying sine ripple rides on top */
+    const span = lv.span || { xl: x0, xr: x1 };
+    const upright = Math.max(0, Math.min(1, 1 - Math.abs(rot) / 0.35));
+    const sample = upright > 0 && Fluid.active() ? Fluid.sample(i) : null;
+    const N = Math.max(6, (sample ? sample.h.length : Fluid.N) - 1);
+    const bodyW = corkBodyW(sh);
+    const amp = body ? Math.min(body.ripple, Math.max(0, (yb - 2 - topY) * 0.3)) : 0;
+    const kx = 2 * Math.PI / (bodyW * 0.85), ph = body ? body.rphase : 0;
+    const SX = this._sx || (this._sx = new Float64Array(40)), SY = this._sy || (this._sy = new Float64Array(40));
+    const wallsOnly = span.xr - span.xl < 3;   /* nearly empty: no meniscus to speak of */
+    for (let k = 0; k <= N; k++) {
+      const x = span.xl + (span.xr - span.xl) * k / N;
+      const edge = Math.abs(2 * k / N - 1);
+      let y = topY;
+      if (!wallsOnly) y += upright * ((sample ? sample.h[k] : 0) - Fluid.MENISCUS * Math.pow(edge, 2.2));
+      if (amp > 0.02) y += amp * Math.sin(kx * x - ph);
+      SX[k] = x; SY[k] = y;
+    }
+    const allHidden = (hiddenDepth[i] || 0) >= total - 1e-6;
+    ctx.fillStyle = this.liquidGradient(ctx, allHidden ? 'hidden' : cols[m - 1], shapeName);
+    ctx.beginPath();
+    lineTo(x0, yb, true); lineTo(x0, SY[0]);
+    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k]);
+    lineTo(x1, SY[N]); lineTo(x1, yb); ctx.closePath(); ctx.fill();
+    for (let j = allHidden ? -1 : m - 2; j >= 0; j--) {
+      ctx.fillStyle = this.liquidGradient(ctx, cols[j], shapeName);
+      quad(lv.tops[j]); ctx.fill();
+    }
+    /* mystery bottles: the bottom `hid` layers read as one hidden fill */
+    const hid = Math.min(hiddenDepth[i] || 0, total);
+    let unitLv = null;
+    if (hid > 0.001) {
+      if (!allHidden) {
+        const units = this._units || (this._units = []);
+        units.length = 0;
+        for (let u = 1; u <= Math.ceil(hid - 1e-6); u++) units.push(Math.min(u, hid));
+        unitLv = PourPhysics.levelsFor(shapeName, alpha, units);
+        ctx.fillStyle = this.liquidGradient(ctx, 'hidden', shapeName);
+        quad(unitLv.tops[unitLv.tops.length - 1]); ctx.fill();
+      } else {
+        const units = [];
+        for (let u = 1; u <= Math.ceil(hid - 1e-6); u++) units.push(Math.min(u, hid));
+        unitLv = PourPhysics.levelsFor(shapeName, alpha, units);
+      }
+    }
+    /* vertical depth shading over the whole column (bottle-frame gradient) */
+    ctx.fillStyle = this.depthOverlay(ctx, shapeName);
+    ctx.beginPath(); lineTo(x0, yb, true); lineTo(x0, SY[0]);
+    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k]);
+    lineTo(x1, SY[N]); lineTo(x1, yb); ctx.closePath(); ctx.fill();
+    /* meniscus highlight along the live surface */
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k] + 0.4, k === 0);
+    ctx.stroke();
+    /* glyphs (element emblems, '?' marks): upright in the surface frame, on
+       the bottle axis, fading out between 0° and 20° of tilt */
+    const gA = upright;
+    if (gA > 0.01) {
+      const ta = Math.tan(alpha);
+      ctx.save();
+      ctx.translate(50, 0); ctx.rotate(-alpha);
+      ctx.globalAlpha = gA;
+      /* hidden units keep their secrets: emblems cover only the visible part */
+      const hidTop = unitLv ? unitLv.tops[unitLv.tops.length - 1] : Infinity;
+      for (let j = 0; j < m; j++) {
+        const elem = ELEMENT_MAP[cols[j]];
+        if (!elem || cums[j] <= hid + 1e-6) continue;
+        const yT = lv.tops[j], yB = Math.min(j ? lv.tops[j - 1] : yb - 2, hidTop);
+        const my = (yT + yB) / 2;
+        ctx.save(); ctx.translate(-my * ta - 50, 0);
+        this.drawElement(ctx, elem, yT, yB - yT);
+        ctx.restore();
+      }
+      if (unitLv) {
+        ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        for (let u = 0; u < unitLv.tops.length; u++) {
+          const yT = unitLv.tops[u], yB = u ? unitLv.tops[u - 1] : yb - 2;
+          if (yB - yT < 6) continue;
+          const my = (yT + yB) / 2;
+          ctx.fillText('?', -my * ta, my);
+        }
+      }
+      ctx.restore();
+    }
   }
 };
 
@@ -2065,6 +2062,7 @@ const renderer = {
     layoutStage();
     this.chooseBackend();
     if (this.backend.syncLayout) this.backend.syncLayout();
+    cacheBodyPx();
     return this;
   },
   renderBottle(i, opts = {}, wob = null) {
@@ -2321,6 +2319,7 @@ function setupBoard(gen) {
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
   capsThisLevel = 0;
   corks = state.map(() => null);
+  jobs = []; poses = []; bodies = state.map((b, i) => makeBody(i));
   AudioFX.stopAllPours();
   Fluid.resetAll();
   clearHintGlow();
@@ -2537,6 +2536,7 @@ function setSelected(i) {
   sel = i;
   if (i !== null) {
     slots[i].el.classList.add('selected'); Fluid.slosh(i, 2.2); Fluid.start();   /* lift sloshes the liquid */
+    kickSlosh(i, (Math.random() < 0.5 ? -1 : 1) * 0.9);
     if (!isCanvasMode()) sweepSheen(slots[i].svg);
   }
   updateBottleLabels();
@@ -2591,7 +2591,7 @@ function onTap(i) {
   if (sel === i) { setSelected(null); AudioFX.swap(); return; }
   if (window.canPour(state, sel, i)) {
     const s = sel; setSelected(null);
-    doPour(s, i);
+    doPour(s, i, true);
   } else if (canBeSource(i)) {
     setSelected(i); AudioFX.swap();
   } else {
@@ -2619,146 +2619,400 @@ function fillSnapshot(snap, color, q) {
   return out;
 }
 
-/* ---------------- pour choreography (rAF-driven) ---------------- */
-function liveBottleMouthPoint(i, angleDeg) {
-  const stageRect = $('#stage').getBoundingClientRect();
-  const rect = slots[i].slot.getBoundingClientRect();
-  const sh = slots[i].sh;
-  const bw = rect.width, bh = rect.height;
-  const inline = slots[i].btn.style.transform || '';
-  const tMatch = inline.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
-  const tx = tMatch ? parseFloat(tMatch[1]) : 0;
-  const ty = tMatch ? parseFloat(tMatch[2]) : 0;
-  const a = (angleDeg || 0) * Math.PI / 180;
-  const cx = bw / 2, cy = bh / 2;
-  const mx = bw / 2, my = sh.mouthFrac * bh;
-  const rx = Math.cos(a) * (mx - cx) - Math.sin(a) * (my - cy);
-  const ry = Math.sin(a) * (mx - cx) + Math.cos(a) * (my - cy);
-  return { x: rect.left + tx + cx + rx - stageRect.left, y: rect.top + ty + cy + ry - stageRect.top };
+/* ---------------- pour choreography (Aliquot port) ----------------
+   A pour is a job stepped by the Motion loop:
+     travel T1 — lip eases to the pour point on an arc while the bottle tips
+                 to thStart (the angle where its liquid just meets the lip)
+     pour   T2 — the source drains; its angle follows thetaFor(volume) and
+                 the pose is solved every frame so the lip stays on target
+     return T3 — back home, touchdown thud + slosh
+   The receiver fills at the same rate, delayed by the stream's fall time tf.
+   Poses are written as CSS translate+rotate on the bottle button (rotation
+   about the element centre), which the canvas renderer reads back. */
+const clampN = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerpN = (a, b, t) => a + (b - a) * t;
+const ease3 = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeSine = t => -(Math.cos(Math.PI * t) - 1) / 2;
+const smoothstep = t => { t = clampN(t, 0, 1); return t * t * (3 - 2 * t); };
+const flowN = t => (t > 0 && t < 1) ? 4 * t * (1 - t) : 0;
+
+let jobs = [];            /* running pour jobs */
+let bodies = [];          /* per-bottle slosh oscillator + surface ripple */
+let bodyPx = [];          /* per-bottle glass body width in px (cached at layout) */
+let poses = [];           /* per-bottle live pose { tx, ty, a } while a job moves it */
+function makeBody(i) {
+  return { phi: 0, phiV: 0, px: null, pvx: 0, pang: 0, pangV: 0, ripple: 0, rphase: i * 1.7, pouring: false };
 }
-async function doPour(si, di) {
+function flyingSource(i) { for (const j of jobs) if (j.si === i && !j.srcDone) return true; return false; }
+function jobsInto(i) {
+  let out = null;
+  for (const j of jobs) if (j.di === i && !j.dstDone && j.streamFx) (out || (out = [])).push(j);
+  return out;
+}
+function cacheBodyPx() {
+  bodyPx = slots.map(sl => sl ? sl.slot.getBoundingClientRect().width * corkBodyW(sl.sh) / 100 : 40);
+}
+
+/* per-shape pour geometry in viewBox units: lip corner, rim, outline samples
+   for clearance, and the receiver's outer top profile (topAt[|dx|]) */
+const pourGeoCache = {};
+function pourGeo(sn) {
+  if (pourGeoCache[sn]) return pourGeoCache[sn];
+  const sh = SHAPES[sn], g = PourPhysics.SHAPE_GEO[sn];
+  const lipHalf = shapeWidthAt(sn, g.top) / 2;
+  const rimHalf = sh.lip.w / 2, rimTop = sh.lip.y, rimBot = sh.lip.y + sh.lip.h;
+  const bodyW = corkBodyW(sh);
+  const outer = y => shapeWidthAt(sn, y) / 2 + 3;
+  const S = [];
+  for (let y = rimBot; y <= g.bottom; y += 6) S.push(50 - outer(y), y, 50 + outer(y), y);
+  S.push(sh.lip.x, rimTop, sh.lip.x + sh.lip.w, rimTop, sh.lip.x, rimBot, sh.lip.x + sh.lip.w, rimBot);
+  for (let x = -bodyW / 2 + 6; x <= bodyW / 2 - 6; x += 6) S.push(50 + x, g.bottom + 3);
+  const topAt = new Float64Array(61);
+  for (let d = 0; d <= 60; d++) {
+    if (d <= rimHalf) { topAt[d] = rimTop; continue; }
+    let y = Infinity;
+    for (let yy = rimBot; yy <= g.bottom; yy += 1) if (outer(yy) >= d) { y = yy; break; }
+    topAt[d] = y;
+  }
+  return (pourGeoCache[sn] = { top: g.top, lipHalf, rimHalf, rimTop, rimBot, bodyW, samples: S, topAt });
+}
+function receiverTop(gD, du) {
+  if (du <= 0) return gD.topAt[0];
+  if (du >= 60) return Infinity;
+  return gD.topAt[Math.ceil(du)];
+}
+
+/* where the lip must sit at tilt th: over the receiver mouth, high enough
+   that no part of the tilted source dips into the receiver's outline */
+function pourPoint(job, th, s) {
+  s = s == null ? job.s : s;
+  const { hd, kD, kS, gD, gS, w } = job;
+  const dCx = hd.x + hd.w / 2, rimTop = hd.y + gD.rimTop * kD;
+  const px = dCx - s * w * 0.14;
+  let py = rimTop - w * 0.2;
+  const a = s * th, c = Math.cos(a), sn = Math.sin(a);
+  const lipU = 50 + s * gS.lipHalf, lipV = gS.top;
+  const margin = w * 0.08 / kD, gap = w * 0.1, S = gS.samples;
+  for (let i = 0; i < S.length; i += 2) {
+    const dx = (S[i] - lipU) * kS, dy = (S[i + 1] - lipV) * kS;
+    const wx = px + dx * c - dy * sn;
+    const topU = receiverTop(gD, Math.abs(wx - dCx) / kD - margin);
+    if (!isFinite(topU)) continue;
+    const req = hd.y + topU * kD - gap - (dx * sn + dy * c);
+    if (req < py) py = req;
+  }
+  return { x: px, y: Math.max(py, 6 - job.stageTop) };
+}
+/* how far the tilted source would stick out of the stage when pouring to side s */
+function overflowFor(job, s) {
+  const { kS, gS } = job;
+  const lipU = 50 + s * gS.lipHalf, lipV = gS.top, S = gS.samples;
+  let worst = 0;
+  for (const th of [job.thStart, job.thEnd]) {
+    const P = pourPoint(job, th, s), a = s * th, c = Math.cos(a), sn = Math.sin(a);
+    for (let i = 0; i < S.length; i += 2) {
+      const wx = P.x + (S[i] - lipU) * kS * c - (S[i + 1] - lipV) * kS * sn;
+      if (wx < 2) worst = Math.max(worst, 2 - wx);
+      if (wx > job.stageW - 2) worst = Math.max(worst, wx - job.stageW + 2);
+    }
+  }
+  return worst;
+}
+
+/* bottle-local viewBox point (u, v) → stage px under pose (tx, ty, a) */
+function worldPt(h, k, tx, ty, a, u, v) {
+  const cx = h.w / 2, cy = h.h / 2, lx = u * k - cx, ly = v * k - cy, c = Math.cos(a), s = Math.sin(a);
+  return { x: h.x + tx + cx + lx * c - ly * s, y: h.y + ty + cy + lx * s + ly * c };
+}
+function setPose(i, tx, ty, a) {
+  poses[i] = { tx, ty, a };
+  slots[i].btn.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) rotate(' + (a * 180 / Math.PI).toFixed(3) + 'deg)';
+}
+function clearPose(i) {
+  poses[i] = null;
+  if (!slots[i]) return;
+  slots[i].btn.style.transform = '';
+  slots[i].btn.style.transition = '';
+  slots[i].el.classList.remove('pouring');
+}
+/* pose that puts the source's lip corner at (lipX, lipY) with angle a */
+function poseSourceLip(job, lipX, lipY, a) {
+  const h = job.hs, k = job.kS, cx = h.w / 2, cy = h.h / 2;
+  const lx = job.lipU * k - cx, ly = job.lipV * k - cy, c = Math.cos(a), s = Math.sin(a);
+  const tx = lipX - (h.x + cx + lx * c - ly * s), ty = lipY - (h.y + cy + lx * s + ly * c);
+  setPose(job.si, tx, ty, a);
+  job.pose = { tx, ty, a };
+}
+
+function createJob(si, di, n, color, srcBefore, dstBefore, srcAfter, dstAfter, lifted) {
+  const stage = $('#stage'), sr = stage.getBoundingClientRect();
+  const home = i => { const r = slots[i].slot.getBoundingClientRect(); return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height }; };
+  const hs = home(si), hd = home(di);
+  const snS = shapesByBottle[si], snD = shapesByBottle[di];
+  const gS = pourGeo(snS), gD = pourGeo(snD);
+  const kS = hs.w / 100, kD = hd.w / 100;
+  const job = {
+    si, di, n, color, snS, snD, gS, gD, hs, hd, kS, kD,
+    w: gS.bodyW * kS, wD: gD.bodyW * kD, stageW: sr.width, stageTop: sr.top,
+    V0: srcBefore.length, dstUnits0: dstBefore.length,
+    snapS: mergeRuns(srcBefore), snapD: mergeRuns(dstBefore),
+    afterS: mergeRuns(srcAfter), afterD: mergeRuns(dstAfter),
+    dstComplete: window.isBottleComplete(dstAfter),
+    t: 0, srcDone: false, dstDone: false, retStarted: false, voice: null,
+    streamOrigin: null, streamFx: null, svgStream: false, drops: [], flowD: 0, done: false
+  };
+  job.maxW = 0.55 * Math.min(gS.lipHalf * 2 * kS, gD.lipHalf * 2 * kD);
+  job.thStart = PourPhysics.thetaFor(snS, job.V0);
+  job.thEnd = PourPhysics.thetaFor(snS, job.V0 - n);
+  const sCx = hs.x + hs.w / 2, dCx = hd.x + hd.w / 2;
+  let s = dCx >= sCx ? 1 : -1;
+  if (Math.abs(dCx - sCx) < 1) s = dCx < sr.width / 2 ? -1 : 1;
+  const o1 = overflowFor(job, s), o2 = overflowFor(job, -s);
+  if (o1 > 0 && o2 < o1) s = -s;
+  job.s = s;
+  job.lipU = 50 + s * gS.lipHalf; job.lipV = gS.top;
+  job.lip0 = { x: hs.x + job.lipU * kS, y: hs.y + job.lipV * kS + (lifted ? -0.22 * hs.w : 0) };
+  const P = pourPoint(job, job.thStart);
+  const dist = Math.hypot(P.x - job.lip0.x, P.y - job.lip0.y);
+  job.T1 = clampN(0.2 + dist / (job.w * 22), 0.24, 0.42);
+  job.T2 = 0.16 + 0.1 * n;
+  const fall = (hd.y + PourPhysics.uprightLevel(snD, job.dstUnits0) * kD) - P.y;
+  job.tf = clampN(0.045 + fall / (job.w * 18), 0.07, 0.15);
+  job.T3 = 0.28;
+  job.arc = Math.min(job.w * 0.55, dist * 0.12);
+  job.lipEnd = null; job.angEnd = s * job.thEnd;
+  return job;
+}
+
+function streamTarget(job) {
+  let units = 0;
+  for (const seg of visual[job.di]) units += seg.u;
+  return {
+    x: job.hd.x + job.hd.w / 2 + job.s * job.w * 0.03,
+    y: job.hd.y + PourPhysics.uprightLevel(job.snD, units) * job.kD + 1
+  };
+}
+
+function stepJob(job, dt) {
+  job.t += dt;
+  const { si, di, s, w } = job, t = job.t;
+  const bS = bodies[si], bD = bodies[di];
+  const svg = !isCanvasMode();
+  if (!job.srcDone) {
+    let lipX = 0, lipY = 0, ang = 0;
+    if (t < job.T1) {
+      const u = t / job.T1, e = ease3(u);
+      ang = s * job.thStart * easeSine(u);
+      const P = pourPoint(job, job.thStart);
+      lipX = lerpN(job.lip0.x, P.x, e);
+      lipY = lerpN(job.lip0.y, P.y, e) - Math.sin(Math.PI * e) * job.arc;
+      if (bS) bS.pouring = false;
+    } else if (t < job.T1 + job.T2) {
+      const E = smoothstep((t - job.T1) / job.T2);
+      visual[si] = drainSnapshot(job.snapS, job.n * E);
+      ang = s * PourPhysics.thetaFor(job.snS, job.V0 - job.n * E);
+      const P = pourPoint(job, Math.abs(ang));
+      lipX = P.x; lipY = P.y;
+      if (bS) bS.pouring = true;
+      job.lipEnd = { x: lipX, y: lipY }; job.angEnd = ang;
+    } else {
+      if (!job.retStarted) {
+        job.retStarted = true;
+        if (bS) bS.pouring = false;
+        visual[si] = job.afterS.map(x => ({ c: x.c, u: x.u }));
+        if (!job.lipEnd) { const P = pourPoint(job, job.thEnd); job.lipEnd = { x: P.x, y: P.y }; }
+      }
+      const u = (t - job.T1 - job.T2) / job.T3;
+      if (u >= 1) {
+        job.srcDone = true;
+        clearPose(si);
+        if (bS) { bS.ripple = Math.max(bS.ripple, job.gS.bodyW * 0.06); bS.phiV -= s * 0.55; }
+        AudioFX.land();
+        if (svg) renderer.renderBottle(si, 0);
+      } else {
+        const e = ease3(u);
+        ang = job.angEnd * (1 - easeSine(u));
+        const lift = sel === si ? -0.22 * job.hs.w : 0;
+        const hx = job.hs.x + job.lipU * job.kS, hy = job.hs.y + job.lipV * job.kS + lift;
+        lipX = lerpN(job.lipEnd.x, hx, e);
+        lipY = lerpN(job.lipEnd.y, hy, e) - Math.sin(Math.PI * e) * w * 0.25;
+      }
+    }
+    if (!job.srcDone) {
+      poseSourceLip(job, lipX, lipY, ang);
+      /* the stream leaves from the outer rim; it freezes once the source
+         stops pouring so the tail falls straight */
+      if (t >= job.T1 && !job.retStarted) {
+        job.streamOrigin = worldPt(job.hs, job.kS, job.pose.tx, job.pose.ty, ang, 50 + s * job.gS.rimHalf, job.gS.rimBot);
+      }
+      if (svg) renderer.renderBottle(si, ang * 180 / Math.PI);
+    }
+  }
+  if (!job.dstDone) {
+    const td = t - job.T1 - job.tf;
+    if (td > 0) {
+      const u = td / job.T2, E = smoothstep(u), fl = flowN(u);
+      visual[di] = fillSnapshot(job.snapD, job.color, job.n * E);
+      job.flowD = fl;
+      if (bD) bD.ripple = Math.max(bD.ripple, job.gD.bodyW * (0.018 + 0.05 * fl));
+      if (!job.voice && u < 0.9) { job.voice = AudioFX.startPour(); buzz(12); }
+      if (job.voice) AudioFX.updatePour(job.voice, fl, (job.dstUnits0 + job.n * E) / 4, dt);
+      if (fl > 0.3 && CanvasRenderer.effectsEnabled() && Math.random() < dt * 26 * fl) spawnDrop(job);
+      if (u >= 1) {
+        job.dstDone = true;
+        visual[di] = job.afterD.map(x => ({ c: x.c, u: x.u }));
+        AudioFX.stopPour(job.voice); job.voice = null;
+        job.flowD = 0;
+        if (bD) bD.phiV += s * 0.5;
+        if (job.svgStream) { renderer.endPour({ si, di }); job.svgStream = false; }
+        if (explicitPrettyEffects()) spawnSparkles(slots[di].el, 4, 0.25);
+        if (job.dstComplete) completeReceiver(di);
+      }
+    }
+    if (job.streamOrigin && !job.dstDone) {
+      const tg = streamTarget(job);
+      job.streamFx = { sx: job.streamOrigin.x, sy: job.streamOrigin.y, tx: tg.x, ty: tg.y };
+      if (svg) {
+        const info = {
+          si, di, color: job.color, c0: COLORS[job.color][0], c1: COLORS[job.color][1],
+          sx: job.streamOrigin.x, sy: job.streamOrigin.y, tx: tg.x, ty: tg.y,
+          cpx: job.streamOrigin.x + s * w * 0.16, cpy: job.streamOrigin.y + (tg.y - job.streamOrigin.y) * 0.08,
+          side: s, receiverW: job.hd.w
+        };
+        if (!job.svgStream) { renderer.beginPour(info); job.svgStream = true; }
+        else renderer.updatePour(info);
+      }
+    }
+    if (svg) renderer.renderBottle(di, 0);
+  }
+  for (const d of job.drops) { d.life -= dt; d.vy += w * 38 * dt; d.x += d.vx * dt; d.y += d.vy * dt; }
+  if (job.drops.length) job.drops = job.drops.filter(d => d.life > 0);
+  if (job.srcDone && job.dstDone && !job.drops.length) job.done = true;
+}
+function spawnDrop(job) {
+  const tg = streamTarget(job), w = job.w;
+  job.drops.push({
+    x: tg.x + (Math.random() - 0.5) * w * 0.1, y: tg.y - 1,
+    vx: (Math.random() - 0.5) * w * 2.2, vy: -w * (2 + Math.random() * 2.2),
+    life: 0.22 + Math.random() * 0.1, r: Math.max(1, w * 0.035)
+  });
+}
+/* the receiver just finished filling and is complete: reveal, then cork it */
+function completeReceiver(di, quiet) {
+  if (hiddenDepth[di]) { hiddenDepth[di] = 0; if (!quiet) AudioFX.reveal(); }
+  if (quiet) { seatCorkNow(di); slots[di].el.classList.add('capped'); }
+  else startCork(di);
+  if (!isCanvasMode()) renderer.renderBottle(di, 0);
+}
+/* jump a job to its end state (reduced motion, fast-forward) */
+function finishJob(job, quiet) {
+  AudioFX.stopPour(job.voice); job.voice = null;
+  if (job.svgStream) { renderer.endPour({ si: job.si, di: job.di }); job.svgStream = false; }
+  if (!job.srcDone) {
+    job.srcDone = true;
+    visual[job.si] = job.afterS.map(x => ({ c: x.c, u: x.u }));
+    clearPose(job.si);
+    if (!quiet) AudioFX.land();
+  }
+  if (!job.dstDone) {
+    job.dstDone = true;
+    visual[job.di] = job.afterD.map(x => ({ c: x.c, u: x.u }));
+    if (job.dstComplete) completeReceiver(job.di, quiet);
+  }
+  job.streamFx = null; job.drops = [];
+  job.done = true;
+  if (bodies[job.si]) bodies[job.si].pouring = false;
+}
+
+/* one Motion task steps every pour job and every bottle's slosh */
+let boardTicking = false;
+function ensureBoardTick() {
+  if (boardTicking || !state.length) return;
+  boardTicking = true;
+  Motion.add(dt => {
+    const alive = boardTick(dt);
+    if (!alive) boardTicking = false;
+    return alive;
+  });
+}
+const SLOSH_K = 230;
+function boardTick(dt) {
+  let active = jobs.length > 0;
+  for (const job of jobs) {
+    try { stepJob(job, dt); }
+    catch (e) { console.error(e); finishJob(job, true); }   /* never leave a pour hanging */
+  }
+  if (jobs.some(j => j.done)) {
+    const done = jobs.filter(j => j.done);
+    jobs = jobs.filter(j => !j.done);
+    for (const j of done) if (j.resolve) j.resolve();
+  }
+  /* slosh: the surface is a damped oscillator driven by the bottle's
+     horizontal and angular acceleration */
+  for (let i = 0; i < bodies.length; i++) {
+    const b = bodies[i];
+    if (!b) continue;
+    const p = poses[i], x = p ? p.tx : 0, ang = p ? p.a : 0;
+    if (b.px === null) { b.px = x; b.pvx = 0; b.pang = ang; b.pangV = 0; }
+    const vx = (x - b.px) / dt, ax = (vx - b.pvx) / dt; b.px = x; b.pvx = vx;
+    const av = (ang - b.pang) / dt, aa = (av - b.pangV) / dt; b.pang = ang; b.pangV = av;
+    const axn = clampN(ax / (bodyPx[i] || 40), -70, 70), aan = clampN(aa, -120, 120);
+    const damp = b.pouring ? 16 : 6.2, sub = 3, h = dt / sub;
+    for (let k = 0; k < sub; k++) {
+      const acc = -SLOSH_K * b.phi - damp * b.phiV + 0.42 * axn - 0.08 * aan;
+      b.phiV += acc * h; b.phi += b.phiV * h;
+    }
+    b.phi = clampN(b.phi, -0.2, 0.2);
+    b.ripple *= Math.exp(-dt * 2.8); b.rphase += dt * 15;
+    if (Math.abs(b.phi) > 0.0015 || Math.abs(b.phiV) > 0.015 || b.ripple > 0.05) active = true;
+    else if (!p) { b.phi = 0; b.phiV = 0; if (b.ripple <= 0.05) b.ripple = 0; }
+  }
+  if (!isCanvasMode() && active) {
+    /* SVG keeps its tilt heuristic; slosh only moves canvas pixels */
+  }
+  return active;
+}
+function kickSlosh(i, v) {
+  if (RM || !bodies[i]) return;
+  bodies[i].phiV += v;
+  ensureBoardTick();
+}
+
+function runJob(job) {
+  return new Promise(res => {
+    job.resolve = res;
+    visual[job.si] = job.snapS.map(x => ({ c: x.c, u: x.u }));
+    visual[job.di] = job.snapD.map(x => ({ c: x.c, u: x.u }));
+    slots[job.si].el.classList.add('pouring');
+    slots[job.si].btn.style.transition = 'none';
+    if (RM) { finishJob(job, false); renderer.renderAll(); res(); return; }
+    jobs.push(job);
+    ensureBoardTick();
+  });
+}
+
+async function doPour(si, di, lifted) {
   locked.add(si); locked.add(di); activePours++;
   undoHistory.push(snapshotBoard());
   if (undoHistory.length > 300) undoHistory.shift();
   const n = window.pourAmount(state, si, di);
   const color = state[si][state[si].length - 1];
+  const srcBefore = state[si].slice(), dstBefore = state[di].slice();
   window.applyPour(state, si, di);
   moves++;
   if (!save.seenHint) { save.seenHint = true; persist(); $('#hint').style.opacity = 0; }
   updateHUD();
 
-  const stage = $('#stage');
-  const stageRect = stage.getBoundingClientRect();
-  const sRect = slots[si].slot.getBoundingClientRect();
-  const dRect = slots[di].slot.getBoundingClientRect();
-  const shS = slots[si].sh, shD = slots[di].sh;
-  const bwS = sRect.width, bhS = sRect.height;
-  const bwD = dRect.width, bhD = dRect.height;
-  const side = dRect.left + bwD / 2 >= sRect.left + bwS / 2 ? 1 : -1;
-  const A = side * (78 + Math.random() * 6);
-  const aR = A * Math.PI / 180;
-
-  const Pm = { x: dRect.left + bwD / 2, y: dRect.top + shD.mouthFrac * bhD };
-  const Q = { x: Pm.x, y: Pm.y - bwS * 0.6 };
-  const C = { x: bwS / 2, y: bhS / 2 };
-  const M = { x: bwS / 2, y: shS.mouthFrac * bhS };
-  const rx = Math.cos(aR) * (M.x - C.x) - Math.sin(aR) * (M.y - C.y);
-  const ry = Math.sin(aR) * (M.x - C.x) + Math.cos(aR) * (M.y - C.y);
-  const dxF = Q.x - (sRect.left + C.x + rx);
-  const dyF = Q.y - (sRect.top + C.y + ry);
-  const lift = bwS * 0.3;
-
-  const slotEl = slots[si].el, bottleEl = slots[si].btn;
-  slotEl.classList.add('pouring');
-  bottleEl.style.transition = 'none';
-
-  /* phase 1: lift, travel, tilt — carry-acceleration slosh */
-  if (!RM) {
-    setTimeout(() => { Fluid.slosh(si, 1.4, -side); Fluid.start(); }, 60);  /* initial surge backward */
-    setTimeout(() => { Fluid.slosh(si, 0.9, side); Fluid.start(); }, 210);   /* arc-peak settles forward */
-  }
   AudioFX.swap();
-  /* Aliquot timings: travel scales with distance, pour with layer count */
-  const travelMs = Math.min(420, Math.max(240, 200 + Math.hypot(dxF, dyF) / (bwS * 22) * 1000));
-  await tween(RM ? 0 : travelMs, p => {
-    const ang = A * p;
-    const arc = -Math.sin(p * Math.PI) * lift;
-    bottleEl.style.transform = 'translate(' + (dxF * p).toFixed(1) + 'px,' + (dyF * p + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
-    renderer.renderBottle(si, ang);
-  });
-  bottleEl.style.transform = 'translate(' + dxF.toFixed(1) + 'px,' + dyF.toFixed(1) + 'px) rotate(' + A.toFixed(2) + 'deg)';
-  renderer.renderBottle(si, A);
-
-  /* phase 2: arc stream + drain */
-  const dur = RM ? 40 : 160 + 100 * n;
-  const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
-  /* volume-true surface height — the linear sh.unit estimate left the landing
-     ripple floating above (or sunk below) the real liquid surface */
-  const surfVb = shD.volToY ? shD.volToY(dstUnits0 / 4) : shD.B - dstUnits0 * shD.unit;
-  const surfaceY = dRect.top + (surfVb / shD.vbH) * bhD;
-  const c0 = COLORS[color][0], c1 = COLORS[color][1];
-
-  /* Gravity arc metadata for the active renderer. */
-  const mouth0 = liveBottleMouthPoint(si, A);
-  let sx = mouth0.x, sy = mouth0.y;
-  const tx = Pm.x - stageRect.left, ty = surfaceY - stageRect.top;
-  let cpx = sx + (tx - sx) * 0.35 + side * 8;
-  let cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
-  renderer.beginPour({ si, di, color, c0, c1, sx, sy, tx, ty, cpx, cpy, side, receiverW: bwD, progress: 0, started: performance.now() });
-  buzz(12);
-  let voice = null, lastP = 0, lastT = performance.now();
-
-  const snapS = visual[si].map(s => ({ c: s.c, u: s.u }));
-  const snapD = visual[di].map(s => ({ c: s.c, u: s.u }));
-  await tween(dur, p => {
-    visual[si] = drainSnapshot(snapS, n * p);
-    visual[di] = fillSnapshot(snapD, color, n * p);
-    const mouth = liveBottleMouthPoint(si, A);
-    sx = mouth.x; sy = mouth.y;
-    cpx = sx + (tx - sx) * 0.35 + side * 8;
-    cpy = Math.min(sy, ty) - Math.abs(tx - sx) * 0.12 - 6;
-    renderer.updatePour({ si, progress: p, sx, sy, tx, ty, cpx, cpy });
-    /* pour voice starts when the stream reaches the receiver (canvas stream
-       reach = first 15% of the pour); flow = normalised drain rate */
-    const now = performance.now(), dt = Math.max(0.001, (now - lastT) / 1000);
-    if (!voice && p > 0.12 && p < 0.9) voice = AudioFX.startPour();
-    if (voice) {
-      const flow = Math.min(1, ((p - lastP) / dt) * (dur / 1000) * 0.5);
-      AudioFX.updatePour(voice, flow, (dstUnits0 + n * p) / 4, dt);
-    }
-    lastP = p; lastT = now;
-    renderer.renderBottle(si, A);
-    renderer.renderBottle(di, 0);
-  });
-  AudioFX.stopPour(voice);
-  renderer.endPour({ si, di });
-  if (explicitPrettyEffects()) spawnSparkles(slots[di].el, 4, 0.25);
-  const completed = window.isBottleComplete(state[di]);
-  if (completed) {
-    /* a complete bottle holds no secrets — reveal any hidden bands as the lid drops */
-    if (hiddenDepth[di]) { hiddenDepth[di] = 0; renderer.renderBottle(di, 0); AudioFX.reveal(); }
-    startCork(di);
-  }
-
-  /* phase 3: return */
-  await tween(RM ? 0 : 280, p => {
-    const q = 1 - p;
-    const ang = A * q;
-    const arc = -Math.sin(p * Math.PI) * lift * 0.5;
-    bottleEl.style.transform = 'translate(' + (dxF * q).toFixed(1) + 'px,' + (dyF * q + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
-    renderer.renderBottle(si, ang);
-  });
-  bottleEl.style.transform = '';
-  bottleEl.style.transition = '';
-  slotEl.classList.remove('pouring');
-  AudioFX.land();
+  const job = createJob(si, di, n, color, srcBefore, dstBefore, state[si].slice(), state[di].slice(), lifted);
+  await runJob(job);
 
   visual[si] = mergeRuns(state[si]);
   visual[di] = mergeRuns(state[di]);
   revealMystery(si);
   renderer.renderBottle(si, 0); renderer.renderBottle(di, 0);
 
-  if (completed) {
+  if (job.dstComplete) {
     orbUpdate(true);
     if (frozen.size) thawAll();
   }
@@ -3600,8 +3854,11 @@ function closeModal(modalEl) {
 
 function init() {
   for (const k in SHAPES) {
+    /* liquid spans the interior bottom up to the capacity line (physics module) */
+    const geo = PourPhysics.SHAPE_GEO[k];
+    SHAPES[k].B = geo.bottom; SHAPES[k].T = geo.cap;
     SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
-    SHAPES[k].volToY = buildVolMap(k, SHAPES[k]);
+    SHAPES[k].volToY = frac => PourPhysics.uprightLevel(k, frac * 4);
   }
   Fluid.enabled = save.fluid !== false;
   applyRenderQuality();
@@ -3723,7 +3980,8 @@ window.__vessel = {
   get veiled() { return veiled; },
   get frozen() { return frozen; },
   get orbFrac() { return orbFrac; },
-  get corks() { return corks; }
+  get corks() { return corks; },
+  get jobs() { return jobs; }
 };
 
 window.__vesselRenderer = renderer;
