@@ -5,6 +5,7 @@
    ============================================================ */
 'use strict';
 import { PourPhysics } from './pour-physics.js';
+import { startablePours } from './pour-queue.js';
 (function () {
 
 /* ---------------- palette ----------------
@@ -965,11 +966,12 @@ let usedHint = false, usedAuto = false, autoPlaying = false;
 let undosUsed = 0, perfectStreak = 0;
 let pendingLayout = false;
 let state = [], visual = [], par = 0, undosAllowed = Infinity, undosLeft = Infinity;
-let moves = 0, undoHistory = [], sel = null, activePours = 0;
+let moves = 0, undoHistory = [], sel = null;
 let shapesByBottle = [], hiddenDepth = [], veiled = [];
 let frozen = new Set();
 let needCaps = 0;
 let capsThisLevel = 0;   /* completions this level — drives the cork pop's rising pitch */
+/* bottles claimed by a running or queued pour (refreshBusy keeps it current) */
 const locked = new Set();
 let ELEMENT_MAP = {};
 let slots = [];
@@ -1870,7 +1872,7 @@ const CanvasRenderer = {
     const tMatch = inline.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
     const rMatch = inline.match(/rotate\((-?[\d.]+)deg\)/);
     const tx = tMatch ? parseFloat(tMatch[1]) : 0;
-    const selectedLift = !tMatch && slot.el.classList.contains('selected') ? -r.w * 0.22 : 0;
+    const selectedLift = !tMatch && slot.el.classList.contains('selected') && !locked.has(i) ? -r.w * 0.22 : 0;
     const ty = (tMatch ? parseFloat(tMatch[2]) : 0) + selectedLift;
     const rot = rMatch ? parseFloat(rMatch[1]) * Math.PI / 180 : 0;
     ctx.save();
@@ -2092,8 +2094,8 @@ const renderer = {
   }
 };
 
-function revealMystery(i) {
-  const maxHid = Math.max(0, state[i].length - 1);
+function revealMystery(i, len) {
+  const maxHid = Math.max(0, (len == null ? state[i].length : len) - 1);
   if ((hiddenDepth[i] || 0) > maxHid) {
     hiddenDepth[i] = maxHid;
     if (slots[i] && explicitPrettyEffects()) spawnSparkles(slots[i].el, 5, 0.4);
@@ -2114,13 +2116,23 @@ function syncCaps() {
   if (isCanvasMode()) renderer.renderAll();
 }
 
+/* Undo snapshot of the logical board. Specials resolve when a pour's job
+   completes, so fold in the effects of pours that are still animating or
+   queued — otherwise undo could re-hide a layer or re-freeze a bottle. */
 function snapshotBoard() {
+  const hd = hiddenDepth.slice();
+  let fr = [...frozen];
+  const pending = jobs.map(j => j.entry).filter(Boolean).concat(queue);
+  for (const e of pending) {
+    hd[e.si] = Math.min(hd[e.si] || 0, Math.max(0, e.srcAfter.length - 1));
+    if (window.isBottleComplete(e.dstAfter)) { hd[e.di] = 0; fr = []; }
+  }
   return {
     state: window.cloneState(state),
     moves,
-    hiddenDepth: hiddenDepth.slice(),
+    hiddenDepth: hd,
     veiled: veiled.slice(),
-    frozen: [...frozen]
+    frozen: fr
   };
 }
 
@@ -2305,7 +2317,7 @@ function handleGameKey(e) {
   else if (k.toLowerCase() === 'u') { e.preventDefault(); undo(); }
   else if (k.toLowerCase() === 'r') {
     e.preventDefault();
-    if (activePours === 0 && !autoPlaying && confirm('Restart this level?')) restartCurrent();
+    if (!autoPlaying && confirm('Restart this level?')) { flushAll(); restartCurrent(); }
   } else if (k.toLowerCase() === 'h') { e.preventDefault(); showHint(); }
 }
 
@@ -2315,7 +2327,8 @@ function setupBoard(gen) {
   par = gen.par;
   undosAllowed = gen.undos; undosLeft = gen.undos;
   visual = state.map(mergeRuns);
-  moves = 0; undoHistory = []; sel = null; locked.clear(); activePours = 0;
+  discardPours();
+  moves = 0; undoHistory = []; sel = null; locked.clear();
   usedHint = false; usedAuto = false; autoPlaying = false; undosUsed = 0;
   capsThisLevel = 0;
   corks = state.map(() => null);
@@ -2428,7 +2441,7 @@ function startRushTimer(sec) {
   rushTimeLeft = sec;
   clearInterval(rushTicker);
   rushTicker = setInterval(() => {
-    if (document.hidden || activePours > 0 && rushTimeLeft <= 1) return;
+    if (document.hidden || pendingCount() > 0 && rushTimeLeft <= 1) return;
     rushTimeLeft--;
     if (rushTimeLeft === 10) AudioFX.ice();
     updateHUD();
@@ -2520,11 +2533,11 @@ function updateHUD() {
   }
   subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
-  undoBtn.disabled = undoHistory.length === 0 || activePours > 0 || undosLeft <= 0 || autoPlaying;
+  undoBtn.disabled = undoHistory.length === 0 || undosLeft <= 0 || autoPlaying;
   const badge = $('#undo-badge');
   if (undosAllowed !== Infinity) { badge.classList.remove('hidden'); badge.textContent = undosLeft; }
   else badge.classList.add('hidden');
-  $('#btn-restart').disabled = activePours > 0 || autoPlaying;
+  $('#btn-restart').disabled = autoPlaying;
   $('#btn-hint').disabled = autoPlaying || solutionPending;
   updateBottleLabels();
 }
@@ -2580,7 +2593,6 @@ function thawAll() {
 function onTap(i) {
   AudioFX.ensure();
   if (autoPlaying) return;
-  if (locked.has(i)) return;
   if (frozen.has(i)) { shake(i); AudioFX.ice(); buzz([8, 20, 8]); return; }
   if (veiled[i]) { unveil(i); return; }
   if (sel === null) {
@@ -2591,7 +2603,7 @@ function onTap(i) {
   if (sel === i) { setSelected(null); AudioFX.swap(); return; }
   if (window.canPour(state, sel, i)) {
     const s = sel; setSelected(null);
-    doPour(s, i, true);
+    commitMove(s, i, !locked.has(s));
   } else if (canBeSource(i)) {
     setSelected(i); AudioFX.swap();
   } else {
@@ -2942,11 +2954,7 @@ function boardTick(dt) {
     try { stepJob(job, dt); }
     catch (e) { console.error(e); finishJob(job, true); }   /* never leave a pour hanging */
   }
-  if (jobs.some(j => j.done)) {
-    const done = jobs.filter(j => j.done);
-    jobs = jobs.filter(j => !j.done);
-    for (const j of done) if (j.resolve) j.resolve();
-  }
+  if (afterJobsStep()) active = true;
   /* slosh: the surface is a damped oscillator driven by the bottle's
      horizontal and angular acceleration */
   for (let i = 0; i < bodies.length; i++) {
@@ -2967,10 +2975,7 @@ function boardTick(dt) {
     if (Math.abs(b.phi) > 0.0015 || Math.abs(b.phiV) > 0.015 || b.ripple > 0.05) active = true;
     else if (!p) { b.phi = 0; b.phiV = 0; if (b.ripple <= 0.05) b.ripple = 0; }
   }
-  if (!isCanvasMode() && active) {
-    /* SVG keeps its tilt heuristic; slosh only moves canvas pixels */
-  }
-  return active;
+  return active || pendingCount() > 0;
 }
 function kickSlosh(i, v) {
   if (RM || !bodies[i]) return;
@@ -2978,21 +2983,24 @@ function kickSlosh(i, v) {
   ensureBoardTick();
 }
 
-function runJob(job) {
-  return new Promise(res => {
-    job.resolve = res;
-    visual[job.si] = job.snapS.map(x => ({ c: x.c, u: x.u }));
-    visual[job.di] = job.snapD.map(x => ({ c: x.c, u: x.u }));
-    slots[job.si].el.classList.add('pouring');
-    slots[job.si].btn.style.transition = 'none';
-    if (RM) { finishJob(job, false); renderer.renderAll(); res(); return; }
-    jobs.push(job);
-    ensureBoardTick();
-  });
+/* ---------------- instant-commit input queue ----------------
+   A legal tap commits the move to `state` at once (undo snapshot, moves,
+   HUD) and queues its animation. A queued pour starts when neither of its
+   bottles is claimed by a running pour or an earlier queued one, so each
+   bottle's pours play in order and independent pours run side by side.
+   Specials (mystery reveal, orb, thaw) fire when the pour's job completes. */
+let queue = [];
+let settleArmed = false;   /* a pour finished since the board last settled */
+let boardGen = 0;          /* bumps on every board setup; stale timers check it */
+function pendingCount() { return jobs.length + queue.length; }
+function refreshBusy() {
+  locked.clear();
+  for (const j of jobs) { locked.add(j.si); locked.add(j.di); }
+  for (const q of queue) { locked.add(q.si); locked.add(q.di); }
+  slots.forEach((sl, i) => { if (sl) sl.el.classList.toggle('busy', locked.has(i)); });
 }
 
-async function doPour(si, di, lifted) {
-  locked.add(si); locked.add(di); activePours++;
+function commitMove(si, di, lifted) {
   undoHistory.push(snapshotBoard());
   if (undoHistory.length > 300) undoHistory.shift();
   const n = window.pourAmount(state, si, di);
@@ -3001,35 +3009,146 @@ async function doPour(si, di, lifted) {
   window.applyPour(state, si, di);
   moves++;
   if (!save.seenHint) { save.seenHint = true; persist(); $('#hint').style.opacity = 0; }
-  updateHUD();
-
+  const entry = {
+    si, di, n, color, srcBefore, dstBefore, srcAfter: state[si].slice(), dstAfter: state[di].slice(),
+    lifted: !!lifted, at: performance.now()
+  };
+  entry.done = new Promise(r => { entry.resolve = r; });
+  queue.push(entry);
   AudioFX.swap();
-  const job = createJob(si, di, n, color, srcBefore, dstBefore, state[si].slice(), state[di].slice(), lifted);
-  await runJob(job);
+  pumpQueue();
+  refreshBusy();
+  updateHUD();
+  ensureBoardTick();   /* also runs the settle check when reduced motion finished the pour already */
+  return entry.done;
+}
 
-  visual[si] = mergeRuns(state[si]);
-  visual[di] = mergeRuns(state[di]);
-  revealMystery(si);
-  renderer.renderBottle(si, 0); renderer.renderBottle(di, 0);
+function pumpQueue() {
+  let progressed = true;
+  while (progressed && queue.length) {
+    progressed = false;
+    const start = new Set(startablePours(jobs, queue));
+    const ready = queue.filter((q, k) => start.has(k));
+    queue = queue.filter((q, k) => !start.has(k));
+    /* reduced motion finishes pours synchronously, which can free later ones */
+    for (const q of ready) if (startEntry(q)) progressed = true;
+  }
+}
 
+/* start a queued pour; returns true when it finished synchronously (reduced motion) */
+function startEntry(q) {
+  /* the source only starts lifted if it was still up from its selection */
+  const lifted = q.lifted && performance.now() - q.at < 40;
+  const job = createJob(q.si, q.di, q.n, q.color, q.srcBefore, q.dstBefore, q.srcAfter, q.dstAfter, lifted);
+  job.entry = q;
+  visual[job.si] = job.snapS.map(x => ({ c: x.c, u: x.u }));
+  visual[job.di] = job.snapD.map(x => ({ c: x.c, u: x.u }));
+  slots[job.si].el.classList.add('pouring');
+  slots[job.si].btn.style.transition = 'none';
+  if (RM) {
+    finishJob(job, false);
+    postJob(job, false);
+    renderer.renderAll();
+    return true;
+  }
+  jobs.push(job);
+  ensureBoardTick();
+  return false;
+}
+
+/* bookkeeping when a pour's animation is over (or fast-forwarded) */
+function postJob(job, quiet) {
+  if (job.posted) return;
+  job.posted = true;
+  const { si, di } = job;
+  revealMystery(si, job.entry ? job.entry.srcAfter.length : state[si].length);
   if (job.dstComplete) {
-    orbUpdate(true);
+    orbUpdate(!quiet);
     if (frozen.size) thawAll();
   }
+  if (!quiet) { sloshBottle(di, Math.min(2, job.n)); sloshBottle(si, 0.5); }
+  if (!isCanvasMode()) { renderer.renderBottle(si, 0); renderer.renderBottle(di, 0); }
+  settleArmed = true;
+  if (job.entry) job.entry.resolve();
+}
 
-  locked.delete(si); locked.delete(di); activePours--;
-  sloshBottle(di, Math.min(2, n));
-  sloshBottle(si, 0.5);
-  updateHUD();
-  updateBottleLabels();
-  if (pendingLayout && activePours === 0) { pendingLayout = false; renderer.syncLayout(); }
-  if (activePours === 0 && window.isSolved(state)) {
-    await wait(RM ? 100 : 550);
-    onWin();
-  } else if (activePours === 0 && !autoPlaying && !anyUsefulMove()) {
+/* called by boardTick every frame: finished jobs → post, start what can start */
+function afterJobsStep() {
+  if (jobs.some(j => j.done)) {
+    const done = jobs.filter(j => j.done);
+    jobs = jobs.filter(j => !j.done);
+    refreshBusy();
+    for (const j of done) postJob(j, false);
+    pumpQueue();
+    refreshBusy();
+    updateHUD();
+    updateBottleLabels();
+  }
+  if (settleArmed && !pendingCount() && corks.every(c => !c || c.t >= 1)) {
+    settleArmed = false;
+    onBoardSettled();
+  }
+  return settleArmed;
+}
+
+/* nothing running, nothing queued, every cork seated: layout, win, stuck */
+function onBoardSettled() {
+  visual = state.map(mergeRuns);
+  renderer.renderAll();
+  if (pendingLayout) { pendingLayout = false; renderer.syncLayout(); }
+  if (window.isSolved(state)) {
+    const gen = boardGen;
+    wait(RM ? 100 : 350).then(() => {
+      if (gen !== boardGen || pendingCount() || !window.isSolved(state) || $('#overlay').classList.contains('show')) return;
+      onWin();
+    });
+  } else if (!autoPlaying && !anyUsefulMove()) {
     toastMsg('No moves left — undo ↩ or restart ⟳', 3200);
     AudioFX.invalid();
   }
+}
+
+/* fast-forward every running and queued pour to its end state (visual =
+   state), stop pour voices, seat corks — before undo, restart, hint, menu */
+function flushAll() {
+  const had = pendingCount() > 0 || corks.some(c => c && c.t < 1);
+  for (const job of jobs) { finishJob(job, true); postJob(job, true); }
+  jobs = [];
+  for (const q of queue) {
+    revealMystery(q.si, q.srcAfter.length);
+    if (window.isBottleComplete(q.dstAfter)) {
+      hiddenDepth[q.di] = 0;
+      if (frozen.size) thawAll();
+    }
+    q.resolve();
+  }
+  queue = [];
+  corks.forEach((c, i) => { if (c && c.t < 1) { c.t = 1; c.popped = true; paintCorkSvg(i); if (slots[i]) slots[i].el.classList.add('capped'); } });
+  AudioFX.stopAllPours();
+  settleArmed = false;
+  if (!had) return;
+  slots.forEach((sl, i) => clearPose(i));
+  visual = state.map(mergeRuns);
+  refreshBusy();
+  syncCaps();
+  orbUpdate(false);
+  renderer.renderAll();
+  updateHUD();
+}
+
+/* board teardown (new level): drop everything without effects */
+function discardPours() {
+  for (const job of jobs) AudioFX.stopPour(job.voice);
+  for (const job of jobs) if (job.entry) job.entry.resolve();
+  for (const q of queue) q.resolve();
+  jobs = []; queue = []; settleArmed = false; boardGen++;
+  AudioFX.stopAllPours();
+  if (SvgRenderer.pourFxMap) for (const si of [...SvgRenderer.pourFxMap.keys()]) SvgRenderer.endPour({ si });
+}
+
+/* autoplay (and QA) path: commit a pour and resolve when its animation ends */
+function doPour(si, di) {
+  return commitMove(si, di, false);
 }
 
 /* a position is stuck when no pour between usable bottles is legal */
@@ -3084,7 +3203,8 @@ function spawnSparkles(host, count, spread) {
 
 /* ---------------- undo / restart ---------------- */
 function undo() {
-  if (!undoHistory.length || activePours > 0 || undosLeft <= 0 || autoPlaying) return;
+  if (!undoHistory.length || undosLeft <= 0 || autoPlaying) return;
+  flushAll();
   const snap = undoHistory.pop();
   undosUsed++;
   if (undosAllowed !== Infinity) undosLeft--;
@@ -3218,7 +3338,9 @@ function clearHintGlow() {
 
 let hintGlowT = null;
 async function showHint() {
-  if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
+  if (autoPlaying || solutionPending || !state.length) return;
+  flushAll();
+  if (window.isSolved(state)) return;
   if (mode === 'rush') { toastMsg('Hints are paused in Rush for timer fairness ⚡', 2200); AudioFX.invalid(); return; }
   AudioFX.ensure();
   toastMsg('Thinking…', 1200);
@@ -3253,7 +3375,9 @@ async function showHint() {
    "skip the puzzle" feature. Keep it that way unless a deliberate design
    decision adds an auto-solve control to the HUD. */
 async function autoSolve() {
-  if (activePours > 0 || autoPlaying || solutionPending || !state.length || window.isSolved(state)) return;
+  if (autoPlaying || solutionPending || !state.length) return;
+  flushAll();
+  if (window.isSolved(state)) return;
   if (mode === 'rush') { toastMsg('Auto-solve is paused in Rush for timer fairness ⚡', 2400); AudioFX.invalid(); return; }
   AudioFX.ensure();
   toastMsg('Thinking…', 1200);
@@ -3777,6 +3901,7 @@ function buildHeroBottles() {
 
 /* ---------------- wiring ---------------- */
 function goMenu() {
+  flushAll();
   stopRushTimer();
   AudioFX.stopAllPours();
   autoPlaying = false;
@@ -3880,7 +4005,7 @@ function init() {
   });
   $('#btn-back').addEventListener('click', () => { AudioFX.swap(); exitToMenu(); });
   $('#btn-undo').addEventListener('click', undo);
-  $('#btn-restart').addEventListener('click', () => { if (activePours === 0 && !autoPlaying) { AudioFX.swap(); restartCurrent(); } });
+  $('#btn-restart').addEventListener('click', () => { if (!autoPlaying) { AudioFX.swap(); flushAll(); restartCurrent(); } });
   $('#btn-sound').addEventListener('click', () => {
     save.sound = !save.sound; persist(); AudioFX.syncMute();
     $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
@@ -3952,7 +4077,7 @@ function init() {
   });
 
   let rT;
-  const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (activePours === 0) renderer.syncLayout(); else pendingLayout = true; }, 120); };
+  const relayout = () => { clearTimeout(rT); rT = setTimeout(() => { if (pendingCount() === 0) renderer.syncLayout(); else pendingLayout = true; }, 120); };
   window.addEventListener('resize', relayout);
   window.addEventListener('orientationchange', relayout);
   $('#game').addEventListener('keydown', handleGameKey);
@@ -3973,7 +4098,8 @@ window.__vessel = {
   get autoPlaying() { return autoPlaying; },
   get state() { return state; },
   get moves() { return moves; },
-  get activePours() { return activePours; },
+  get activePours() { return pendingCount(); },
+  get queued() { return queue.length; },
   get slots() { return slots; },
   get hiddenDepth() { return hiddenDepth; },
   get shapes() { return shapesByBottle; },

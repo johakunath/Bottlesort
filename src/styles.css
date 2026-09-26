@@ -487,6 +487,8 @@ body[data-skin="neon"] .slot.selected .glow { opacity: 0.95; }
 /* backstop: nothing inside an invisible proxy SVG may animate */
 .slot.canvas-dom-proxy .bottle svg * { animation: none !important; }
 .slot.selected .bottle { transform: translateY(calc(var(--bw) * -0.22)); }
+/* a bottle picked while its pour is still animating lifts once the pour ends */
+.slot.selected.busy .bottle { transform: none; }
 .slot.selected .shadow { opacity: 0.55; transform: scale(0.88); }
 .slot.pouring { z-index: 60; }
 .slot.pouring .shadow { opacity: 0; }
