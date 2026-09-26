@@ -253,7 +253,7 @@ const RENDER_PROFILES = {
     settleMs: 70, streamGlow: false
   },
   normal: {
-    id: 'normal', label: 'Normal', targetFps: 30, dprCap: 1.5,
+    id: 'normal', label: 'Normal', targetFps: 60, dprCap: 1.5,
     fluidSamples: 11, particleScale: 0.75, glowStrength: 0.75,
     idleAnimations: true, celebrationIntensity: 0.75,
     settleMs: 120, streamGlow: true
@@ -2483,7 +2483,9 @@ async function doPour(si, di) {
     setTimeout(() => { Fluid.slosh(si, 0.9, side); Fluid.start(); }, 210);   /* arc-peak settles forward */
   }
   AudioFX.swap();
-  await tween(RM ? 0 : 360, p => {
+  /* Aliquot timings: travel scales with distance, pour with layer count */
+  const travelMs = Math.min(420, Math.max(240, 200 + Math.hypot(dxF, dyF) / (bwS * 22) * 1000));
+  await tween(RM ? 0 : travelMs, p => {
     const ang = A * p;
     const arc = -Math.sin(p * Math.PI) * lift;
     bottleEl.style.transform = 'translate(' + (dxF * p).toFixed(1) + 'px,' + (dyF * p + arc).toFixed(1) + 'px) rotate(' + ang.toFixed(2) + 'deg)';
@@ -2493,7 +2495,7 @@ async function doPour(si, di) {
   renderer.renderBottle(si, A);
 
   /* phase 2: arc stream + drain */
-  const dur = RM ? 40 : 260 + activeRenderProfile().settleMs + 150 * n;
+  const dur = RM ? 40 : 160 + 100 * n;
   const dstUnits0 = visual[di].reduce((s, x) => s + x.u, 0);
   /* volume-true surface height — the linear sh.unit estimate left the landing
      ripple floating above (or sunk below) the real liquid surface */
@@ -2528,7 +2530,7 @@ async function doPour(si, di) {
   if (explicitPrettyEffects()) spawnSparkles(slots[di].el, 4, 0.25);
 
   /* phase 3: return */
-  await tween(RM ? 0 : activeRenderProfile().settleMs + 160, p => {
+  await tween(RM ? 0 : 280, p => {
     const q = 1 - p;
     const ang = A * q;
     const arc = -Math.sin(p * Math.PI) * lift * 0.5;
