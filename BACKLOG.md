@@ -2,18 +2,20 @@
 
 ## Open — next up
 
-- **Finish animation:** current spiral reads weak on a tablet. Options mocked up
-  (sparkle fountain / light sweep / colour splash); pick one, then implement in
-  `src/completion-effect.js`. Cork stays the only persistent completion marker.
-- **Small-bottle volumes differ by shape:** at equal on-screen width one segment
-  holds round 2749, tall 2309, classic 2098, flask 1595 area units (flask = 58 %
-  of round). Towers match round exactly. In "Mixed glassware" a pour from a
-  flask into a round bottle therefore still looks like it shrinks. Fix options:
-  per-shape render scale, or retune the shapes' cap lines.
 - **Par is the greedy solver's first line, not the optimum,** so stars are
-  generous on big boards. Early tower levels are long by design (every tower
-  unit must be poured: Relaxed L1 = 2 colours, par 18).
+  generous on big boards.
 - **Real-device re-test** of frame timing on phone and tablet (see below).
+
+## Shipped — colour-splash finish, equal volumes, small early towers
+
+- Finish effect (option D): droplets in the liquid's colour jump out of the
+  mouth and rain down beside the bottle, plus a ripple on the surface
+  (`src/completion-effect.js`). Replaces the spiral and the cork sparkles.
+- Every shape shows the same liquid area per segment: small shapes are drawn
+  at a volume scale (`volumeScale()` in pour-physics: flask 1.31×, classic
+  1.15×, tall 1.09× round); towers are built to match round.
+- Towers hold 8 segments in early levels (Relaxed 1–6, Normal 1–4, Expert 1–2,
+  Rush stages 1–3) and 12 afterwards. Relaxed L1 par 18 → 9. Rules version 4.
 
 ## Shipped — permanent 12-segment towers + reliability pass
 

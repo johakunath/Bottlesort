@@ -15,8 +15,9 @@ export function readSession(storage) {
   const s = storage.read(SESSION_KEY), g = s?.gen;
   if (!s || s.version !== 2 || !g || !board(g.state, g.capacities) || !integer(g.par, 1, 1000000)
       || !integer(g.colors, 2, 9) || !integer(g.sets, 1, 3) || !integer(g.empties, 0, 4)
-      || g.state.length !== Logic.boardSize(g.colors, g.sets, g.empties)
-      || g.state.flat().length !== Logic.totalUnits(g.colors, g.sets)
+      || !Logic.TOWER_CAPS.includes(g.towerCap)
+      || g.state.length !== Logic.boardSize(g.colors, g.sets, g.empties, g.towerCap)
+      || g.state.flat().length !== Logic.totalUnits(g.colors, g.sets, g.towerCap)
       || !['classic', 'daily', 'rush', 'challenge'].includes(s.mode)
       || !['normal', 'relaxed', 'expert'].includes(s.difficulty)
       || !integer(s.level, 1, s.mode === 'rush' ? 100000 : 30)
@@ -25,10 +26,10 @@ export function readSession(storage) {
       || !integer(s.rushStage, 1, 100000) || !integer(s.rushTimeLeft, 0, 1000000)
       || !validSnapshot(s.snapshot, g.state, g.capacities)
       || !Array.isArray(s.history) || s.history.length > 300 || !s.history.every(h => validSnapshot(h, g.state, g.capacities))) return null;
-  const expected = Logic.towerCapacities(g.state.length);
+  const expected = Logic.towerCapacities(g.state.length, g.towerCap);
   if (g.rulesVersion !== Logic.RULES_VERSION || !Array.isArray(g.capacities) || g.capacities.length !== g.state.length || !g.capacities.every((c,i) => c === expected[i])) return null;
   const units = g.state.flat();
-  if (units.some(c => c >= g.colors) || Array.from({length:g.colors}, (_, c) => units.filter(x => x === c).length).some((n,c) => n !== Logic.unitsOfColor(c, g.sets))) return null;
+  if (units.some(c => c >= g.colors) || Array.from({length:g.colors}, (_, c) => units.filter(x => x === c).length).some((n,c) => n !== Logic.unitsOfColor(c, g.sets, g.towerCap))) return null;
   const sp = g.specials;
   if (!sp || !['mystery', 'veiled', 'frozen'].every(k => Array.isArray(sp[k]) && sp[k].every(i => integer(i, 0, g.state.length - 1)))) return null;
   if (s.mode === 'daily' && !/^\d{4}-\d{2}-\d{2}$/.test(s.dailyDate)) return null;
@@ -40,7 +41,9 @@ export function readSession(storage) {
   s.history.forEach(h => { h.state = Logic.withCapacities(h.state, g.capacities); });
   return s;
 }
-export function validChallenge(c) { return c && integer(c.seed, 0, 4294967295) && integer(c.colors, 3, 9) && integer(c.sets, 1, 3) && integer(c.empties, 0, 4) && Logic.boardSize(c.colors, c.sets, c.empties) <= MAX_BOTTLES; }
+export function validChallenge(c) { return c && integer(c.seed, 0, 4294967295) && integer(c.colors, 3, 9) && integer(c.sets, 1, 3) && integer(c.empties, 0, 4)
+  && (c.towerCap === undefined || Logic.TOWER_CAPS.includes(c.towerCap))
+  && Logic.boardSize(c.colors, c.sets, c.empties, c.towerCap) <= MAX_BOTTLES; }
 /* Links carry the rules version: an older link would produce a different board
    than the sender played, so it is reported as outdated instead of opened. */
 export function isOutdatedChallenge(hash) {
@@ -56,6 +59,7 @@ export function parseChallenge(hash) {
   }
   if (!['seed','colors','sets','empties'].every(k => /^\d+$/.test(q.get(k) || ''))) return null;
   const c = Object.fromEntries(['seed','colors','sets','empties'].map(k => [k, Number(q.get(k))]));
+  if (q.has('towerCap')) { if (!/^\d+$/.test(q.get('towerCap'))) return null; c.towerCap = Number(q.get('towerCap')); }
   return validChallenge(c) ? c : null;
 }
 export function challengeURL(base, challenge) {

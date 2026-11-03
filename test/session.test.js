@@ -42,7 +42,7 @@ test('a tower containing more than four segments survives JSON save and restore'
   }
   st.write(SESSION_KEY,data);
   const restored=readSession(st), tower=restored.snapshot.state.find(b=>b.length>4);
-  assert.ok(tower);assert.equal(L.capacityOf(tower),12);
+  assert.ok(tower);assert.equal(L.capacityOf(tower),data.gen.towerCap);
   assert.equal(L.isBottleComplete(tower),false);
   assert.deepEqual(restored.snapshot.state,data.snapshot.state);
 });

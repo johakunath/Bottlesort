@@ -121,7 +121,8 @@ for (const diff of ['relaxed', 'normal', 'expert']) {
   test('every ' + diff + ' level (1-' + MAX_LEVEL + ') is verified solvable with the stated par', () => {
     for (let level = 1; level <= MAX_LEVEL; level++) {
       const gen = generateLevel(level, diff);
-      assert.equal(gen.state.length, VesselLogic.boardSize(gen.colors, gen.sets, gen.empties), diff + ' L' + level + ' bottle count');
+      assert.equal(gen.state.length, VesselLogic.boardSize(gen.colors, gen.sets, gen.empties, gen.towerCap), diff + ' L' + level + ' bottle count');
+      assert.equal(gen.towerCap, VesselLogic.towerCapFor(level, diff));
       assert.equal(gen.state.filter((b, i) => !b.length && gen.capacities[i] === 4).length, gen.empties, diff + ' L' + level + ' small empties come on top of the towers');
       assert.equal(gen.state.some(isBottleComplete), false, diff + ' L' + level + ' should not start pre-solved');
 

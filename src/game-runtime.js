@@ -5,7 +5,7 @@ import { createCanvasRenderer } from './canvas-renderer.js';
 import { SESSION_KEY, readSession, parseChallenge, isOutdatedChallenge, challengeURL } from './session.js';
 import { WorkerClient } from './worker-client.js';
 import { storage, SAVE_KEY, createDefaultSave, normalizeSave, preferredRenderer } from './storage.js';
-import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES } from './bottle-design.js';
+import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, towerShapeName, isTowerShape } from './bottle-design.js';
 import { createAudio } from './audio.js';
 import { VesselLogic as Logic } from './game-logic.js';
 /* ============================================================
@@ -657,10 +657,11 @@ function corkContact(i) {
   c.popped = true;
   const slot = slots[i];
   slot.el.classList.add('capped');
-  setCompletion(slot, true, !RM);
+  setCompletion(slot, true, !RM, {
+    color: COLORS[state[i][0]], mouth: slot.sh.mouthFrac, surface: slot.sh.T / slot.sh.vbH
+  });
   AudioFX.cap(c.note); buzz([15, 40, 25]);
   Fluid.drop(i, -1.6); Fluid.start();
-  if (!RM) spawnSparkles(slot.el, 8, 0.55);
   if (!isCanvasMode()) sweepSheen(slot.svg);
 }
 function paintCorkSvg(i) {
@@ -1274,7 +1275,7 @@ function sharePuzzle() {
 function assignShapes(n) {
   const rng = Logic.mulberry32(Logic.diffSeed(level, difficulty) + 777);
   return Array.from({length:n}, (_, i) => {
-    if (Logic.capacityOf(state[i]) > Logic.CAP) return 'tower';
+    if (Logic.capacityOf(state[i]) > Logic.CAP) return towerShapeName(Logic.capacityOf(state[i]));
     if (save.bottleCollection !== 'mixed') return save.bottleCollection;
     return rng() < 0.22 ? 'flask' : 'round';
   });
@@ -1403,9 +1404,10 @@ function setupBoard(gen) {
     const shapeName = shapesByBottle[i];
     const sh = SHAPES[shapeName];
     const slot = document.createElement('div');
-    slot.className = 'slot s-' + shapeName + (shapeName === 'tall' ? ' tall' : '');
+    slot.className = 'slot s-' + shapeName + (shapeName === 'tall' ? ' tall' : '') + (isTowerShape(shapeName) && shapeName !== 'tower' ? ' s-tower' : '');
     slot.classList.toggle('canvas-dom-proxy', isCanvasMode());
     slot.style.setProperty('--d', (i * 45) + 'ms');
+    slot.style.setProperty('--s', PourPhysics.volumeScale(shapeName).toFixed(4));
     const glow = document.createElement('span'); glow.className = 'glow';
     const shadow = document.createElement('span'); shadow.className = 'shadow';
     const btn = document.createElement('button');
@@ -1420,9 +1422,9 @@ function setupBoard(gen) {
     ring.style.top = (sh.mouthFrac * 100).toFixed(1) + '%';
     btn.appendChild(ring);
     slot.appendChild(glow); slot.appendChild(shadow); slot.appendChild(btn);
-    if (shapeName === 'tower') {
+    if (isTowerShape(shapeName)) {
       const count = document.createElement('span'); count.className = 'capacity-label'; count.setAttribute('aria-hidden', 'true'); slot.appendChild(count);
-      const ticks = svgEl('path', { fill: 'none', stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 2, d: Array.from({length:11},(_,u) => 'M73,' + sh.volToY((u+1)/12) + ' h8').join(' ') });
+      const ticks = svgEl('path', { fill: 'none', stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 2, d: Array.from({length:sh.capacity-1},(_,u) => 'M73,' + sh.volToY((u+1)/sh.capacity) + ' h8').join(' ') });
       svg.appendChild(ticks);
     }
     if (frozen.has(i)) {
@@ -1875,7 +1877,7 @@ function createJob(si, di, n, color, srcBefore, dstBefore, srcAfter, dstAfter, l
   const gS = pourGeo(snS), gD = pourGeo(snD);
   // Screen-height bottles briefly scale down for transfer so their tilted
   // bodies remain visible on a narrow phone, then return to full height.
-  const pourScale = snS === 'tower' ? Math.min(1, sr.width * 0.46 / hs.h, sr.height * 0.5 / hs.h) : 1;
+  const pourScale = isTowerShape(snS) ? Math.min(1, sr.width * 0.46 / hs.h, sr.height * 0.5 / hs.h) : 1;
   const baseKS = hs.w / 100, kS = baseKS * pourScale, kD = hd.w / 100;
   const job = {
     si, di, n, color, snS, snD, gS, gD, hs, hd, kS, kD, baseKS, pourScale,

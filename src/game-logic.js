@@ -2,32 +2,36 @@ import { BAKED } from './levels-baked.js';
 /* ============================================================
    Vessel — pure game logic (no DOM)
    Bottles are arrays of color indices, bottom -> top, with a capacity.
-   Small bottles hold 4 segments; mandatory side towers hold 12.
+   Small bottles hold 4 segments; the two mandatory side towers hold 8 in the
+   first levels of each difficulty (and early Rush stages), 12 afterwards.
    ============================================================ */
 'use strict';
 
 const CAP = 4;
 const TOWER_CAP = 12;
+const SMALL_TOWER_CAP = 8;
+const TOWER_CAPS = [SMALL_TOWER_CAP, TOWER_CAP];
 const TOWER_COLORS = 2;                // colors 0 and 1 get extra units to fill the towers
-const RULES_VERSION = 3;
+const RULES_VERSION = 4;
 
 /* Level definitions: [colors, sets]. Each color has sets*4 units, plus
-   eight extra units for colors 0 and 1 to supply the two 12-unit towers.
+   (towerCap - 4) extra units for colors 0 and 1 to supply the two towers.
+   Levels 1..smallTowers use 8-segment towers, later levels 12.
    Board = tower, colors*sets+4 filled small bottles, `empties` empty small
    bottles, tower. Both towers start empty and come on top of `empties`.
    Capacity lives on each bottle array as `.capacity` at runtime only; anything
    serialized (sessions, worker messages) carries a separate `capacities` array
    and is rehydrated with withCapacities(). */
 const LEVEL_TABLE = {
-  relaxed: { empties: 2, undos: Infinity, mystery: 0, levels: [
+  relaxed: { empties: 2, undos: Infinity, mystery: 0, smallTowers: 6, levels: [
     [2,1],[3,1],[3,1],[4,1],[4,1],[5,1],[5,1],[6,1],[6,1],[7,1],
     [5,2],[6,2],[7,2],[8,2],[9,1],[9,2],[6,3],[7,3],[8,2],[6,3],
     [7,2],[8,2],[9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[9,2],[7,3]] },
-  normal:  { empties: 1, undos: Infinity, mystery: 0, levels: [
+  normal:  { empties: 1, undos: Infinity, mystery: 0, smallTowers: 4, levels: [
     [3,1],[4,1],[5,1],[6,1],[7,1],[5,2],[6,2],[7,2],[8,2],[6,3],
     [7,2],[8,2],[6,3],[9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[8,2],
     [9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[9,2],[8,2],[7,3],[9,2]] },
-  expert:  { empties: 1, undos: 5, mystery: 1, levels: [
+  expert:  { empties: 1, undos: 5, mystery: 1, smallTowers: 2, levels: [
     [4,1],[5,1],[6,1],[7,1],[8,1],[6,2],[7,2],[8,2],[6,3],[7,3],
     [8,2],[6,3],[9,2],[7,3],[8,2],[9,2],[7,3],[8,2],[9,2],[6,3],
     [7,3],[9,2],[8,2],[7,3],[9,2],[8,2],[7,3],[9,2],[8,2],[7,3]] }
@@ -149,7 +153,7 @@ function solve(initial, budget, frozenSet) {
       const src = s[i];
       if (!src.length) continue;
       const run = topRun(src);
-      if (run.count === TOWER_CAP || (run.count === CAP && !s.some(b => capacityOf(b) > CAP))) continue;
+      if ((capacityOf(src) > CAP && run.count === capacityOf(src)) || (run.count === CAP && !s.some(b => capacityOf(b) > CAP))) continue;
       const srcUniform = run.count === src.length;
       for (let j = 0; j < s.length; j++) {
         if (i === j) continue;
@@ -168,7 +172,7 @@ function solve(initial, budget, frozenSet) {
         if (amount === run.count) score += 3;
         // Collect abundant colors in towers; avoid reserving them for colors
         // whose entire supply cannot fill one. Such moves remain legal buffers.
-        if (capacityOf(dst) > CAP) score += totals[run.color] >= TOWER_CAP ? 20 : -20;
+        if (capacityOf(dst) > CAP) score += totals[run.color] >= capacityOf(dst) ? 20 : -20;
         if (srcUniform) score += 2;
         if (capacityOf(src) > CAP && srcUniform) score -= 35;
         if (dst.length === 0) score -= 2;
@@ -201,20 +205,25 @@ function buildState(level, difficulty, attempt) {
   const cfg = LEVEL_TABLE[difficulty] || LEVEL_TABLE.normal;
   const [colors, sets] = cfg.levels[level - 1];
   const rng = mulberry32(diffSeed(level, difficulty) + attempt * 104729);
-  const state = mixedBoard(rng, colors, sets, cfg.empties);
-  return { state, colors, sets, cfg };
+  const towerCap = towerCapFor(level, difficulty);
+  const state = mixedBoard(rng, colors, sets, cfg.empties, towerCap);
+  return { state, colors, sets, cfg, towerCap };
 }
 
-function unitsOfColor(c, sets) { return CAP * sets + (c < TOWER_COLORS ? TOWER_CAP - CAP : 0); }
-function totalUnits(colors, sets) { return colors * CAP * sets + TOWER_COLORS * (TOWER_CAP - CAP); }
+function towerCapFor(level, difficulty) {
+  const cfg = LEVEL_TABLE[difficulty] || LEVEL_TABLE.normal;
+  return level <= (cfg.smallTowers || 0) ? SMALL_TOWER_CAP : TOWER_CAP;
+}
+function unitsOfColor(c, sets, towerCap = TOWER_CAP) { return CAP * sets + (c < TOWER_COLORS ? towerCap - CAP : 0); }
+function totalUnits(colors, sets, towerCap = TOWER_CAP) { return colors * CAP * sets + TOWER_COLORS * (towerCap - CAP); }
 /* tower + filled small bottles + empty small bottles + tower */
-function boardSize(colors, sets, empties) { return 2 + totalUnits(colors, sets) / CAP + empties; }
-function towerCapacities(n) { return Array.from({ length: n }, (_, i) => i === 0 || i === n - 1 ? TOWER_CAP : CAP); }
+function boardSize(colors, sets, empties, towerCap = TOWER_CAP) { return 2 + totalUnits(colors, sets, towerCap) / CAP + empties; }
+function towerCapacities(n, towerCap = TOWER_CAP) { return Array.from({ length: n }, (_, i) => i === 0 || i === n - 1 ? towerCap : CAP); }
 
-function mixedBoard(rng, colors, sets, empties) {
+function mixedBoard(rng, colors, sets, empties, towerCap = TOWER_CAP) {
   const units = [];
   for (let c = 0; c < colors; c++) {
-    const count = unitsOfColor(c, sets);
+    const count = unitsOfColor(c, sets, towerCap);
     for (let k = 0; k < count; k++) units.push(c);
   }
   shuffleInPlace(units, rng);
@@ -222,7 +231,7 @@ function mixedBoard(rng, colors, sets, empties) {
   for (let i = 0; i < units.length; i += CAP) state.push(units.slice(i, i + CAP));
   for (let i = 0; i < empties; i++) state.push([]);
   state.push([]);
-  return withCapacities(state, towerCapacities(state.length));
+  return withCapacities(state, towerCapacities(state.length, towerCap));
 }
 
 /* Special bottles, expert only. Disjoint sets over the filled bottles.
@@ -258,7 +267,7 @@ function generateLevelUncached(level, difficulty) {
   if (baked && baked.v === RULES_VERSION) {
     const b = buildState(level, difficulty, baked.o);
     const specials = specialsFor(level, difficulty, b.colors * b.sets, b.state);
-    return { rulesVersion: RULES_VERSION, capacities: b.state.map(capacityOf), state: b.state, seedOffset: baked.o, par: baked.p, colors: b.colors, sets: b.sets,
+    return { rulesVersion: RULES_VERSION, towerCap: b.towerCap, capacities: b.state.map(capacityOf), state: b.state, seedOffset: baked.o, par: baked.p, colors: b.colors, sets: b.sets,
              empties: b.cfg.empties, undos: b.cfg.undos, specials };
   }
   for (let attempt = 0; attempt < 400; attempt++) {
@@ -267,7 +276,7 @@ function generateLevelUncached(level, difficulty) {
     const specials = specialsFor(level, difficulty, b.colors * b.sets, b.state);
     const res = solve(cloneState(b.state), 400000, new Set(specials.frozen));
     if (res.solution && res.solution.length > 2) {
-      return { rulesVersion: RULES_VERSION, capacities: b.state.map(capacityOf), state: b.state, seedOffset: attempt, par: res.solution.length, colors: b.colors, sets: b.sets,
+      return { rulesVersion: RULES_VERSION, towerCap: b.towerCap, capacities: b.state.map(capacityOf), state: b.state, seedOffset: attempt, par: res.solution.length, colors: b.colors, sets: b.sets,
                empties: b.cfg.empties, undos: b.cfg.undos, specials };
     }
   }
@@ -276,14 +285,14 @@ function generateLevelUncached(level, difficulty) {
 
 /* ---------- Custom boards (Daily / Rush) ----------
    Seeded, solver-verified boards independent of the classic tables. */
-function generateFromSeed(seedBase, colors, sets, empties, maxAttempts) {
+function generateFromSeed(seedBase, colors, sets, empties, maxAttempts, towerCap = TOWER_CAP) {
   for (let attempt = 0; attempt < (maxAttempts || 200); attempt++) {
     const rng = mulberry32((seedBase + attempt * 104729) >>> 0);
-    const state = mixedBoard(rng, colors, sets, empties);
+    const state = mixedBoard(rng, colors, sets, empties, towerCap);
     if (state.some(isBottleComplete)) continue;
     const res = solve(cloneState(state), 300000);
     if (res.solution && res.solution.length > 2) {
-      return { rulesVersion: RULES_VERSION, capacities: state.map(capacityOf), state, par: res.solution.length, colors, sets, empties,
+      return { rulesVersion: RULES_VERSION, towerCap, capacities: state.map(capacityOf), state, par: res.solution.length, colors, sets, empties,
                undos: Infinity, specials: { mystery: [], veiled: [], frozen: [] } };
     }
   }
@@ -298,7 +307,7 @@ function dailyConfig(dateStr) { // dateStr: 'YYYY-MM-DD'
   const weekend = dow === 0 || dow === 6;
   const colors = 5 + (seed % 4);                 // 5-8
   const sets = weekend ? 2 : 1;
-  return { seed: (seed * 2654435761) >>> 0, colors, sets, empties: 1 };
+  return { seed: (seed * 2654435761) >>> 0, colors, sets, empties: 1, towerCap: TOWER_CAP };
 }
 
 /* Rush ladder: shapes grow with the stage number. */
@@ -306,14 +315,14 @@ function rushConfig(stage) {
   const s = Math.max(1, stage);
   const colors = Math.min(3 + s, 9);             // 4,5,6,7,8,9,9...
   const sets = s >= 8 ? 2 : 1;
-  return { seed: (s * 48271 + 7) >>> 0, colors, sets, empties: 1 };
+  return { seed: (s * 48271 + 7) >>> 0, colors, sets, empties: 1, towerCap: s <= 3 ? SMALL_TOWER_CAP : TOWER_CAP };
 }
 
 function rushTimeFor(par) { return Math.round(18 + par * 2.4); }
 
 /* ---------- Exports ---------- */
 const VesselLogic = {
-  CAP, TOWER_CAP, TOWER_COLORS, RULES_VERSION, capacityOf, unitsOfColor, totalUnits, boardSize, towerCapacities, cloneBottle, withCapacities, LEVEL_TABLE, MAX_LEVEL, buildState, diffSeed, specialsFor,
+  CAP, TOWER_CAP, SMALL_TOWER_CAP, TOWER_CAPS, TOWER_COLORS, RULES_VERSION, capacityOf, towerCapFor, unitsOfColor, totalUnits, boardSize, towerCapacities, cloneBottle, withCapacities, LEVEL_TABLE, MAX_LEVEL, buildState, diffSeed, specialsFor,
   generateFromSeed, dailyConfig, rushConfig, rushTimeFor,
   mulberry32, cloneState, stateKey, topRun,
   isBottleComplete, isBottleClear, isSolved, completionProgress,

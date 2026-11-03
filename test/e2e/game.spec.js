@@ -7,14 +7,14 @@ test('collections, labels, resume, undo, and sharing on mobile', async ({page}) 
   const errors=[]; page.on('pageerror', e=>errors.push(e.message)); await boot(page);
   await page.click('#btn-settings'); await page.selectOption('#bottle-collection','round'); await page.click('#sw-symbols'); await page.click('#settings-close');
   await page.evaluate(()=>window.__vessel.loadLevel(1));
-  expect(await page.evaluate(()=>window.__vessel.shapes.filter(s=>s!=='tower').every(s=>s==='round'))).toBe(true);
+  expect(await page.evaluate(()=>window.__vessel.shapes.filter(s=>!s.startsWith('tower')).every(s=>s==='round'))).toBe(true);
   const initial = await page.evaluate(()=>JSON.stringify(window.__vessel.state));
   await pour(page,(await solution(page))[0]);
   const after = await page.evaluate(()=>JSON.stringify(window.__vessel.state)); expect(after).not.toBe(initial);
   await page.reload(); await page.click('#btn-resume');
   expect(await page.evaluate(()=>JSON.stringify(window.__vessel.state))).toBe(after);
   await page.click('#btn-undo'); expect(await page.evaluate(()=>JSON.stringify(window.__vessel.state))).toBe(initial);
-  await page.click('#btn-share'); await expect(page.locator('#share-link')).toHaveValue(/v=3&level=1&difficulty=normal/);
+  await page.click('#btn-share'); await expect(page.locator('#share-link')).toHaveValue(/v=4&level=1&difficulty=normal/);
   expect(errors).toEqual([]);
 });
 
@@ -80,7 +80,7 @@ test('SVG labels respect hidden expert layers; tall collection fits mobile', asy
   await page.addInitScript(()=>localStorage.setItem('vessel_save_v1',JSON.stringify({symbols:true,bottleCollection:'tall',difficulty:'expert'})));
   await page.goto('/?renderer=svg');await page.waitForFunction(()=>!!window.__vessel);
   await page.evaluate(()=>window.__vessel.loadLevel(14));
-  expect(await page.evaluate(()=>window.__vessel.shapes.filter(s=>s!=='tower').every(s=>s==='tall'))).toBe(true);
+  expect(await page.evaluate(()=>window.__vessel.shapes.filter(s=>!s.startsWith('tower')).every(s=>s==='tall'))).toBe(true);
   expect(await page.evaluate(()=>window.__vessel.slots.every(({btn})=>{const r=btn.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}))).toBe(true);
   const labels=await page.evaluate(()=>window.__vessel.slots.map((slot,i)=>({hidden:window.__vessel.hiddenDepth[i],size:window.__vessel.state[i].length,text:[...slot.svg.querySelectorAll('text')].map(t=>t.textContent)})));
   for(const item of labels) if(item.hidden===item.size&&item.size) expect(item.text.some(t=>/^[1-9]$/.test(t))).toBe(false);
@@ -130,7 +130,7 @@ test('towers stand beside the grid at the same scale across phone and tablet siz
       return {boxes,height:stage.height,screen:innerHeight,width:innerWidth,controls:{left:c.left,right:c.right,top:c.top,bottom:c.bottom}};
     });
     const towers=bounds.boxes.filter(b=>b.shape==='tower');expect(towers).toHaveLength(2);
-    const small=bounds.boxes.filter(b=>b.shape!=='tower'), bw=small[0].right-small[0].left;
+    const small=bounds.boxes.filter(b=>b.shape!=='tower'), round=small.find(b=>b.shape==='round'), bw=round.right-round.left;
     const gridLeft=Math.min(...small.map(b=>b.left)), gridRight=Math.max(...small.map(b=>b.right));
     const [left,right]=[...towers].sort((a,b)=>a.left-b.left);
     expect(gridLeft-left.right).toBeLessThan(bw*0.6); expect(right.left-gridRight).toBeLessThan(bw*0.6);
@@ -141,6 +141,7 @@ test('towers stand beside the grid at the same scale across phone and tablet siz
       expect(b.top).toBeGreaterThanOrEqual(0);expect(b.bottom).toBeLessThanOrEqual(bounds.screen);
       const c=bounds.controls;expect(b.right<=c.left || b.left>=c.right || b.bottom<=c.top || b.top>=c.bottom).toBe(true);
     }
+    for(const f of small.filter(b=>b.shape==='flask')) expect(Math.abs((f.right-f.left)/bw-1.313)).toBeLessThan(0.05);
     for(const b of bounds.boxes) {
       expect(b.left).toBeGreaterThanOrEqual(0);expect(b.right).toBeLessThanOrEqual(bounds.width);
       expect(b.top).toBeGreaterThanOrEqual(0);expect(b.bottom).toBeLessThanOrEqual(bounds.screen);
@@ -156,9 +157,9 @@ test('animated tower transfer stays aligned and restores its full height in both
     await page.waitForTimeout(800);
     const before=await page.evaluate(()=>JSON.stringify(window.__vessel.state));
     await page.evaluate(()=>{const v=window.__vessel;v.onTap(1);v.onTap(0);v.onTap(0);v.onTap(v.state.length-1);});
-    await page.waitForFunction(()=>window.__vessel.jobs.some(j=>j.snS==='tower'&&j.streamOrigin));
+    await page.waitForFunction(()=>window.__vessel.jobs.some(j=>j.snS.startsWith('tower')&&j.streamOrigin));
     const sample=await page.evaluate(()=>{
-      const j=window.__vessel.jobs.find(j=>j.snS==='tower'),p=j.pose,h=j.hs;
+      const j=window.__vessel.jobs.find(j=>j.snS.startsWith('tower')),p=j.pose,h=j.hs;
       const lx=((50+j.s*j.gS.rimHalf)*j.baseKS-h.w/2)*p.scale;
       const ly=(j.gS.rimBot*j.baseKS-h.h/2)*p.scale;
       const x=h.x+p.tx+h.w/2+lx*Math.cos(p.a)-ly*Math.sin(p.a);
@@ -173,17 +174,19 @@ test('animated tower transfer stays aligned and restores its full height in both
   }
 });
 
-test('towers are permanent across styles and display twelve-segment fill counts', async ({page}) => {
+test('towers are permanent across styles; early levels use 8-segment towers', async ({page}) => {
   await boot(page);await page.click('#btn-settings');
   await expect(page.locator('#bottle-collection option[value="tower"]')).toHaveCount(0);
   await page.selectOption('#bottle-collection','round');await page.click('#settings-close');
   await page.evaluate(()=>window.__vessel.loadLevel(1));
-  expect(await page.evaluate(()=>window.__vessel.state.filter(b=>b.capacity===12).length)).toBe(2);
-  await expect(page.locator('.capacity-label').first()).toHaveText('0 / 12');
+  expect(await page.evaluate(()=>window.__vessel.state.filter(b=>b.capacity===8).length)).toBe(2);
+  await expect(page.locator('.capacity-label').first()).toHaveText('0 / 8');
   for(const move of await solution(page)) await pour(page,move);
   await expect(page.locator('#overlay')).toHaveClass(/show/);
-  await expect(page.locator('.capacity-label').first()).toHaveText('12 / 12');
-  await expect(page.locator('.capacity-label').last()).toHaveText('12 / 12');
+  await expect(page.locator('.capacity-label').first()).toHaveText('8 / 8');
+  await expect(page.locator('.capacity-label').last()).toHaveText('8 / 8');
+  await page.evaluate(()=>window.__vessel.loadLevel(5));
+  await expect(page.locator('.capacity-label').first()).toHaveText('0 / 12');
   await expect(page.locator('.completion-badge')).toHaveCount(0);
 });
 
@@ -198,6 +201,7 @@ test('completion sparkles finish cleanly and leave only the cork as a marker', a
   for(const move of prefix.moves) await pour(page,move);
   const effect=page.locator('.slot').filter({has:page.locator('.completion-effect.celebrating')});
   await expect(effect).not.toHaveCount(0,{timeout:20000});
+  await expect(page.locator('.completion-effect.celebrating .splash-drop')).not.toHaveCount(0);
   await page.waitForFunction(()=>window.__vessel.activePours===0);
   await expect(page.locator('.completion-effect.celebrating')).toHaveCount(0,{timeout:5000});
   expect(await page.evaluate(i=>!!window.__vessel.slots[i].el.querySelector('.completion-effect'),prefix.target)).toBe(false);

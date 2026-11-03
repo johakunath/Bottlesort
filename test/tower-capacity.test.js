@@ -18,12 +18,13 @@ test('empty towers cannot satisfy a win and capacity is part of the solver key',
   const a=L.withCapacities([[0],[1]],[12,4]),b=L.withCapacities([[0],[1]],[4,12]);
   assert.notEqual(L.stateKey(a),L.stateKey(b));assert.equal(L.capacityOf(L.cloneState(a)[0]),12);
 });
-test('all classic modes have permanent towers and sufficient liquid for both', () => {
+test('early levels use 8-segment towers, later 12, with exactly enough liquid for both', () => {
   for(const d of ['relaxed','normal','expert']) for(let level=1;level<=30;level++) {
     const g=L.generateLevel(level,d);
-    assert.equal(g.capacities.filter(c=>c===12).length,2);
-    for(const color of [0,1]) assert.equal(g.state.flat().filter(c=>c===color).length,4*g.sets+8);
-    assert.equal(g.state.filter(b=>b.length===4).length, L.totalUnits(g.colors,g.sets)/4);
+    assert.equal(g.towerCap, level <= L.LEVEL_TABLE[d].smallTowers ? 8 : 12);
+    assert.equal(g.capacities.filter(c=>c===g.towerCap).length,2);
+    for(const color of [0,1]) assert.equal(g.state.flat().filter(c=>c===color).length,4*g.sets+g.towerCap-4);
+    assert.equal(g.state.filter(b=>b.length===4).length, L.totalUnits(g.colors,g.sets,g.towerCap)/4);
   }
 });
 test('tower liquid volume scales through all twelve segments, not four', () => {
@@ -42,4 +43,10 @@ test('completion meter reserves progress for filling the mandatory towers', () =
   assert.equal(L.completionProgress(s),.5);
   for(let i=4;i<=6;i++) L.applyPour(s,i,7);
   assert.equal(L.completionProgress(s),1);
+});
+test('Rush starts with small towers and daily boards use full towers', () => {
+  assert.equal(L.rushConfig(1).towerCap,8); assert.equal(L.rushConfig(4).towerCap,12);
+  assert.equal(L.dailyConfig('2026-11-03').towerCap,12);
+  const g=L.generateFromSeed(123,4,1,1,undefined,8);
+  assert.equal(g.towerCap,8); assert.deepEqual(g.capacities.filter(c=>c>4),[8,8]);
 });

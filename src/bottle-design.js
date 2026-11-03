@@ -43,22 +43,6 @@ const COLOR_NAMES = ['cherry', 'tangerine', 'lemon', 'lime', 'teal', 'blue', 'vi
    Every shape: viewBox 100 x vbH. pivot = element center (CSS rotate origin).
    B/T = liquid bottom/top, box = interior bounds for tilt pooling. */
 const SHAPES = {
-  /* Same glass as `round`, stretched so one segment holds exactly the same
-     interior area as a round-bottle segment (bottom 568, see SHAPE_GEO). Drawn at
-     the same scale as the small bottles, liquid volume reads true when poured. */
-  tower: {
-    vbH: 584, aspect: 5.84, mouthFrac: 17 / 584, surfRx: 31,
-    interior: 'M36,24 L36,34 C36,46 18,46 18,64 L18,552 Q18,568 34,568 L66,568 Q82,568 82,552 L82,64 C82,46 64,46 64,34 L64,24 Z',
-    outline: 'M33,21 L33,34 C33,43 15,44 15,64 L15,552 Q15,571 34,571 L66,571 Q85,571 85,552 L85,64 C85,44 67,43 67,34 L67,21',
-    lip: { x: 30, y: 11, w: 40, h: 13, rx: 6, mouthRx: 15, mouthRy: 4, mouthCy: 17 },
-    B: 568, T: 50, box: [18, 82, 24, 568],
-    cork: { x: 31, y: 10, w: 38, h: 17, r: 6 },
-    gloss: [
-      { x: 23, y: 66, w: 7, h: 481, rx: 3.5, o: 0.65 },
-      { x: 73, y: 72, w: 4, h: 469, rx: 2, o: 0.35 },
-      { x: 38, y: 25, w: 4, h: 11, rx: 2, o: 0.55 }
-    ]
-  },
   round: {
     vbH: 240, aspect: 2.4, mouthFrac: 17 / 240, surfRx: 31,
     interior: 'M36,24 L36,34 C36,46 18,46 18,64 L18,208 Q18,224 34,224 L66,224 Q82,224 82,208 L82,64 C82,46 64,46 64,34 L64,24 Z',
@@ -111,6 +95,30 @@ const SHAPES = {
     sparkle: [[33, 146], [70, 186], [58, 158]]
   }
 };
+/* Towers: the round glass extended downwards. The bottom B is chosen so one
+   tower segment holds exactly the interior area of one round segment
+   (B = 224 + (capacity - 4) * roundUnitArea / 64; see SHAPE_GEO in pour-physics). */
+const TOWER_BOTTOM = { 8: 396, 12: 568 };
+function towerShapeName(capacity) { return capacity === 12 ? 'tower' : 'tower' + capacity; }
+function isTowerShape(name) { return typeof name === 'string' && name.startsWith('tower'); }
+function towerShape(B) {
+  const vbH = B + 16;
+  return {
+    vbH, aspect: vbH / 100, mouthFrac: 17 / vbH, surfRx: 31,
+    interior: `M36,24 L36,34 C36,46 18,46 18,64 L18,${B - 16} Q18,${B} 34,${B} L66,${B} Q82,${B} 82,${B - 16} L82,64 C82,46 64,46 64,34 L64,24 Z`,
+    outline: `M33,21 L33,34 C33,43 15,44 15,64 L15,${B - 16} Q15,${B + 3} 34,${B + 3} L66,${B + 3} Q85,${B + 3} 85,${B - 16} L85,64 C85,44 67,43 67,34 L67,21`,
+    lip: { x: 30, y: 11, w: 40, h: 13, rx: 6, mouthRx: 15, mouthRy: 4, mouthCy: 17 },
+    B, T: 50, box: [18, 82, 24, B],
+    cork: { x: 31, y: 10, w: 38, h: 17, r: 6 },
+    gloss: [
+      { x: 23, y: 66, w: 7, h: B - 87, rx: 3.5, o: 0.65 },
+      { x: 73, y: 72, w: 4, h: B - 99, rx: 2, o: 0.35 },
+      { x: 38, y: 25, w: 4, h: 11, rx: 2, o: 0.55 }
+    ]
+  };
+}
+for (const cap of [8, 12]) SHAPES[towerShapeName(cap)] = towerShape(TOWER_BOTTOM[cap]);
+
 /* cork + parchment-label furniture per shape (Apothecary skin) */
 SHAPES.classic.cork = { x: 33, y: 13, w: 34, h: 18, r: 6 };
 SHAPES.classic.label = { x: 29, y: 150, w: 42, h: 54, rx: 4 };
@@ -118,4 +126,4 @@ SHAPES.tall.cork = { x: 34, y: 11, w: 32, h: 16, r: 5 };
 SHAPES.tall.label = { x: 34, y: 196, w: 32, h: 76, rx: 4 };
 
 
-export { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES };
+export { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, TOWER_BOTTOM, towerShapeName, isTowerShape };

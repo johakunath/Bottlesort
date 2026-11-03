@@ -13,6 +13,7 @@
    round bottle extended to bottom 568, so one tower segment equals one round segment. */
 const SHAPE_GEO = {
   tower: { top: 24, bottom: 568, cap: 50, capacity: 12 },
+  tower8: { top: 24, bottom: 396, cap: 50, capacity: 8 },
   round: { top: 24, bottom: 224, cap: 50 },
   classic: { top: 26, bottom: 224, cap: 62 },
   tall: { top: 24, bottom: 304, cap: 64 },
@@ -25,7 +26,7 @@ const TH_RANGE = 110 * Math.PI / 180;
 
 /* interior width (viewBox units) at height y */
 function shapeWidthAt(sn, y) {
-  if (sn === 'round' || sn === 'tower') {
+  if (sn === 'round' || sn.startsWith('tower')) {
     if (y <= 34) return 28;
     if (y < 64) {
       // Invert the shoulder's cubic Bezier to match the rendered glass.
@@ -38,7 +39,7 @@ function shapeWidthAt(sn, y) {
       const t = (lo + hi) / 2;
       return 28 + 36 * (3 * t * t - 2 * t * t * t);
     }
-    const bottom = sn === 'tower' ? 568 : 224;
+    const bottom = SHAPE_GEO[sn].bottom;
     if (y <= bottom - 16) return 64;
     const t = 1 - Math.sqrt(Math.max(0, (bottom - y) / 16));
     return 64 - 32 * t * t;
@@ -248,8 +249,21 @@ function levelsFor(sn, alpha, cums) {
   return out;
 }
 
+/* interior area of one segment, in viewBox units² */
+function unitArea(sn) {
+  const g = SHAPE_GEO[sn], poly = simplifyPolygon(interiorPolygon(sn, 2));
+  return areaBelow(poly.xs, poly.ys, poly.n, g.cap) / (g.capacity || CAP_UNITS);
+}
+/* Render scale per shape so one segment covers the same on-screen area in
+   every bottle (reference: round). Towers are built to match round exactly. */
+const scaleCache = {};
+function volumeScale(sn) {
+  if (!(sn in scaleCache)) scaleCache[sn] = SHAPE_GEO[sn] && !sn.startsWith('tower') ? Math.sqrt(unitArea('round') / unitArea(sn)) : 1;
+  return scaleCache[sn];
+}
+
 const PourPhysics = {
   SHAPE_GEO, CAP_UNITS, THETA_MAX,
-  shapeWidthAt, interiorPolygon, simplifyPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor
+  shapeWidthAt, interiorPolygon, simplifyPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor, unitArea, volumeScale
 };
-export { PourPhysics, SHAPE_GEO, shapeWidthAt, interiorPolygon, simplifyPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor };
+export { PourPhysics, SHAPE_GEO, shapeWidthAt, interiorPolygon, simplifyPolygon, areaBelow, shapeModel, capacityAt, thetaFor, uprightLevel, levelsFor, unitArea, volumeScale };

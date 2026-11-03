@@ -528,7 +528,7 @@ const CanvasRenderer = {
       ctx.restore();
     }
     ctx.drawImage(this.shellLayer(shapeName), 0, 0, 100, sh.vbH);
-    if (shapeName === 'tower') {
+    if (shapeName.startsWith('tower')) {
       ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2; ctx.beginPath();
       for (let u = 1; u < sh.capacity; u++) { const y = sh.volToY(u / sh.capacity); ctx.moveTo(73, y); ctx.lineTo(81, y); }
       ctx.stroke();
