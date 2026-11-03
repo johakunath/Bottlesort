@@ -9,9 +9,10 @@
    ============================================================ */
 
 /* Full capacity (4 small / 12 tower) fills into the shoulder, leaving only neck headspace. Shape
-   capacity comes from these lines, so upright and tilted volumes agree. */
+   capacity comes from these lines, so upright and tilted volumes agree. The tower is the
+   round bottle extended to bottom 568, so one tower segment equals one round segment. */
 const SHAPE_GEO = {
-  tower: { top: 24, bottom: 984, cap: 58, capacity: 12 },
+  tower: { top: 24, bottom: 568, cap: 50, capacity: 12 },
   round: { top: 24, bottom: 224, cap: 50 },
   classic: { top: 26, bottom: 224, cap: 62 },
   tall: { top: 24, bottom: 304, cap: 64 },
@@ -37,7 +38,7 @@ function shapeWidthAt(sn, y) {
       const t = (lo + hi) / 2;
       return 28 + 36 * (3 * t * t - 2 * t * t * t);
     }
-    const bottom = sn === 'tower' ? 984 : 224;
+    const bottom = sn === 'tower' ? 568 : 224;
     if (y <= bottom - 16) return 64;
     const t = 1 - Math.sqrt(Math.max(0, (bottom - y) / 16));
     return 64 - 32 * t * t;

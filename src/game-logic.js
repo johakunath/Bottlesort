@@ -8,22 +8,27 @@ import { BAKED } from './levels-baked.js';
 
 const CAP = 4;
 const TOWER_CAP = 12;
-const RULES_VERSION = 2;
+const TOWER_COLORS = 2;                // colors 0 and 1 get extra units to fill the towers
+const RULES_VERSION = 3;
 
 /* Level definitions: [colors, sets]. Each color has sets*4 units, plus
    eight extra units for colors 0 and 1 to supply the two 12-unit towers.
-   Initial small bottles = colors*sets+4; both towers start empty. */
+   Board = tower, colors*sets+4 filled small bottles, `empties` empty small
+   bottles, tower. Both towers start empty and come on top of `empties`.
+   Capacity lives on each bottle array as `.capacity` at runtime only; anything
+   serialized (sessions, worker messages) carries a separate `capacities` array
+   and is rehydrated with withCapacities(). */
 const LEVEL_TABLE = {
-  relaxed: { empties: 3, undos: Infinity, mystery: 0, levels: [
-    [3,1],[4,1],[4,1],[5,1],[5,1],[6,1],[6,1],[7,1],[7,1],[8,1],
+  relaxed: { empties: 2, undos: Infinity, mystery: 0, levels: [
+    [2,1],[3,1],[3,1],[4,1],[4,1],[5,1],[5,1],[6,1],[6,1],[7,1],
     [5,2],[6,2],[7,2],[8,2],[9,1],[9,2],[6,3],[7,3],[8,2],[6,3],
     [7,2],[8,2],[9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[9,2],[7,3]] },
-  normal:  { empties: 2, undos: Infinity, mystery: 0, levels: [
-    [4,1],[5,1],[6,1],[7,1],[8,1],[5,2],[6,2],[7,2],[8,2],[6,3],
+  normal:  { empties: 1, undos: Infinity, mystery: 0, levels: [
+    [3,1],[4,1],[5,1],[6,1],[7,1],[5,2],[6,2],[7,2],[8,2],[6,3],
     [7,2],[8,2],[6,3],[9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[8,2],
     [9,2],[7,3],[8,2],[9,2],[6,3],[7,3],[9,2],[8,2],[7,3],[9,2]] },
-  expert:  { empties: 2, undos: 5, mystery: 1, levels: [
-    [5,1],[6,1],[7,1],[8,1],[9,1],[6,2],[7,2],[8,2],[6,3],[7,3],
+  expert:  { empties: 1, undos: 5, mystery: 1, levels: [
+    [4,1],[5,1],[6,1],[7,1],[8,1],[6,2],[7,2],[8,2],[6,3],[7,3],
     [8,2],[6,3],[9,2],[7,3],[8,2],[9,2],[7,3],[8,2],[9,2],[6,3],
     [7,3],[9,2],[8,2],[7,3],[9,2],[8,2],[7,3],[9,2],[8,2],[7,3]] }
 };
@@ -59,7 +64,7 @@ function withCapacities(s, capacities) {
 }
 
 function stateKey(s) {
-  return s.map(b => capacityOf(b) + ':' + capacityOf(b) + ':' + b.join(',')).sort().join('|');
+  return s.map(b => capacityOf(b) + ':' + b.join(',')).sort().join('|');
 }
 
 function topRun(bottle) {
@@ -200,18 +205,24 @@ function buildState(level, difficulty, attempt) {
   return { state, colors, sets, cfg };
 }
 
+function unitsOfColor(c, sets) { return CAP * sets + (c < TOWER_COLORS ? TOWER_CAP - CAP : 0); }
+function totalUnits(colors, sets) { return colors * CAP * sets + TOWER_COLORS * (TOWER_CAP - CAP); }
+/* tower + filled small bottles + empty small bottles + tower */
+function boardSize(colors, sets, empties) { return 2 + totalUnits(colors, sets) / CAP + empties; }
+function towerCapacities(n) { return Array.from({ length: n }, (_, i) => i === 0 || i === n - 1 ? TOWER_CAP : CAP); }
+
 function mixedBoard(rng, colors, sets, empties) {
   const units = [];
   for (let c = 0; c < colors; c++) {
-    const count = CAP * sets + (c < 2 ? TOWER_CAP - CAP : 0);
+    const count = unitsOfColor(c, sets);
     for (let k = 0; k < count; k++) units.push(c);
   }
   shuffleInPlace(units, rng);
   const state = [[]];
   for (let i = 0; i < units.length; i += CAP) state.push(units.slice(i, i + CAP));
-  for (let i = 2; i < empties; i++) state.push([]);
+  for (let i = 0; i < empties; i++) state.push([]);
   state.push([]);
-  return withCapacities(state, state.map((_,i) => i === 0 || i === state.length-1 ? TOWER_CAP : CAP));
+  return withCapacities(state, towerCapacities(state.length));
 }
 
 /* Special bottles, expert only. Disjoint sets over the filled bottles.
@@ -287,7 +298,7 @@ function dailyConfig(dateStr) { // dateStr: 'YYYY-MM-DD'
   const weekend = dow === 0 || dow === 6;
   const colors = 5 + (seed % 4);                 // 5-8
   const sets = weekend ? 2 : 1;
-  return { seed: (seed * 2654435761) >>> 0, colors, sets, empties: 2 };
+  return { seed: (seed * 2654435761) >>> 0, colors, sets, empties: 1 };
 }
 
 /* Rush ladder: shapes grow with the stage number. */
@@ -295,14 +306,14 @@ function rushConfig(stage) {
   const s = Math.max(1, stage);
   const colors = Math.min(3 + s, 9);             // 4,5,6,7,8,9,9...
   const sets = s >= 8 ? 2 : 1;
-  return { seed: (s * 48271 + 7) >>> 0, colors, sets, empties: 2 };
+  return { seed: (s * 48271 + 7) >>> 0, colors, sets, empties: 1 };
 }
 
 function rushTimeFor(par) { return Math.round(18 + par * 2.4); }
 
 /* ---------- Exports ---------- */
 const VesselLogic = {
-  CAP, TOWER_CAP, RULES_VERSION, capacityOf, cloneBottle, withCapacities, LEVEL_TABLE, MAX_LEVEL, buildState, diffSeed, specialsFor,
+  CAP, TOWER_CAP, TOWER_COLORS, RULES_VERSION, capacityOf, unitsOfColor, totalUnits, boardSize, towerCapacities, cloneBottle, withCapacities, LEVEL_TABLE, MAX_LEVEL, buildState, diffSeed, specialsFor,
   generateFromSeed, dailyConfig, rushConfig, rushTimeFor,
   mulberry32, cloneState, stateKey, topRun,
   isBottleComplete, isBottleClear, isSolved, completionProgress,

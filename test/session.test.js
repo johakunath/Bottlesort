@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStorage } from '../src/storage.js';
-import { SESSION_KEY, readSession, parseChallenge, challengeURL } from '../src/session.js';
+import { SESSION_KEY, readSession, parseChallenge, challengeURL, isOutdatedChallenge } from '../src/session.js';
 import { VesselLogic as L } from '../src/game-logic.js';
 const storage = () => createStorage(() => null);
 function fixture() {
@@ -24,7 +24,14 @@ test('challenge links roundtrip reproducibly and reject invalid inputs', () => {
     const url = new URL(challengeURL('https://example.com/?renderer=svg#old',c));
     assert.equal(url.search,''); assert.deepEqual(parseChallenge(url.hash), c);
   }
-  for (const hash of ['#v=3&level=1&difficulty=normal', '#v=1&level=31&difficulty=normal', '#v=1&seed=-1&colors=5&sets=1&empties=2', '#v=1&seed=1&colors=999&sets=1&empties=2']) assert.equal(parseChallenge(hash),null);
+  const v = L.RULES_VERSION;
+  for (const hash of [`#v=${v+1}&level=1&difficulty=normal`, `#v=${v}&level=31&difficulty=normal`, `#v=${v}&seed=-1&colors=5&sets=1&empties=2`, `#v=${v}&seed=1&colors=999&sets=1&empties=2`]) assert.equal(parseChallenge(hash),null);
+});
+test('links from older rules are reported as outdated, not opened', () => {
+  for (const old of ['#v=1&level=3&difficulty=normal', `#v=${L.RULES_VERSION-1}&seed=1&colors=5&sets=1&empties=2`]) {
+    assert.equal(parseChallenge(old), null); assert.equal(isOutdatedChallenge(old), true);
+  }
+  assert.equal(isOutdatedChallenge(`#v=${L.RULES_VERSION}&level=3&difficulty=normal`), false);
 });
 test('a tower containing more than four segments survives JSON save and restore', () => {
   const st=storage(), data=fixture();

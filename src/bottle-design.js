@@ -43,16 +43,19 @@ const COLOR_NAMES = ['cherry', 'tangerine', 'lemon', 'lime', 'teal', 'blue', 'vi
    Every shape: viewBox 100 x vbH. pivot = element center (CSS rotate origin).
    B/T = liquid bottom/top, box = interior bounds for tilt pooling. */
 const SHAPES = {
+  /* Same glass as `round`, stretched so one segment holds exactly the same
+     interior area as a round-bottle segment (bottom 568, see SHAPE_GEO). Drawn at
+     the same scale as the small bottles, liquid volume reads true when poured. */
   tower: {
-    vbH: 1000, aspect: 10, mouthFrac: 17 / 1000, surfRx: 31,
-    interior: 'M36,24 L36,34 C36,46 18,46 18,64 L18,968 Q18,984 34,984 L66,984 Q82,984 82,968 L82,64 C82,46 64,46 64,34 L64,24 Z',
-    outline: 'M33,21 L33,34 C33,43 15,44 15,64 L15,968 Q15,987 34,987 L66,987 Q85,987 85,968 L85,64 C85,44 67,43 67,34 L67,21',
+    vbH: 584, aspect: 5.84, mouthFrac: 17 / 584, surfRx: 31,
+    interior: 'M36,24 L36,34 C36,46 18,46 18,64 L18,552 Q18,568 34,568 L66,568 Q82,568 82,552 L82,64 C82,46 64,46 64,34 L64,24 Z',
+    outline: 'M33,21 L33,34 C33,43 15,44 15,64 L15,552 Q15,571 34,571 L66,571 Q85,571 85,552 L85,64 C85,44 67,43 67,34 L67,21',
     lip: { x: 30, y: 11, w: 40, h: 13, rx: 6, mouthRx: 15, mouthRy: 4, mouthCy: 17 },
-    B: 984, T: 58, box: [18, 82, 24, 984],
+    B: 568, T: 50, box: [18, 82, 24, 568],
     cork: { x: 31, y: 10, w: 38, h: 17, r: 6 },
     gloss: [
-      { x: 23, y: 66, w: 7, h: 897, rx: 3.5, o: 0.65 },
-      { x: 73, y: 72, w: 4, h: 885, rx: 2, o: 0.35 },
+      { x: 23, y: 66, w: 7, h: 481, rx: 3.5, o: 0.65 },
+      { x: 73, y: 72, w: 4, h: 469, rx: 2, o: 0.35 },
       { x: 38, y: 25, w: 4, h: 11, rx: 2, o: 0.55 }
     ]
   },

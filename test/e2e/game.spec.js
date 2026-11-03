@@ -14,7 +14,7 @@ test('collections, labels, resume, undo, and sharing on mobile', async ({page}) 
   await page.reload(); await page.click('#btn-resume');
   expect(await page.evaluate(()=>JSON.stringify(window.__vessel.state))).toBe(after);
   await page.click('#btn-undo'); expect(await page.evaluate(()=>JSON.stringify(window.__vessel.state))).toBe(initial);
-  await page.click('#btn-share'); await expect(page.locator('#share-link')).toHaveValue(/v=2&level=1&difficulty=normal/);
+  await page.click('#btn-share'); await expect(page.locator('#share-link')).toHaveValue(/v=3&level=1&difficulty=normal/);
   expect(errors).toEqual([]);
 });
 
@@ -117,10 +117,10 @@ test('worker initialization failure is recoverable and never traps controls', as
   await page.click('#btn-back');await expect(page.locator('#menu')).toBeVisible();expect(errors).toEqual([]);
 });
 
-test('screen-height towers flank the center grid across phone sizes and rotation', async ({page}) => {
+test('towers stand beside the grid at the same scale across phone and tablet sizes', async ({page}) => {
   await page.addInitScript(()=>localStorage.setItem('vessel_save_v1',JSON.stringify({bottleCollection:'tower'})));
   await boot(page); await page.evaluate(()=>window.__vessel.loadLevel(14));
-  for (const viewport of [{width:390,height:844},{width:320,height:740},{width:844,height:390}]) {
+  for (const viewport of [{width:390,height:844},{width:320,height:740},{width:844,height:390},{width:820,height:1180},{width:1180,height:820}]) {
     await page.setViewportSize(viewport);
     await page.waitForTimeout(250);
     const bounds=await page.evaluate(()=>{
@@ -130,8 +130,14 @@ test('screen-height towers flank the center grid across phone sizes and rotation
       return {boxes,height:stage.height,screen:innerHeight,width:innerWidth,controls:{left:c.left,right:c.right,top:c.top,bottom:c.bottom}};
     });
     const towers=bounds.boxes.filter(b=>b.shape==='tower');expect(towers).toHaveLength(2);
+    const small=bounds.boxes.filter(b=>b.shape!=='tower'), bw=small[0].right-small[0].left;
+    const gridLeft=Math.min(...small.map(b=>b.left)), gridRight=Math.max(...small.map(b=>b.right));
+    const [left,right]=[...towers].sort((a,b)=>a.left-b.left);
+    expect(gridLeft-left.right).toBeLessThan(bw*0.6); expect(right.left-gridRight).toBeLessThan(bw*0.6);
+    expect(gridLeft-left.right).toBeGreaterThan(0); expect(right.left-gridRight).toBeGreaterThan(0);
     for(const b of towers) {
-      expect(b.height).toBeGreaterThan(bounds.height*.7);
+      expect(Math.abs((b.right-b.left)-bw)).toBeLessThanOrEqual(1);
+      expect(Math.abs(b.height/bw-5.84)).toBeLessThan(0.05);
       expect(b.top).toBeGreaterThanOrEqual(0);expect(b.bottom).toBeLessThanOrEqual(bounds.screen);
       const c=bounds.controls;expect(b.right<=c.left || b.left>=c.right || b.bottom<=c.top || b.top>=c.bottom).toBe(true);
     }
@@ -178,10 +184,10 @@ test('towers are permanent across styles and display twelve-segment fill counts'
   await expect(page.locator('#overlay')).toHaveClass(/show/);
   await expect(page.locator('.capacity-label').first()).toHaveText('12 / 12');
   await expect(page.locator('.capacity-label').last()).toHaveText('12 / 12');
-  await expect(page.locator('.s-tower .completion-badge')).toHaveCount(2);
+  await expect(page.locator('.completion-badge')).toHaveCount(0);
 });
 
-test('completion sparkles finish cleanly and undo removes the completed marker', async ({page}) => {
+test('completion sparkles finish cleanly and leave only the cork as a marker', async ({page}) => {
   await page.emulateMedia({reducedMotion:'no-preference'});await boot(page);
   await page.evaluate(()=>window.__vessel.loadLevel(1));
   const prefix=await page.evaluate(async()=>{
@@ -194,7 +200,7 @@ test('completion sparkles finish cleanly and undo removes the completed marker',
   await expect(effect).not.toHaveCount(0,{timeout:20000});
   await page.waitForFunction(()=>window.__vessel.activePours===0);
   await expect(page.locator('.completion-effect.celebrating')).toHaveCount(0,{timeout:5000});
-  expect(await page.evaluate(i=>!!window.__vessel.slots[i].el.querySelector('.completion-badge'),prefix.target)).toBe(true);
+  expect(await page.evaluate(i=>!!window.__vessel.slots[i].el.querySelector('.completion-effect'),prefix.target)).toBe(false);
   await page.evaluate(()=>window.__vessel.undo());
   expect(await page.evaluate(i=>!!window.__vessel.slots[i].el.querySelector('.completion-effect'),prefix.target)).toBe(false);
 });

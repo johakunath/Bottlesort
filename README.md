@@ -46,7 +46,7 @@ supported install UI; on iOS use Safari's Add to Home Screen.
 Renderers receive an explicit adapter with live getters for board state and
 callbacks for effects. They do not own save data or puzzle rules. Keep new
 features in their owning module; use targeted searches and tests rather than
-loading the entire runtime and historical backlog for every change.
+loading the entire runtime and full backlog for every change.
 
 ## State and concurrency contracts
 
@@ -56,9 +56,10 @@ loading the entire runtime and historical backlog for every change.
 - Each board includes eight additional units for each of two colors, enough
   to fill both towers. Winning requires both towers to be full and monochrome.
   A full small bottle can still pour into a tower. Style settings affect only small bottles.
-- Two giant bottles always occupy the side rails.
-  They span the play area and briefly scale down during transfer to stay visible
-  on narrow screens. Full bottles fill into their shoulders, leaving neck headspace.
+- The two towers are drawn at the small-bottle scale (one tower segment = one
+  round-bottle segment of liquid) and stand directly beside the grid, bottoms on
+  the lowest shelf line (`.board` flex row, `src/board-layout.js`). They come on
+  top of the configured small empties. Full bottles fill into their shoulders.
 - A move commits immediately; visual pours queue per bottle. `snapshotBoard()`
   incorporates pending reveals/thaws so reload and undo never restore stale animation state.
 - Board changes cancel hint workers. A revision check also rejects results already
@@ -69,14 +70,15 @@ loading the entire runtime and historical backlog for every change.
   playable but cannot retain data after closing/reloading the page.
 - Number labels reveal only visible colors. Screen reader labels list visible
   layers bottom to top. Keyboard: arrows, Enter/Space, U (undo), R (restart), H (hint).
-- Shared links use `#v=2` with bounded configuration. They share initial conditions,
+- Shared links carry the rules version (`#v=3`) with bounded configuration. They share initial conditions,
   never the solution or personal progress. Imported links are consumed once so
   reloading offers Resume rather than restarting the challenge.
-- Older `#v=1` links are upgraded to the tower rules. Saved progress and awards
-  are retained, but unfinished v1 sessions must restart; the menu explains this once.
-- Completed bottles play a finite sparkling spiral and keep a glow/Full badge.
-  Reduced-motion users get the persistent marker without the animation. Undo
-  and pouring out remove the marker. See `src/completion-effect.js`.
+- Links from older rules are reported as outdated instead of opening a different
+  board. Saved progress and awards are retained; unfinished sessions from older
+  rules must restart.
+- Completed bottles play a finite sparkling spiral; the cork is the only
+  persistent marker. Undo and pouring out remove the effect.
+  See `src/completion-effect.js`.
 - `window.__vessel` is the manual QA interface; runtime dependencies use imports.
 
 ## Tests and assets
@@ -89,4 +91,4 @@ layout, and offline worker execution. `scripts/qa-rapid-tap.mjs` supports manual
 animated stress checks (see its header).
 
 Original design images live under `design/original-backgrounds/`; only optimized
-backgrounds ship in `public/assets/`. Current product work belongs in `BACKLOG.md`.
+backgrounds ship in `public/assets/`. Product work and open items live in `BACKLOG.md`.

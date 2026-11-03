@@ -23,7 +23,7 @@ test('all classic modes have permanent towers and sufficient liquid for both', (
     const g=L.generateLevel(level,d);
     assert.equal(g.capacities.filter(c=>c===12).length,2);
     for(const color of [0,1]) assert.equal(g.state.flat().filter(c=>c===color).length,4*g.sets+8);
-    assert.ok(g.state.filter(b=>b.length===4).length>=7);
+    assert.equal(g.state.filter(b=>b.length===4).length, L.totalUnits(g.colors,g.sets)/4);
   }
 });
 test('tower liquid volume scales through all twelve segments, not four', () => {

@@ -2,7 +2,7 @@ import { setCompletion } from './completion-effect.js';
 import { boardLayout } from './board-layout.js';
 import { createSvgRenderer } from './svg-renderer.js';
 import { createCanvasRenderer } from './canvas-renderer.js';
-import { SESSION_KEY, readSession, parseChallenge, challengeURL } from './session.js';
+import { SESSION_KEY, readSession, parseChallenge, isOutdatedChallenge, challengeURL } from './session.js';
 import { WorkerClient } from './worker-client.js';
 import { storage, SAVE_KEY, createDefaultSave, normalizeSave, preferredRenderer } from './storage.js';
 import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES } from './bottle-design.js';
@@ -1189,20 +1189,28 @@ function layoutStage() {
   document.documentElement.style.setProperty('--bw', layout.bottleWidth + 'px');
   stage.style.setProperty('--tower-width', layout.towerWidth + 'px');
   stage.style.setProperty('--tower-height', layout.towerHeight + 'px');
+  stage.style.setProperty('--tower-gap', layout.towerGap + 'px');
   stage.classList.toggle('with-towers', layout.towers.length > 0);
   const key = JSON.stringify([layout.grid, layout.towers]);
   if (stage.dataset.layout !== key) {
-    stage.querySelectorAll('.row, .tower-rail').forEach(r => r.remove());
-    layout.towers.forEach((i, side) => {
-      const rail = document.createElement('div');
-      rail.className = 'tower-rail ' + (side ? 'right' : 'left');
-      rail.appendChild(slots[i].slot); stage.insertBefore(rail, $('#fx'));
-    });
+    stage.querySelectorAll('.board').forEach(r => r.remove());
+    // [tower][rows][tower] as one flex row: CSS keeps the towers beside the
+    // grid with their bottoms on the lowest shelf line, at any viewport size.
+    const board = document.createElement('div'); board.className = 'board';
+    const rows = document.createElement('div'); rows.className = 'board-rows';
     layout.grid.forEach(indices => {
       const row = document.createElement('div'); row.className = 'row';
       indices.forEach(i => row.appendChild(slots[i].slot));
-      stage.insertBefore(row, $('#fx'));
+      rows.appendChild(row);
     });
+    const rail = (i, side) => {
+      const el = document.createElement('div');
+      el.className = 'tower-rail ' + side; el.appendChild(slots[i].slot); return el;
+    };
+    if (layout.towers[0] !== undefined) board.appendChild(rail(layout.towers[0], 'left'));
+    board.appendChild(rows);
+    if (layout.towers[1] !== undefined) board.appendChild(rail(layout.towers[1], 'right'));
+    stage.insertBefore(board, $('#fx'));
     stage.dataset.layout = key;
     stage.dataset.rows = layout.grid.length; stage.dataset.n = String(state.length);
   }
@@ -1238,7 +1246,13 @@ function loadChallenge(config) {
 }
 function openSharedChallenge() {
   const config = parseChallenge(location.hash);
-  if (!config) return;
+  if (!config) {
+    if (isOutdatedChallenge(location.hash)) {
+      window.history.replaceState(window.history.state, '', location.pathname + location.search);
+      $('#loading-status').textContent = 'This puzzle link was made for older rules. Ask for a new link.';
+    }
+    return;
+  }
   // Consume the import link so a reload offers Resume instead of overwriting it.
   window.history.replaceState(window.history.state, '', location.pathname + location.search);
   if (config.level) { difficulty = config.difficulty; loadLevel(config.level); }
@@ -1381,7 +1395,7 @@ function setupBoard(gen) {
   buildElementMap(gen);
 
   const stage = $('#stage');
-  stage.querySelectorAll('.row, .tower-rail').forEach(r => r.remove());
+  stage.querySelectorAll('.board').forEach(r => r.remove());
   delete stage.dataset.layout;
   stage.dataset.n = ''; stage.dataset.rows = '';
   $('#fx').innerHTML = '';
@@ -3071,7 +3085,7 @@ function init() {
   $('#btn-hint').addEventListener('click', showHint);
 
   $('#btn-resume').addEventListener('click', resumeSession);
-  $('#btn-challenge').addEventListener('click', () => loadChallenge({ seed: crypto.getRandomValues(new Uint32Array(1))[0], colors: 5, sets: 1, empties: 2 }));
+  $('#btn-challenge').addEventListener('click', () => loadChallenge({ seed: crypto.getRandomValues(new Uint32Array(1))[0], colors: 5, sets: 1, empties: 1 }));
   $('#btn-share').addEventListener('click', sharePuzzle);
   $('#btn-share-win').addEventListener('click', sharePuzzle);
   $('#share-close').addEventListener('click', () => closeModal($('#share-modal')));
