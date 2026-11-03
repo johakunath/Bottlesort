@@ -122,7 +122,7 @@ for (const diff of ['relaxed', 'normal', 'expert']) {
     for (let level = 1; level <= MAX_LEVEL; level++) {
       const gen = generateLevel(level, diff);
       const fillCount = gen.colors * gen.sets;
-      assert.equal(gen.state.length, fillCount + gen.empties, diff + ' L' + level + ' bottle count');
+      assert.equal(gen.state.length, fillCount + gen.empties + 4, diff + ' L' + level + ' bottle count');
       assert.equal(gen.state.some(isBottleComplete), false, diff + ' L' + level + ' should not start pre-solved');
 
       const frozen = new Set(gen.specials.frozen);

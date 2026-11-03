@@ -8,16 +8,14 @@
    = pouring to the right) maps (x, y) → (x·c − y·s, x·s + y·c).
    ============================================================ */
 
-/* interior extent per shape: `top` is the interior path's first y (the
-   mouth), `bottom` its lowest point, `cap` the height 4 layers fill to.
-   The space above `cap` is headspace. Caps sit 20 % of the column lower
-   than the old neck-level line (37 / 33 / 33), so a full bottle reads
-   clearly below the neck; with that headspace a full bottle starts
-   pouring at ~70–78° (classic 69°, tall 78°, flask 74°). */
+/* Full capacity (4 small / 12 tower) fills into the shoulder, leaving only neck headspace. Shape
+   capacity comes from these lines, so upright and tilted volumes agree. */
 const SHAPE_GEO = {
-  classic: { top: 26, bottom: 224, cap: 74.4 },
-  tall: { top: 24, bottom: 304, cap: 87.2 },
-  flask: { top: 26, bottom: 210.2, cap: 68.4 }
+  tower: { top: 24, bottom: 984, cap: 58, capacity: 12 },
+  round: { top: 24, bottom: 224, cap: 50 },
+  classic: { top: 26, bottom: 224, cap: 62 },
+  tall: { top: 24, bottom: 304, cap: 64 },
+  flask: { top: 26, bottom: 210.2, cap: 45 }
 };
 const CAP_UNITS = 4;
 const THETA_MAX = 105 * Math.PI / 180;
@@ -26,7 +24,24 @@ const TH_RANGE = 110 * Math.PI / 180;
 
 /* interior width (viewBox units) at height y */
 function shapeWidthAt(sn, y) {
-  if (sn === 'classic') {
+  if (sn === 'round' || sn === 'tower') {
+    if (y <= 34) return 28;
+    if (y < 64) {
+      // Invert the shoulder's cubic Bezier to match the rendered glass.
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 24; i++) {
+        const t = (lo + hi) / 2, u = 1 - t;
+        const py = u * u * u * 34 + 3 * u * u * t * 46 + 3 * u * t * t * 46 + t * t * t * 64;
+        if (py < y) lo = t; else hi = t;
+      }
+      const t = (lo + hi) / 2;
+      return 28 + 36 * (3 * t * t - 2 * t * t * t);
+    }
+    const bottom = sn === 'tower' ? 984 : 224;
+    if (y <= bottom - 16) return 64;
+    const t = 1 - Math.sqrt(Math.max(0, (bottom - y) / 16));
+    return 64 - 32 * t * t;
+  } else if (sn === 'classic') {
     if (y <= 54) return 24;
     if (y <= 84) return 24 + (y - 54) / 30 * 32;
     if (y <= 204) return 56;
@@ -123,7 +138,7 @@ function shapeModel(sn) {
   const g = SHAPE_GEO[sn];
   const poly = simplifyPolygon(interiorPolygon(sn, 2));
   const totalA = areaBelow(poly.xs, poly.ys, poly.n, -1e9);
-  const unitA = areaBelow(poly.xs, poly.ys, poly.n, g.cap) / CAP_UNITS;
+  const unitA = areaBelow(poly.xs, poly.ys, poly.n, g.cap) / (g.capacity || CAP_UNITS);
   /* lip = interior top-right corner (pouring right; left is the mirror image) */
   const lipX = shapeWidthAt(sn, g.top) / 2, lipY = g.top;
   const thTab = new Float64Array(TH_N + 1), cTab = new Float64Array(TH_N + 1);

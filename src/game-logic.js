@@ -1,14 +1,18 @@
-﻿/* ============================================================
+import { BAKED } from './levels-baked.js';
+/* ============================================================
    Vessel — pure game logic (no DOM)
-   Bottles are arrays of color indices, bottom -> top. Capacity 4.
+   Bottles are arrays of color indices, bottom -> top, with a capacity.
+   Small bottles hold 4 segments; mandatory side towers hold 12.
    ============================================================ */
 'use strict';
 
 const CAP = 4;
+const TOWER_CAP = 12;
+const RULES_VERSION = 2;
 
-/* Level definitions: [colors, sets] per level. Total filled bottles =
-   colors * sets; each color exists sets*4 units. Repeating colors across
-   multiple bottle-sets is how big boards stay readable with few hues. */
+/* Level definitions: [colors, sets]. Each color has sets*4 units, plus
+   eight extra units for colors 0 and 1 to supply the two 12-unit towers.
+   Initial small bottles = colors*sets+4; both towers start empty. */
 const LEVEL_TABLE = {
   relaxed: { empties: 3, undos: Infinity, mystery: 0, levels: [
     [3,1],[4,1],[4,1],[5,1],[5,1],[6,1],[6,1],[7,1],[7,1],[8,1],
@@ -26,7 +30,7 @@ const LEVEL_TABLE = {
 const MAX_LEVEL = 30;
 
 /* Baked seed offsets + par, found at build time so runtime never searches. */
-const BAKED = {"relaxed":[{"o":0,"p":7},{"o":0,"p":11},{"o":0,"p":13},{"o":0,"p":15},{"o":0,"p":16},{"o":0,"p":19},{"o":0,"p":20},{"o":0,"p":28},{"o":0,"p":25},{"o":0,"p":33}],"normal":[{"o":0,"p":14},{"o":0,"p":18},{"o":0,"p":22},{"o":0,"p":24},{"o":0,"p":30},{"o":0,"p":35},{"o":0,"p":34},{"o":0,"p":45},{"o":0,"p":61},{"o":0,"p":60}],"expert":[{"o":0,"p":14},{"o":0,"p":20},{"o":0,"p":24},{"o":0,"p":27},{"o":0,"p":35},{"o":0,"p":35},{"o":0,"p":48},{"o":0,"p":61},{"o":0,"p":50},{"o":0,"p":71}]};
+
 
 /* ---------- RNG ---------- */
 function mulberry32(a) {
@@ -47,10 +51,15 @@ function shuffleInPlace(arr, rng) {
 }
 
 /* ---------- State helpers ---------- */
-function cloneState(s) { return s.map(b => b.slice()); }
+function capacityOf(b) { return b.capacity || CAP; }
+function cloneBottle(b) { const copy = b.slice(); copy.capacity = capacityOf(b); return copy; }
+function cloneState(s) { return s.map(cloneBottle); }
+function withCapacities(s, capacities) {
+  return s.map((b, i) => { const copy = b.slice(); copy.capacity = capacities?.[i] || capacityOf(b); return copy; });
+}
 
 function stateKey(s) {
-  return s.map(b => b.join(',')).sort().join('|');
+  return s.map(b => capacityOf(b) + ':' + capacityOf(b) + ':' + b.join(',')).sort().join('|');
 }
 
 function topRun(bottle) {
@@ -63,16 +72,25 @@ function topRun(bottle) {
 }
 
 function isBottleComplete(b) {
-  if (b.length !== CAP) return false;
-  for (let i = 1; i < CAP; i++) if (b[i] !== b[0]) return false;
+  if (b.length !== capacityOf(b)) return false;
+  for (let i = 1; i < b.length; i++) if (b[i] !== b[0]) return false;
   return true;
 }
 
 function isBottleClear(b) { // empty or complete
-  return b.length === 0 || isBottleComplete(b);
+  return (b.length === 0 && capacityOf(b) === CAP) || isBottleComplete(b);
 }
 
 function isSolved(s) { return s.every(isBottleClear); }
+function completionProgress(state) {
+  const total = state.reduce((sum,b) => sum + b.length, 0);
+  if (!total) return 0;
+  const towerGoal = state.filter(b => capacityOf(b) > CAP).reduce((sum,b) => sum + capacityOf(b), 0);
+  const complete = state.filter(isBottleComplete);
+  const towerDone = complete.filter(b => capacityOf(b) > CAP).reduce((sum,b) => sum + b.length, 0);
+  const smallDone = complete.filter(b => capacityOf(b) === CAP).length * CAP;
+  return Math.min(1, (towerDone + Math.min(smallDone, Math.max(0, total - towerGoal))) / total);
+}
 
 /* A pour is legal if source has liquid, target has space, and the
    target is empty or its top color matches the source top color. */
@@ -80,14 +98,14 @@ function canPour(s, i, j) {
   if (i === j) return false;
   const src = s[i], dst = s[j];
   if (src.length === 0) return false;
-  if (dst.length >= CAP) return false;
+  if (dst.length >= capacityOf(dst)) return false;
   if (dst.length === 0) return true;
   return dst[dst.length - 1] === src[src.length - 1];
 }
 
 function pourAmount(s, i, j) {
   const run = topRun(s[i]);
-  return Math.min(run.count, CAP - s[j].length);
+  return Math.min(run.count, capacityOf(s[j]) - s[j].length);
 }
 
 /* Mutates s. Returns number of units moved. */
@@ -105,6 +123,7 @@ function applyPour(s, i, j) {
 function solve(initial, budget, frozenSet) {
   budget = budget || 250000;
   const frozen = frozenSet && frozenSet.size ? frozenSet : null;
+  const totals = initial.flat().reduce((a,c) => { a[c] = (a[c] || 0) + 1; return a; }, []);
   const visited = new Set();
   let nodes = 0;
   let aborted = false;
@@ -113,7 +132,9 @@ function solve(initial, budget, frozenSet) {
     if (isSolved(s)) return path;
     if (++nodes > budget) { aborted = true; return null; }
     if (!thawed && frozen) thawed = s.some(isBottleComplete);
-    const k = (frozen ? (thawed ? 'T' : 'F') : '') + stateKey(s);
+    const k = frozen && !thawed
+      ? 'F' + s.map((b, i) => (frozen.has(i) ? 'locked:' : 'free:') + capacityOf(b) + ':' + b.join(',')).sort().join('|')
+      : 'T' + stateKey(s);
     if (visited.has(k)) return null;
     visited.add(k);
 
@@ -123,23 +144,28 @@ function solve(initial, budget, frozenSet) {
       const src = s[i];
       if (!src.length) continue;
       const run = topRun(src);
-      if (run.count === CAP) continue;
+      if (run.count === TOWER_CAP || (run.count === CAP && !s.some(b => capacityOf(b) > CAP))) continue;
       const srcUniform = run.count === src.length;
       for (let j = 0; j < s.length; j++) {
         if (i === j) continue;
         if (frozen && !thawed && frozen.has(j)) continue;
         const dst = s[j];
-        if (dst.length >= CAP) continue;
+        if (srcUniform && src.length === capacityOf(src) && capacityOf(dst) <= capacityOf(src)) continue;
+        if (dst.length >= capacityOf(dst)) continue;
         if (dst.length === 0) {
-          if (srcUniform) continue;
+          if (srcUniform && capacityOf(src) === capacityOf(dst)) continue;
         } else if (dst[dst.length - 1] !== run.color) continue;
 
-        const space = CAP - dst.length;
+        const space = capacityOf(dst) - dst.length;
         const amount = Math.min(run.count, space);
         let score = 0;
-        if (dst.length + amount === CAP && (dst.length ? dst.every(x => x === run.color) : amount === CAP)) score += 6;
+        if (dst.length + amount === capacityOf(dst) && (dst.length ? dst.every(x => x === run.color) : amount === capacityOf(dst))) score += 6;
         if (amount === run.count) score += 3;
+        // Collect abundant colors in towers; avoid reserving them for colors
+        // whose entire supply cannot fill one. Such moves remain legal buffers.
+        if (capacityOf(dst) > CAP) score += totals[run.color] >= TOWER_CAP ? 20 : -20;
         if (srcUniform) score += 2;
+        if (capacityOf(src) > CAP && srcUniform) score -= 35;
         if (dst.length === 0) score -= 2;
         if (amount < run.count) score -= 2;
         moves.push({ i, j, score });
@@ -170,14 +196,22 @@ function buildState(level, difficulty, attempt) {
   const cfg = LEVEL_TABLE[difficulty] || LEVEL_TABLE.normal;
   const [colors, sets] = cfg.levels[level - 1];
   const rng = mulberry32(diffSeed(level, difficulty) + attempt * 104729);
-  const units = [];
-  for (let c = 0; c < colors; c++) for (let k = 0; k < CAP * sets; k++) units.push(c);
-  shuffleInPlace(units, rng);
-  const state = [];
-  const fill = colors * sets;
-  for (let b = 0; b < fill; b++) state.push(units.slice(b * CAP, b * CAP + CAP));
-  for (let e = 0; e < cfg.empties; e++) state.push([]);
+  const state = mixedBoard(rng, colors, sets, cfg.empties);
   return { state, colors, sets, cfg };
+}
+
+function mixedBoard(rng, colors, sets, empties) {
+  const units = [];
+  for (let c = 0; c < colors; c++) {
+    const count = CAP * sets + (c < 2 ? TOWER_CAP - CAP : 0);
+    for (let k = 0; k < count; k++) units.push(c);
+  }
+  shuffleInPlace(units, rng);
+  const state = [[]];
+  for (let i = 0; i < units.length; i += CAP) state.push(units.slice(i, i + CAP));
+  for (let i = 2; i < empties; i++) state.push([]);
+  state.push([]);
+  return withCapacities(state, state.map((_,i) => i === 0 || i === state.length-1 ? TOWER_CAP : CAP));
 }
 
 /* Special bottles, expert only. Disjoint sets over the filled bottles.
@@ -189,7 +223,7 @@ function specialsFor(level, difficulty, fillCount, state) {
   if (difficulty !== 'expert') return out;
   const rng = mulberry32(diffSeed(level, difficulty) + 999);
   const pool = [];
-  for (let i = 0; i < fillCount; i++) pool.push(i);
+  for (let i = 0; i < state.length; i++) if (state[i].length && capacityOf(state[i]) === CAP) pool.push(i);
   shuffleInPlace(pool, rng);
   const take = n => pool.splice(0, Math.max(0, Math.min(n, pool.length)));
   if (level >= 4) out.mystery = take(Math.min(2 + Math.floor((level - 4) / 2), Math.floor(fillCount / 4)));
@@ -210,10 +244,10 @@ function generateLevel(level, difficulty) {
 
 function generateLevelUncached(level, difficulty) {
   const baked = BAKED && BAKED[difficulty] && BAKED[difficulty][level - 1];
-  if (baked) {
+  if (baked && baked.v === RULES_VERSION) {
     const b = buildState(level, difficulty, baked.o);
     const specials = specialsFor(level, difficulty, b.colors * b.sets, b.state);
-    return { state: b.state, par: baked.p, colors: b.colors, sets: b.sets,
+    return { rulesVersion: RULES_VERSION, capacities: b.state.map(capacityOf), state: b.state, seedOffset: baked.o, par: baked.p, colors: b.colors, sets: b.sets,
              empties: b.cfg.empties, undos: b.cfg.undos, specials };
   }
   for (let attempt = 0; attempt < 400; attempt++) {
@@ -222,7 +256,7 @@ function generateLevelUncached(level, difficulty) {
     const specials = specialsFor(level, difficulty, b.colors * b.sets, b.state);
     const res = solve(cloneState(b.state), 400000, new Set(specials.frozen));
     if (res.solution && res.solution.length > 2) {
-      return { state: b.state, par: res.solution.length, colors: b.colors, sets: b.sets,
+      return { rulesVersion: RULES_VERSION, capacities: b.state.map(capacityOf), state: b.state, seedOffset: attempt, par: res.solution.length, colors: b.colors, sets: b.sets,
                empties: b.cfg.empties, undos: b.cfg.undos, specials };
     }
   }
@@ -234,16 +268,11 @@ function generateLevelUncached(level, difficulty) {
 function generateFromSeed(seedBase, colors, sets, empties, maxAttempts) {
   for (let attempt = 0; attempt < (maxAttempts || 200); attempt++) {
     const rng = mulberry32((seedBase + attempt * 104729) >>> 0);
-    const units = [];
-    for (let c = 0; c < colors; c++) for (let k = 0; k < CAP * sets; k++) units.push(c);
-    shuffleInPlace(units, rng);
-    const state = [];
-    for (let b = 0; b < colors * sets; b++) state.push(units.slice(b * CAP, b * CAP + CAP));
-    for (let e = 0; e < empties; e++) state.push([]);
+    const state = mixedBoard(rng, colors, sets, empties);
     if (state.some(isBottleComplete)) continue;
     const res = solve(cloneState(state), 300000);
     if (res.solution && res.solution.length > 2) {
-      return { state, par: res.solution.length, colors, sets, empties,
+      return { rulesVersion: RULES_VERSION, capacities: state.map(capacityOf), state, par: res.solution.length, colors, sets, empties,
                undos: Infinity, specials: { mystery: [], veiled: [], frozen: [] } };
     }
   }
@@ -273,10 +302,10 @@ function rushTimeFor(par) { return Math.round(18 + par * 2.4); }
 
 /* ---------- Exports ---------- */
 const VesselLogic = {
-  CAP, LEVEL_TABLE, MAX_LEVEL, buildState, diffSeed, specialsFor,
+  CAP, TOWER_CAP, RULES_VERSION, capacityOf, cloneBottle, withCapacities, LEVEL_TABLE, MAX_LEVEL, buildState, diffSeed, specialsFor,
   generateFromSeed, dailyConfig, rushConfig, rushTimeFor,
   mulberry32, cloneState, stateKey, topRun,
-  isBottleComplete, isBottleClear, isSolved,
+  isBottleComplete, isBottleClear, isSolved, completionProgress,
   canPour, pourAmount, applyPour, solve, generateLevel
 };
 if (typeof window !== 'undefined') Object.assign(window, VesselLogic);

@@ -7,10 +7,19 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "bake": "node scripts/bake-levels.mjs",
+    "test:e2e": "playwright test",
+    "check": "npm run lint && npm test && npm run build",
+    "lint": "eslint .",
+    "test:rapid": "node scripts/qa-rapid-tap.mjs"
   },
   "dependencies": {
     "vite": "^7.1.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0"
+  }
 }

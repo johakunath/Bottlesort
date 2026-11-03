@@ -811,3 +811,39 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
   .elem-icy, .elem-electric, .elem-boil, .elem-toxic { animation: none !important; }
   * { transition-duration: 0.01s !important; }
 }
+
+.utility-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 8px 0; }
+#loading-status { min-height: 1.3em; margin: 4px 12px; text-align: center; font-size: 14px; }
+.generating #loading-status { opacity: 0.75; }
+#share-link { width: 100%; padding: 12px; margin: 10px 0; border-radius: 8px; border: 1px solid var(--glass-edge); color: var(--ink); background: var(--glass-solid); user-select: text; }
+.sheet { max-height: 88dvh; overflow-y: auto; }
+.fabs { gap: 10px; }
+.fabs { display: flex; flex-direction: column; }
+#btn-share { color: #fff; }
+.generating #stage::after { content: 'Mixing your puzzle…'; position: absolute; top: 4px; left: 50%; transform: translateX(-50%); border-radius: 20px; background: var(--card-bg); color: var(--ink); padding: 10px 16px; z-index: 100; }
+
+/* Screen-height side bottles sit outside the center grid, like the reference. */
+.tower-rail { position: absolute; top: 24px; width: var(--tower-width); height: var(--tower-height); }
+.tower-rail.left { left: 0; }
+.tower-rail.right { right: 0; }
+.slot.s-tower { width: var(--tower-width); height: var(--tower-height); }
+.with-towers { --bh: calc(var(--bw) * 2.4); }
+#stage.with-towers { padding-top: 24px; padding-bottom: 60px; }
+.with-towers .fabs { right: 50%; transform: translateX(50%); flex-direction: row; }
+
+.capacity-label { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 3px 6px; border-radius: 9px; background: #211332dd; color: #fff; font: 700 11px system-ui; white-space: nowrap; pointer-events: none; }
+.completion-effect { position: absolute; inset: 10% 9% 0; pointer-events: none; z-index: 4; border-radius: 18px; box-shadow: 0 0 11px #ee9dff99, inset 0 0 8px #f4b6ff66; }
+.completion-badge { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); padding: 4px 8px; border-radius: 12px; background: #7029a8; border: 1px solid #f9d5ff; color: #fff; font: 700 11px system-ui; white-space: nowrap; box-shadow: 0 0 8px #ef9aff88; }
+.s-tower .completion-badge { bottom: 35px; }
+.completion-spiral { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; opacity: 0; }
+.completion-spiral path { fill: none; stroke-linecap: round; }
+.spiral-glow { stroke: #df82ff; stroke-width: 6; filter: drop-shadow(0 0 5px #ee8dff); }
+.spiral-sparks { stroke: #fff4ff; stroke-width: 3; stroke-dasharray: 1 7; }
+.celebrating .completion-spiral { animation: completion-fade 2.4s ease-out both; }
+.celebrating .spiral-glow { stroke-dasharray: 80 500; animation: completion-trail 2s ease-out both; }
+.celebrating .spiral-sparks { animation: completion-shimmer 1.8s linear both; }
+@keyframes completion-trail { from { stroke-dashoffset: 100; } to { stroke-dashoffset: -540; } }
+@keyframes completion-shimmer { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -160; } }
+@keyframes completion-fade { 0% { opacity: 0; } 12%,75% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .celebrating .completion-spiral, .celebrating .spiral-glow, .celebrating .spiral-sparks { animation: none; } }
+.completion-badge { padding: 3px 4px; font-size: clamp(8px, calc(var(--bw) * 0.16), 11px); }

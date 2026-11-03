@@ -1,102 +1,25 @@
-﻿/* ============================================================
+import { setCompletion } from './completion-effect.js';
+import { boardLayout } from './board-layout.js';
+import { createSvgRenderer } from './svg-renderer.js';
+import { createCanvasRenderer } from './canvas-renderer.js';
+import { SESSION_KEY, readSession, parseChallenge, challengeURL } from './session.js';
+import { WorkerClient } from './worker-client.js';
+import { storage, SAVE_KEY, createDefaultSave, normalizeSave, preferredRenderer } from './storage.js';
+import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES } from './bottle-design.js';
+import { createAudio } from './audio.js';
+import { VesselLogic as Logic } from './game-logic.js';
+/* ============================================================
    Vessel — game runtime v2
    Shapes, gravity-true liquid, mystery bottles, ambient magic.
-   Requires logic.js loaded first.
+   Coordinates board lifecycle and motion; pure logic and renderers are imported modules.
    ============================================================ */
 'use strict';
 import { PourPhysics } from './pour-physics.js';
 import { startablePours } from './pour-queue.js';
 (function () {
 
-/* ---------------- palette ----------------
-   Each entry = [bright face, shadow side]; used as a b→a→b across the band. */
-/* palettes retuned for mobile legibility: each colour sits on a distinct hue with
-   varied lightness so neighbours never read as the same colour on a small screen */
-const APO_COLORS = [
-  ['#ff7a85', '#d4263d'], // cherry  (red)
-  ['#ffb24d', '#e0710f'], // tangerine (orange)
-  ['#ffe24d', '#d6ad00'], // lemon   (yellow)
-  ['#7fd96a', '#2f9e3f'], // lime    (green)
-  ['#4fd6c4', '#0e9488'], // teal    (cyan)
-  ['#6aa8ff', '#2459d6'], // blue
-  ['#b98cff', '#6a2fd6'], // violet  (purple)
-  ['#ff8fd6', '#d63f97'], // pink    (magenta)
-  ['#c98f5e', '#7c4a26']  // mocha   (brown)
-];
-const NEON_COLORS = [
-  ['#ff5d6c', '#c8102e'], // cherry  (red)
-  ['#ff9f3a', '#d65a00'], // tangerine (orange)
-  ['#ffe23d', '#c9a200'], // lemon   (yellow)
-  ['#5de86a', '#109a2f'], // lime    (green)
-  ['#2fe0d0', '#058a80'], // teal    (cyan)
-  ['#4f9bff', '#1043d6'], // blue
-  ['#b46bff', '#6a1fd6'], // violet  (purple)
-  ['#ff5db8', '#c8127a'], // pink    (magenta)
-  ['#d8a76a', '#8a5a2c']  // sand    (brown)
-];
-const TIDE_COLORS = [
-  ['#ff7f73', '#c63f45'], // coral   (red)
-  ['#ffbd67', '#d46a24'], // amber   (orange)
-  ['#f7e978', '#c9a93b'], // shell   (yellow)
-  ['#84d86d', '#2f9a55'], // kelp    (green)
-  ['#54d9c5', '#138b84'], // glass   (cyan)
-  ['#69b8ff', '#2a66c7'], // lagoon  (blue)
-  ['#b28dff', '#6650c6'], // lilac   (purple)
-  ['#ff91b7', '#c94678'], // anemone (pink)
-  ['#c8a06a', '#74603f']  // drift   (brown)
-];
 let COLORS = APO_COLORS;
-let HIDDEN_FILL = ['#cbb186', '#8a6a3e']; /* parchment-gray mystery fill (apothecary) */
-const COLOR_NAMES = ['cherry', 'tangerine', 'lemon', 'lime', 'teal', 'blue', 'violet', 'pink', 'mocha'];
-
-/* ---------------- bottle shapes ----------------
-   Every shape: viewBox 100 x vbH. pivot = element center (CSS rotate origin).
-   B/T = liquid bottom/top, box = interior bounds for tilt pooling. */
-const SHAPES = {
-  classic: {
-    vbH: 240, aspect: 2.4, mouthFrac: 20 / 240, surfRx: 26,
-    interior: 'M38,26 L38,54 C38,64 22,68 22,84 L22,204 Q22,224 42,224 L58,224 Q78,224 78,204 L78,84 C78,68 62,64 62,54 L62,26 Z',
-    outline: 'M35,22 L35,53 C35,63 19,67 19,84 L19,205 Q19,227 42,227 L58,227 Q81,227 81,205 L81,84 C81,67 65,63 65,53 L65,22',
-    lip: { x: 31, y: 14, w: 38, h: 12, rx: 6, mouthRx: 14, mouthRy: 3.4, mouthCy: 20 },
-    B: 221, T: 30, box: [22, 78, 26, 224],
-    gloss: [
-      { x: 27, y: 92, w: 9, h: 110, rx: 4.5, o: 0.55 },
-      { x: 68, y: 96, w: 3.5, h: 92, rx: 1.7, o: 0.25 },
-      { x: 40, y: 30, w: 5, h: 22, rx: 2.5, o: 0.5 }
-    ]
-  },
-  tall: {
-    vbH: 320, aspect: 3.2, mouthFrac: 18 / 320, surfRx: 21,
-    interior: 'M40,24 L40,50 C40,58 30,62 30,74 L30,286 Q30,304 50,304 Q70,304 70,286 L70,74 C70,62 60,58 60,50 L60,24 Z',
-    outline: 'M37,20 L37,49 C37,57 27,61 27,74 L27,287 Q27,307 50,307 Q73,307 73,287 L73,74 C73,61 63,57 63,49 L63,20',
-    lip: { x: 34, y: 12, w: 32, h: 11, rx: 5.5, mouthRx: 12, mouthRy: 3, mouthCy: 18 },
-    B: 301, T: 28, box: [30, 70, 24, 304],
-    gloss: [
-      { x: 34, y: 84, w: 8, h: 190, rx: 4, o: 0.55 },
-      { x: 61, y: 90, w: 3, h: 160, rx: 1.5, o: 0.25 },
-      { x: 42, y: 28, w: 4.5, h: 18, rx: 2.2, o: 0.5 }
-    ]
-  },
-  flask: {
-    vbH: 240, aspect: 2.4, mouthFrac: 20 / 240, surfRx: 30, magic: true,
-    interior: 'M42,26 L42,131 A40,40 0 1,0 58,131 L58,26 Z',
-    outline: 'M39,22 L39,129 A43,43 0 1,0 61,129 L61,22',
-    lip: { x: 35, y: 14, w: 30, h: 12, rx: 6, mouthRx: 11, mouthRy: 3, mouthCy: 20 },
-    B: 208, T: 32, box: [10, 90, 26, 210],
-    cork: { x: 35, y: 12, w: 30, h: 16, r: 5 },
-    label: { x: 30, y: 150, w: 40, h: 42, rx: 18 },
-    gloss: [
-      { x: 26, y: 150, w: 10, h: 44, rx: 5, o: 0.5 },
-      { x: 44, y: 32, w: 5, h: 60, rx: 2.5, o: 0.45 }
-    ],
-    sparkle: [[33, 146], [70, 186], [58, 158]]
-  }
-};
-/* cork + parchment-label furniture per shape (Apothecary skin) */
-SHAPES.classic.cork = { x: 33, y: 13, w: 34, h: 18, r: 6 };
-SHAPES.classic.label = { x: 29, y: 150, w: 42, h: 54, rx: 4 };
-SHAPES.tall.cork = { x: 34, y: 11, w: 32, h: 16, r: 5 };
-SHAPES.tall.label = { x: 34, y: 196, w: 32, h: 76, rx: 4 };
+let HIDDEN_FILL = ['#cbb186', '#8a6a3e'];
 
 /* live theme-visual state, updated by applyTheme() */
 let SKIN = 'apothecary', MODE = 'light';
@@ -109,176 +32,13 @@ let LID = ['#c79a5e', '#a9763f', '#7c5026', '#caa06a'];
 const RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------------- storage ---------------- */
-const KEY = 'vessel_save_v1';
-const mem = {};
-const store = {
-  load() {
-    try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch (e) {}
-    return mem[KEY] ? JSON.parse(mem[KEY]) : null;
-  },
-  save(data) {
-    const raw = JSON.stringify(data);
-    mem[KEY] = raw;
-    try { localStorage.setItem(KEY, raw); } catch (e) {}
-  }
-};
-const DEFAULT_SAVE = {
-  progress: { relaxed: {}, normal: {}, expert: {} },
-  sound: true, difficulty: 'normal', seenHint: false, seenSpecials: {},
-  theme: 'apothecary', mode: 'light', haptics: true, fluid: true,
-  ach: {}, daily: { streak: 0, lastWin: '' }, rushBest: 0, lowPowerEffects: false, renderQuality: 'auto', backgroundQuality: 'hifi'
-};
-let save = Object.assign({}, DEFAULT_SAVE, store.load() || {});
-save.progress = Object.assign({}, DEFAULT_SAVE.progress, save.progress || {});
-if (!['relaxed', 'normal', 'expert'].includes(save.difficulty)) save.difficulty = 'normal';
-/* migrate old colour-theme saves (dusk/ocean/candy/galaxy) to the new skins */
-if (!['apothecary', 'neon', 'tidepool'].includes(save.theme)) save.theme = 'apothecary';
-if (!['light', 'dark'].includes(save.mode)) save.mode = 'light';
-/* normalise visual toggles to explicit booleans (pre-fluid saves lack the key:
-   the DEFAULT_SAVE merge already defaults it, this pins the schema) */
-save.fluid = save.fluid !== false;   /* realistic liquid motion — default ON */
-delete save.glass;                   /* removed: WebGL glass reflections */
-delete save.beat;                    /* removed: Neon rhythm mode */
-delete save.symbols;                 /* removed: per-colour liquid symbols */
-save.seenSpecials = save.seenSpecials || {};
-save.ach = save.ach || {};
-save.daily = Object.assign({ streak: 0, lastWin: '' }, save.daily || {});
-save.lowPowerEffects = save.lowPowerEffects === true;
-if (!['auto', 'low', 'normal', 'pretty'].includes(save.renderQuality)) save.renderQuality = 'auto';
-if (save.backgroundQualityUserSet !== true) save.backgroundQuality = 'hifi';
-if (!['basic', 'hifi'].includes(save.backgroundQuality)) save.backgroundQuality = 'hifi';
-function persist() { store.save(save); }
+let save = normalizeSave(storage.read(SAVE_KEY));
+function persist() { storage.write(SAVE_KEY, save); }
 
 /* ---------------- audio ----------------
    Aliquot-style graph: every voice → master gain → compressor → out, with a
    short filtered delay send for bells. One shared noise buffer, made once. */
-const PENTA = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51, 1567.98, 1760];
-const AudioFX = {
-  ctx: null, master: null, wet: null, noiseBuf: null,
-  voices: new Set(),
-  init() {
-    if (this.ctx) return this.ctx;
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return null;
-    let ctx;
-    try { ctx = new AC(); } catch (e) { return null; }
-    const master = ctx.createGain();
-    master.gain.value = save.sound ? 0.9 : 0;
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -16; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.2;
-    master.connect(comp); comp.connect(ctx.destination);
-    const wet = ctx.createGain(); wet.gain.value = 0.25;
-    const d = ctx.createDelay(0.5); d.delayTime.value = 0.12;
-    const fb = ctx.createGain(); fb.gain.value = 0.3;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
-    wet.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(master);
-    const len = Math.floor(ctx.sampleRate * 2);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const ch = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
-    this.ctx = ctx; this.master = master; this.wet = wet; this.noiseBuf = buf;
-    return ctx;
-  },
-  /* called from user gestures: creates/unlocks the context */
-  ensure() {
-    const ctx = this.init();
-    if (ctx && ctx.state === 'suspended' && !document.hidden) ctx.resume().catch(() => {});
-    return save.sound ? ctx : null;
-  },
-  ok() { return !!this.ctx && save.sound && this.ctx.state === 'running'; },
-  suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {}); },
-  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); },
-  /* mute/unmute follows save.sound; the master ramp makes it instant and click-free */
-  syncMute() {
-    if (!this.master) return;
-    this.master.gain.setTargetAtTime(save.sound ? 0.9 : 0, this.ctx.currentTime, 0.015);
-    if (!save.sound) this.stopAllPours();
-  },
-  env(g, t0, a, peak, d) {
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t0 + a);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + d);
-  },
-  tone(f0, f1, dur, peak, when, send, type) {
-    const ctx = this.ctx, t0 = ctx.currentTime + (when || 0);
-    const o = ctx.createOscillator(); o.type = type || 'sine';
-    o.frequency.setValueAtTime(f0, t0);
-    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-    const g = ctx.createGain(); this.env(g, t0, 0.004, peak, dur);
-    o.connect(g); g.connect(this.master); if (send) g.connect(this.wet);
-    o.start(t0); o.stop(t0 + dur + 0.06);
-  },
-  bell(f, peak, when) {
-    this.tone(f, f, 1.1, peak, when, true);
-    this.tone(f * 2.76, f * 2.76, 0.45, peak * 0.28, when, true);
-    this.tone(f * 5.4, f * 5.4, 0.2, peak * 0.09, when, true);
-  },
-  /* band-passed slice of the shared noise buffer; optional f1 sweeps the band */
-  burst(freq, q, dur, peak, when, f1) {
-    const ctx = this.ctx, t0 = ctx.currentTime + (when || 0);
-    const s = ctx.createBufferSource(); s.buffer = this.noiseBuf;
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = q;
-    bp.frequency.setValueAtTime(freq, t0);
-    if (f1 && f1 !== freq) bp.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-    const g = ctx.createGain(); this.env(g, t0, 0.003, peak, dur);
-    s.connect(bp); bp.connect(g); g.connect(this.master);
-    s.start(t0, Math.random() * 1.5); s.stop(t0 + dur + 0.06);
-  },
-  select()  { if (!this.ok()) return; this.tone(1780, 1960, 0.07, 0.05, 0, true); this.tone(2700, 2700, 0.045, 0.014); },
-  swap()    { if (!this.ok()) return; this.tone(1500, 1250, 0.06, 0.03); },
-  invalid() { if (!this.ok()) return; this.tone(220, 160, 0.09, 0.12); this.tone(185, 125, 0.11, 0.09, 0.1); },
-  land()    { if (!this.ok()) return; this.tone(150, 92, 0.09, 0.1); this.tone(2350, 2350, 0.12, 0.022, 0.004, true); },
-  undo()    { if (!this.ok()) return; this.tone(980, 620, 0.09, 0.04); this.burst(3000, 1.2, 0.05, 0.025); },
-  /* k = bottles completed this level so far: each cork climbs the pentatonic scale */
-  cap(k)    {
-    if (!this.ok()) return;
-    this.burst(1500, 1.8, 0.045, 0.2); this.tone(950, 320, 0.07, 0.1);
-    this.bell(PENTA[(k || 0) % PENTA.length], 0.05, 0.05);
-  },
-  reveal()  { if (!this.ok()) return; this.tone(980, 1480, 0.14, 0.07, 0, true); this.bell(1975.5, 0.018, 0.08); },
-  ice()     { if (!this.ok()) return; this.tone(1850, 1700, 0.07, 0.06, 0, true); this.tone(120, 110, 0.08, 0.025, 0, false, 'square'); },
-  thaw()    { if (!this.ok()) return; this.burst(2600, 1.1, 0.3, 0.07, 0, 700); this.tone(1320, 880, 0.22, 0.07, 0.05, true); },
-  win(when) { if (!this.ok()) return; [0, 2, 4, 5, 7].forEach((k, i) => this.bell(PENTA[k], 0.07, (when || 0) + i * 0.085)); },
-  /* continuous pour voice: noise through a resonant band that rises with the
-     receiver's fill, a low body, and random gurgle blips while flow is strong */
-  startPour() {
-    if (!this.ok()) return null;
-    const ctx = this.ctx, t0 = ctx.currentTime;
-    const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 5; bp.frequency.value = 600;
-    const g = ctx.createGain(); g.gain.value = 0.0001;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
-    const g2 = ctx.createGain(); g2.gain.value = 0.0001;
-    src.connect(bp); bp.connect(g); g.connect(this.master);
-    src.connect(lp); lp.connect(g2); g2.connect(this.master);
-    src.start(t0, Math.random() * 1.5);
-    const v = { src, bp, g, g2, blip: 0 };
-    this.voices.add(v);
-    return v;
-  },
-  updatePour(v, flow, fill, dt) {
-    if (!v || !this.ctx || !this.voices.has(v)) return;
-    const t = this.ctx.currentTime;
-    fill = Math.max(0, Math.min(1, fill)); flow = Math.max(0, Math.min(1, flow));
-    v.bp.frequency.setTargetAtTime(480 + 1500 * Math.pow(fill, 1.25), t, 0.03);
-    v.g.gain.setTargetAtTime(0.0001 + 0.17 * flow, t, 0.025);
-    v.g2.gain.setTargetAtTime(0.0001 + 0.1 * flow, t, 0.03);
-    v.blip -= dt;
-    if (v.blip <= 0 && flow > 0.15 && this.ok()) {
-      v.blip = 0.05 + Math.random() * 0.09;
-      const f = (300 + 650 * fill) * (0.85 + Math.random() * 0.3);
-      this.tone(f, f * 1.55, 0.05, 0.045 * flow);
-    }
-  },
-  stopPour(v) {
-    if (!v || !this.ctx || !this.voices.has(v)) return;
-    this.voices.delete(v);
-    const t = this.ctx.currentTime;
-    v.g.gain.setTargetAtTime(0.0001, t, 0.03); v.g2.gain.setTargetAtTime(0.0001, t, 0.03);
-    try { v.src.stop(t + 0.3); } catch (e) {}
-  },
-  stopAllPours() { for (const v of [...this.voices]) this.stopPour(v); }
-};
+const AudioFX = createAudio(() => save);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) AudioFX.suspend(); else AudioFX.resume();
 });
@@ -372,7 +132,7 @@ let activeBackgroundAsset = null;
 const HIFI_BACKGROUNDS = {
   apothecaryLight: {
     cssVar: '--apo-hifi-bg',
-    png: '/assets/background-suggestions/apothecary-sunlit-cabinet.png',
+    fallback: '/assets/optimized/apothecary-sunlit-cabinet-1365.webp',
     avif960: '/assets/optimized/apothecary-sunlit-cabinet-960.avif',
     avif1365: '/assets/optimized/apothecary-sunlit-cabinet-1365.avif',
     webp960: '/assets/optimized/apothecary-sunlit-cabinet-960.webp',
@@ -381,7 +141,7 @@ const HIFI_BACKGROUNDS = {
   },
   apothecaryDark: {
     cssVar: '--apo-hifi-bg',
-    png: '/assets/background-suggestions/apothecary-moonlit-alchemy.png',
+    fallback: '/assets/optimized/apothecary-moonlit-alchemy-1365.webp',
     avif960: '/assets/optimized/apothecary-moonlit-alchemy-960.avif',
     avif1365: '/assets/optimized/apothecary-moonlit-alchemy-1365.avif',
     webp960: '/assets/optimized/apothecary-moonlit-alchemy-960.webp',
@@ -390,7 +150,7 @@ const HIFI_BACKGROUNDS = {
   },
   neon: {
     cssVar: '--neon-hifi-bg',
-    png: '/assets/background-suggestions/neon-vaporwave-skyline.png',
+    fallback: '/assets/optimized/neon-vaporwave-skyline-1365.webp',
     avif960: '/assets/optimized/neon-vaporwave-skyline-960.avif',
     avif1365: '/assets/optimized/neon-vaporwave-skyline-1365.avif',
     webp960: '/assets/optimized/neon-vaporwave-skyline-960.webp',
@@ -399,7 +159,7 @@ const HIFI_BACKGROUNDS = {
   },
   tidepool: {
     cssVar: '--tide-hifi-bg',
-    png: '/assets/tidepool-hifi-backdrop.png',
+    fallback: '/assets/optimized/tidepool-hifi-backdrop-1365.webp',
     avif960: '/assets/optimized/tidepool-hifi-backdrop-960.avif',
     avif1365: '/assets/optimized/tidepool-hifi-backdrop-1365.avif',
     webp960: '/assets/optimized/tidepool-hifi-backdrop-960.webp',
@@ -465,7 +225,7 @@ function backgroundImageValue(asset) {
     'url("' + asset.avif1365 + '") type("image/avif") 2x, ' +
     'url("' + asset.webp960 + '") type("image/webp") 1x, ' +
     'url("' + asset.webp1365 + '") type("image/webp") 2x, ' +
-    'url("' + asset.png + '") type("image/png") 2x)';
+    'url("' + asset.fallback + '") type("image/webp") 2x)';
 }
 function applyBackgroundQuality() {
   backgroundQualityEffective = preferredBackgroundQuality();
@@ -897,6 +657,7 @@ function corkContact(i) {
   c.popped = true;
   const slot = slots[i];
   slot.el.classList.add('capped');
+  setCompletion(slot, true, !RM);
   AudioFX.cap(c.note); buzz([15, 40, 25]);
   Fluid.drop(i, -1.6); Fluid.start();
   if (!RM) spawnSparkles(slot.el, 8, 0.55);
@@ -928,6 +689,7 @@ function startCork(i) {
 function seatCorkNow(i) {
   corks[i] = { t: 1, popped: true, note: 0 };
   paintCorkSvg(i);
+  setCompletion(slots[i], true);
 }
 
 /* ---------------- finite sheen sweeps (replaces the always-on CSS loop) ---------------- */
@@ -975,6 +737,8 @@ const MenuLife = {
 
 /* ---------------- game state ---------------- */
 let level = 1, difficulty = save.difficulty || 'normal';
+let currentGen = null;
+let challengeConfig = null;
 let mode = 'classic';            /* classic | daily | rush */
 let rushStage = 1, rushTimeLeft = 0, rushTicker = null, rushNextT = null;
 let rushGrace = null;   /* pours the last Rush second is waiting on */
@@ -985,7 +749,6 @@ let state = [], visual = [], par = 0, undosAllowed = Infinity, undosLeft = Infin
 let moves = 0, undoHistory = [], sel = null;
 let shapesByBottle = [], hiddenDepth = [], veiled = [];
 let frozen = new Set();
-let needCaps = 0;
 let capsThisLevel = 0;   /* completions this level — drives the cork pop's rising pitch */
 /* bottles claimed by a running or queued pour (refreshBusy keeps it current) */
 const locked = new Set();
@@ -1017,7 +780,7 @@ function buildElementMap(gen) {
   /* overlays render under reduced motion too — the CSS freezes their animations */
   ELEMENT_MAP = {};
   const stateHash = gen.state.reduce((s, b, i) => (s ^ b.reduce((x, c) => (x * 31 + c) | 0, i * 997)) | 0, 0);
-  const rng = window.mulberry32(((stateHash >>> 0) ^ (gen.par * 1234567)) >>> 0);
+  const rng = Logic.mulberry32(((stateHash >>> 0) ^ (gen.par * 1234567)) >>> 0);
   for (let c = 0; c < gen.colors; c++) {
     if (rng() < 0.45) ELEMENT_MAP[c] = ELEM_TYPES[Math.floor(rng() * ELEM_TYPES.length)];
     else rng(); // consume RNG slot
@@ -1206,884 +969,73 @@ const Fluid = {
    The liquid group is counter-rotated against the bottle's tilt, so
    bands and surfaces stay horizontal in world space; the interior
    clip (in bottle space) shapes the pool. */
-const SvgRenderer = {
-  backend: 'svg',
-  beginPour(info) {
-    const fx = $('#fx');
-    const { si, c0, c1, sx, sy, tx, ty, cpx, cpy, side, receiverW } = info;
-    const arcD = `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)}`;
-    const pourSVG = document.createElementNS(NS, 'svg');
-    pourSVG.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:71';
-    const gid = 'ps_' + si;
-    const pdefs = document.createElementNS(NS, 'defs');
-    const pgrad = document.createElementNS(NS, 'linearGradient');
-    pgrad.setAttribute('id', gid); pgrad.setAttribute('gradientUnits', 'userSpaceOnUse');
-    pgrad.setAttribute('x1', sx); pgrad.setAttribute('y1', sy);
-    pgrad.setAttribute('x2', tx); pgrad.setAttribute('y2', ty);
-    [[0, c0], [1, c1]].forEach(([off, col]) => {
-      const stop = document.createElementNS(NS, 'stop');
-      stop.setAttribute('offset', off); stop.setAttribute('stop-color', col);
-      pgrad.appendChild(stop);
-    });
-    pdefs.appendChild(pgrad); pourSVG.appendChild(pdefs);
-    const paths = [];
-    const mkPath = (stroke, width, opacity) => {
-      const path = document.createElementNS(NS, 'path');
-      paths.push(path);
-      path.setAttribute('d', arcD); path.setAttribute('fill', 'none');
-      path.setAttribute('stroke', stroke); path.setAttribute('stroke-width', width);
-      path.setAttribute('stroke-linecap', 'round');
-      if (opacity !== undefined) path.setAttribute('opacity', opacity);
-      return path;
-    };
-    /* layered wide strokes fake the glow — the blur() filter was a mobile slow path */
-    if (activeRenderProfile().streamGlow) {
-      pourSVG.appendChild(mkPath(c0, 14, 0.10 * activeRenderProfile().glowStrength));
-      pourSVG.appendChild(mkPath(c0, 8, 0.18 * activeRenderProfile().glowStrength));
-    }
-    pourSVG.appendChild(mkPath('url(#' + gid + ')', 5));
-    pourSVG.appendChild(mkPath('rgba(255,255,255,0.4)', 1.6));
-    fx.appendChild(pourSVG);
-    const rippleEls = [];
-    if (!RM) {
-      for (let r = 0; r < 2; r++) {
-        const rip = document.createElement('div');
-        rip.className = 'pour-ripple';
-        rip.style.cssText = `width:${receiverW * 0.48}px;height:${receiverW * 0.15}px;border-color:${c0};` +
-          `left:${tx}px;top:${ty}px;animation-delay:${r * 0.24}s`;
-        fx.appendChild(rip);
-        rippleEls.push(rip);
-      }
-      Fluid.drop(info.di, -1.8);
-      Fluid.start();
-    }
-    const dropTimer = (!explicitPrettyEffects()) ? null : setInterval(() => {
-      const d = document.createElement('span');
-      d.className = 'droplet';
-      d.style.background = c0;
-      d.style.boxShadow = '0 0 6px ' + c0 + '88';
-      d.style.left = (tx + (Math.random() * 14 - 7)).toFixed(1) + 'px';
-      d.style.top = ty.toFixed(1) + 'px';
-      d.style.setProperty('--dx', (Math.random() * 44 - 22).toFixed(0) + 'px');
-      d.style.setProperty('--dy', (-(10 + Math.random() * 30)).toFixed(0) + 'px');
-      fx.appendChild(d);
-      setTimeout(() => d.remove(), 600);
-    }, 120);
-    const spawnPearlBubble = () => {
-      const b = document.createElement('span');
-      b.className = 'pearl-bubble';
-      b.style.left = (tx + (Math.random() * receiverW * 0.32 - receiverW * 0.16)).toFixed(1) + 'px';
-      b.style.top = (ty + receiverW * (0.02 + Math.random() * 0.12)).toFixed(1) + 'px';
-      b.style.setProperty('--dx', (Math.random() * 22 - 11).toFixed(0) + 'px');
-      b.style.setProperty('--dy', (-(24 + Math.random() * 34)).toFixed(0) + 'px');
-      fx.appendChild(b);
-      setTimeout(() => b.remove(), 1000);
-    };
-    let bubbleTimer = null;
-    if (prettyTidepoolEffects()) {
-      spawnPearlBubble();
-      bubbleTimer = setInterval(spawnPearlBubble, 180);
-    }
-    if (!this.pourFxMap) this.pourFxMap = new Map();
-    this.pourFxMap.set(si, { pourSVG, paths, grad: pgrad, rippleEls, dropTimer, bubbleTimer });
-  },
-  /* the source keeps re-aiming during the pour — follow it */
-  updatePour(info) {
-    const fx = this.pourFxMap && this.pourFxMap.get(info && info.si);
-    if (!fx || !fx.paths) return;
-    const d = `M ${info.sx.toFixed(1)} ${info.sy.toFixed(1)} Q ${info.cpx.toFixed(1)} ${info.cpy.toFixed(1)} ${info.tx.toFixed(1)} ${info.ty.toFixed(1)}`;
-    fx.paths.forEach(p => p.setAttribute('d', d));
-    if (fx.grad) { fx.grad.setAttribute('x1', info.sx); fx.grad.setAttribute('y1', info.sy); fx.grad.setAttribute('x2', info.tx); fx.grad.setAttribute('y2', info.ty); }
-  },
-  endPour(info) {
-    if (!this.pourFxMap) return;
-    const fx = this.pourFxMap.get(info && info.si);
-    if (!fx) return;
-    if (fx.dropTimer) clearInterval(fx.dropTimer);
-    if (fx.bubbleTimer) clearInterval(fx.bubbleTimer);
-    if (fx.pourSVG) fx.pourSVG.remove();
-    fx.rippleEls.forEach(e => e.remove());
-    this.pourFxMap.delete(info.si);
-  },
-  renderBottle(i, opts = {}) {
-    const tiltDeg = typeof opts === 'number' ? opts : (opts.tiltDeg || 0);
-    const wob = typeof opts === 'object' ? opts.wob : null;
-    const slot = slots[i];
-    const sh = slot.sh;
-    const segs = visual[i];
-    const g = slot.liquidGroup;
-    while (g.firstChild) g.removeChild(g.firstChild);
-    const t = tiltDeg || 0;
-    const a = t * Math.PI / 180;
-    const px = 50, py = sh.vbH / 2;
-    const inner = svgEl('g', t ? { transform: 'rotate(' + (-t).toFixed(2) + ' ' + px + ' ' + py + ')' } : {});
+const SvgRenderer = createSvgRenderer({
+  get $() { return $; },
+  get COLORS() { return COLORS; },
+  get ELEMENT_MAP() { return ELEMENT_MAP; },
+  get Fluid() { return Fluid; },
+  get HIDDEN_FILL() { return HIDDEN_FILL; },
+  get NS() { return NS; },
+  get RM() { return RM; },
+  get SKIN() { return SKIN; },
+  get activeRenderProfile() { return activeRenderProfile; },
+  get appendElemOverlay() { return appendElemOverlay; },
+  get explicitPrettyEffects() { return explicitPrettyEffects; },
+  get hiddenDepth() { return hiddenDepth; },
+  get locked() { return locked; },
+  get prettyTidepoolEffects() { return prettyTidepoolEffects; },
+  get save() { return save; },
+  get shapeWidthAt() { return shapeWidthAt; },
+  get shapesByBottle() { return shapesByBottle; },
+  get slots() { return slots; },
+  get svgEl() { return svgEl; },
+  get visual() { return visual; }
+});
 
-    /* lowest interior point in world space */
-    let low = sh.B;
-    if (t) {
-      const cs = Math.cos(a), sn = Math.sin(a);
-      low = -1e9;
-      const [xl, xr, yt, yb] = sh.box;
-      [[xl, yt], [xr, yt], [xl, yb], [xr, yb]].forEach(([x, y]) => {
-        const wy = py + sn * (x - px) + cs * (y - py);
-        if (wy > low) low = wy;
-      });
-      low -= 2;
-    }
-    const hUnit = sh.unit * (0.55 + 0.45 * Math.cos(a));
-    const fade = Math.max(0, 1 - Math.abs(t) / 32);
+const CanvasRenderer = createCanvasRenderer({
+  get $() { return $; },
+  get COLORS() { return COLORS; },
+  get ELEMENT_MAP() { return ELEMENT_MAP; },
+  get Fluid() { return Fluid; },
+  get FrameGate() { return FrameGate; },
+  get GLASS_SHADOW() { return GLASS_SHADOW; },
+  get HIDDEN_FILL() { return HIDDEN_FILL; },
+  get LID() { return LID; },
+  get MODE() { return MODE; },
+  get Motion() { return Motion; },
+  get PerfMeter() { return PerfMeter; },
+  get PourPhysics() { return PourPhysics; },
+  get RIM_COLOR() { return RIM_COLOR; },
+  get RM() { return RM; },
+  get SHAPES() { return SHAPES; },
+  get SKIN() { return SKIN; },
+  get activeRenderProfile() { return activeRenderProfile; },
+  get bodies() { return bodies; },
+  get boltPath() { return boltPath; },
+  get bottleAnimating() { return bottleAnimating; },
+  get corkBodyW() { return corkBodyW; },
+  get corkPose() { return corkPose; },
+  get corks() { return corks; },
+  get flowN() { return flowN; },
+  get flyingSource() { return flyingSource; },
+  get frozen() { return frozen; },
+  get hiddenDepth() { return hiddenDepth; },
+  get jobsInto() { return jobsInto; },
+  get layoutBox() { return layoutBox; },
+  get locked() { return locked; },
+  get mixHex() { return mixHex; },
+  get poses() { return poses; },
+  get prettyTidepoolEffects() { return prettyTidepoolEffects; },
+  get save() { return save; },
+  get shapesByBottle() { return shapesByBottle; },
+  get slots() { return slots; },
+  get snowflakePath() { return snowflakePath; },
+  get state() { return state; },
+  get veiled() { return veiled; },
+  get visual() { return visual; }
+});
 
-    const shapeName = shapesByBottle[i];
-    const WAVECUT = Fluid.AMP + Fluid.MENISCUS + 1;
-    const waveMode = !t && Fluid.active() && !locked.has(i);
-    const lastSeg = segs.length ? segs[segs.length - 1] : null;
-    let topWave = null;
-
-    let cum = 0;
-    const ellipses = [];
-    for (const seg of segs) {
-      if (seg.u <= 0.01) continue;
-      let y, h;
-      if (!t && sh.volToY) {
-        const yBot = sh.volToY(cum / 4);
-        const yTop = sh.volToY((cum + seg.u) / 4);
-        y = yTop; h = yBot - yTop;
-      } else {
-        h = seg.u * hUnit;
-        y = low - (cum + seg.u) * hUnit;
-      }
-      let rectY = y, rectH = h;
-      /* the top band's flat lid becomes the animated wave surface */
-      if (seg === lastSeg && waveMode && h > WAVECUT + 6) {
-        rectY = y + WAVECUT; rectH = h - WAVECUT;
-        topWave = { surfY: y, bottomY: rectY, c: seg.c };
-      }
-      inner.appendChild(svgEl('rect', { x: -160, y: rectY, width: 420, height: rectH + 1.4, fill: 'url(#liq' + seg.c + ')' }));
-      if (!t && ELEMENT_MAP[seg.c]) appendElemOverlay(inner, ELEMENT_MAP[seg.c], y, h, px);
-      if (fade > 0.04) ellipses.push({ y, c: seg.c });
-      cum += seg.u;
-    }
-    /* Fake-3D meniscus cue: a single concave-arc highlight on the topmost visible
-       liquid when fluid animation is off. Walls rise, centre dips — matching the
-       settled shape of Fluid.crestFor() so the static and animated states look
-       identical. No dark lines; no per-band cost.
-       Uses shapeWidthAt (same as the fluid code) so the arc never exceeds the
-       interior clip — fixes flask neck / nearly-full bottle cases. */
-    if (ellipses.length && !topWave) {
-      const e = ellipses[ellipses.length - 1];
-      const wdy = wob ? wob.dy : 0;
-      const halfW = Math.max(5, shapeWidthAt(shapeName, e.y) / 2);
-      const MEN = Fluid.MENISCUS;
-      const sy = e.y + wdy + 0.4;          /* +0.4 matches crestFor baseline offset */
-      inner.appendChild(svgEl('path', {
-        d: `M${(px - halfW).toFixed(1)},${(sy - MEN).toFixed(2)} Q${px},${(sy + MEN).toFixed(2)} ${(px + halfW).toFixed(1)},${(sy - MEN).toFixed(2)}`,
-        fill: 'none',
-        stroke: 'rgba(255,255,255,0.7)', 'stroke-width': 2,
-        'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-        opacity: fade
-      }));
-    }
-
-    /* animated wave surface for the top band */
-    if (topWave) {
-      const halfW = Math.max(5, shapeWidthAt(shapeName, topWave.surfY) / 2);
-      const path = svgEl('path', { fill: 'url(#liq' + topWave.c + ')', d: Fluid.pathFor(i, topWave.surfY, halfW, topWave.bottomY) });
-      inner.appendChild(path);
-      const crest = svgEl('path', { d: Fluid.crestFor(i, topWave.surfY, halfW), fill: 'none',
-        stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
-      inner.appendChild(crest);
-      slot.surf = { path, crest, surfY: topWave.surfY, halfW, bottomY: topWave.bottomY };
-      Fluid.start();
-    } else {
-      slot.surf = null;
-    }
-
-    /* mystery overlay: unit bands counted from the bottom */
-    const hid = hiddenDepth[i] || 0;
-    for (let u = 0; u < hid && u < cum; u++) {
-      let hy, hh;
-      if (!t && sh.volToY) {
-        const hBot = sh.volToY(u / 4);
-        const hTop = sh.volToY((u + 1) / 4);
-        hy = hTop; hh = hBot - hTop;
-      } else {
-        hh = hUnit;
-        hy = low - (u + 1) * hUnit;
-      }
-      inner.appendChild(svgEl('rect', { x: -160, y: hy, width: 420, height: hh + 1.2, fill: 'url(#liqH)' }));
-      if (fade > 0.3) {
-        const txt = svgEl('text', {
-          x: px, y: hy + hh / 2 + 5.5, 'text-anchor': 'middle',
-          'font-size': 15, 'font-weight': 700, fill: '#cdd5f2', opacity: 0.85 * fade
-        });
-        txt.textContent = '?';
-        txt.setAttribute('font-family', "system-ui, sans-serif");
-        inner.appendChild(txt);
-      }
-    }
-
-    g.appendChild(inner);
-    const top = segs.length && cum > 0.01 ? segs[segs.length - 1] : null;
-    const glowColor = top ? (hid >= cum ? HIDDEN_FILL[1] : COLORS[top.c][1]) : null;
-    /* subtle CSS-only per-bottle glow (WebGL bloom removed) — a touch stronger on Neon */
-    const glowAlpha = Math.round((SKIN === 'neon' ? 0.40 : 0.20) * activeRenderProfile().glowStrength * 255);
-    const ga = Math.max(0, Math.min(255, glowAlpha)).toString(16).padStart(2, '0');
-    slot.glow.style.background = glowColor
-      ? 'radial-gradient(50% 60% at 50% 50%, ' + glowColor + ga + ', transparent 70%)'
-      : 'none';
-  }
-};
-
-
-const CanvasRenderer = {
-  backend: 'canvas2d',
-  canvas: null,
-  ctx: null,
-  dpr: 1,
-  rects: [],
-  ok: false,
-  renderQueued: false,
-  pathCache: new Map(),
-  gradientCache: new Map(),
-  shellCache: new Map(),
-  backCache: new Map(),
-  glowCache: new Map(),
-  PAD: 18,               /* sprite padding so baked shadows/glows aren't clipped */
-  ensure() {
-    this.canvas = this.canvas || document.getElementById('board-canvas');
-    if (!this.canvas) return false;
-    if (!this.ctx) this.ctx = this.canvas.getContext('2d');
-    this.ok = !!this.ctx && typeof Path2D === 'function';
-    return this.ok;
-  },
-  syncLayout() {
-    if (!this.ensure()) return false;
-    const stage = $('#stage');
-    const sr = stage.getBoundingClientRect();
-    this.dpr = Math.max(1, Math.min(activeRenderProfile().dprCap, window.devicePixelRatio || 1));
-    const w = Math.max(1, Math.round(sr.width * this.dpr));
-    const h = Math.max(1, Math.round(sr.height * this.dpr));
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w; this.canvas.height = h;
-      this.gradientCache.clear();
-      this.shellCache.clear();
-      this.backCache.clear();
-    }
-    this.canvas.style.width = sr.width + 'px';
-    this.canvas.style.height = sr.height + 'px';
-    this.rects = slots.map((slot, i) => Object.assign(layoutBox(slot.slot, stage), { shapeName: shapesByBottle[i] }));
-    return true;
-  },
-  clear() {
-    if (!this.ensure()) return;
-    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.ctx.clearRect(0, 0, this.canvas.width / this.dpr, this.canvas.height / this.dpr);
-  },
-  renderBottle() { return this.requestRender(); },
-  requestRender() {
-    if (!this.ensure()) return this;
-    this.staticGen++;   /* something outside the animation loop changed: rebuild the idle layer */
-    if (this.renderQueued || Motion.running) return this;   /* Motion paints every frame anyway */
-    this.renderQueued = true;
-    FrameGate.request('canvas-render', () => {
-      this.renderQueued = false;
-      this.renderNow();
-    });
-    return this;
-  },
-  /* Bottles that are not animating are painted once into an offscreen idle
-     layer; while pours run, each frame blits that layer and redraws only the
-     moving bottles. The layer is rebuilt when the moving set changes or when
-     anything outside the animation loop asks for a render. */
-  staticGen: 0,
-  staticKey: null,
-  staticCanvas: null,
-  renderNow() {
-    if (!this.ensure()) return;
-    if (this.rects.length !== slots.length) this.syncLayout();
-    this.clear();
-    PerfMeter.mark('canvas2d', performance.now());
-    const n = state.length;
-    /* a bottle that started moving stays in the live set until the whole
-       board is still, so the idle layer is rebuilt only when the set grows */
-    const live = this._live || (this._live = new Set());
-    let any = false;
-    for (let i = 0; i < n; i++) if (bottleAnimating(i)) { live.add(i); any = true; }
-    if (!any) live.clear();
-    const act = this._act || (this._act = []);
-    act.length = 0;
-    let key = this.staticGen + ':';
-    for (let i = 0; i < n; i++) if (live.has(i)) { act.push(i); key += i + ','; }
-    if (!act.length) {
-      for (let i = 0; i < n; i++) this.drawBottle(i);
-      this.staticKey = null;
-      return;
-    }
-    const W = this.canvas.width, H = this.canvas.height;
-    if (key !== this.staticKey || !this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) {
-      if (!this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) this.staticCanvas = this.makeLayer(W, H);
-      const sctx = this.staticCanvas.getContext('2d'), main = this.ctx;
-      sctx.setTransform(1, 0, 0, 1, 0, 0);
-      sctx.clearRect(0, 0, W, H);
-      sctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      this.ctx = sctx;
-      try { for (let i = 0; i < n; i++) if (!act.includes(i)) this.drawBottle(i); }
-      finally { this.ctx = main; }
-      this.staticKey = key;
-    }
-    const ctx = this.ctx;
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.staticCanvas, 0, 0); ctx.restore();
-    /* bottles in flight are drawn last so they pass over their neighbours */
-    for (const i of act) if (!flyingSource(i)) this.drawBottle(i);
-    for (const i of act) if (flyingSource(i)) this.drawBottle(i);
-  },
-  renderAll() {
-    return this.requestRender();
-  },
-  setTheme() { this.staticGen++; this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
-  setQuality(q) { this.quality = q || 'auto'; this.shellCache.clear(); this.backCache.clear(); return this; },
-  destroy() { this.renderQueued = false; this.clear(); return this; },
-  roundRect(ctx, x, y, w, h, r) {
-    r = Math.min(r || 0, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
-  },
-  paths(shapeName) {
-    let cached = this.pathCache.get(shapeName);
-    if (!cached) {
-      const sh = SHAPES[shapeName];
-      cached = { interior: new Path2D(sh.interior), outline: new Path2D(sh.outline) };
-      this.pathCache.set(shapeName, cached);
-    }
-    return cached;
-  },
-  liquidGradient(ctx, c, shapeName) {
-    const key = SKIN + ':' + MODE + ':' + c + ':' + shapeName;
-    const cached = this.gradientCache.get(key);
-    if (cached) return cached;
-    const sh = SHAPES[shapeName];
-    /* span the actual glass body, not the full band rect — the old 0–100 span
-       kept the dark cylinder edges outside the visible interior */
-    const xl = sh.box[0] - 4, xr = sh.box[1] + 4;
-    const g = ctx.createLinearGradient(xl, 0, xr, 0);
-    const pair = c === 'hidden' ? HIDDEN_FILL : COLORS[c];
-    const dark = pair[1], light = pair[0];
-    const core = mixHex(light, '#ffffff', SKIN === 'neon' ? 0.26 : 0.15);
-    g.addColorStop(0, dark);
-    g.addColorStop(0.16, mixHex(dark, light, 0.55));
-    g.addColorStop(0.4, light);
-    g.addColorStop(0.56, core);
-    g.addColorStop(0.74, light);
-    g.addColorStop(1, dark);
-    this.gradientCache.set(key, g);
-    return g;
-  },
-  /* vertical depth: liquid reads deeper toward the base — cached per shape */
-  depthOverlay(ctx, shapeName) {
-    const key = 'depth:' + shapeName + ':' + SKIN;
-    const cached = this.gradientCache.get(key);
-    if (cached) return cached;
-    const sh = SHAPES[shapeName];
-    const g = ctx.createLinearGradient(0, sh.T, 0, sh.B);
-    const tint = SKIN === 'neon' ? '18,8,42' : '38,22,10';
-    g.addColorStop(0, 'rgba(' + tint + ',0)');
-    g.addColorStop(0.62, 'rgba(' + tint + ',0.05)');
-    g.addColorStop(1, 'rgba(' + tint + ',0.20)');
-    this.gradientCache.set(key, g);
-    return g;
-  },
-  makeLayer(w, h) {
-    const cv = typeof OffscreenCanvas === 'function'
-      ? new OffscreenCanvas(Math.ceil(w), Math.ceil(h))
-      : document.createElement('canvas');
-    cv.width = Math.ceil(w);
-    cv.height = Math.ceil(h);
-    return cv;
-  },
-  /* baked under-layer: drop shadow + glass backing tint. Rendered once per
-     shape × theme × dpr; per-frame cost is a single drawImage instead of the
-     shadowBlur slow path every bottle every frame. */
-  backLayer(shapeName) {
-    const sh = SHAPES[shapeName];
-    const key = [shapeName, SKIN, MODE, this.dpr].join(':');
-    const cached = this.backCache.get(key);
-    if (cached) return cached;
-    const P = this.PAD;
-    const scale = Math.max(1, Math.min(2, this.dpr || 1));
-    const cv = this.makeLayer((100 + 2 * P) * scale, (sh.vbH + 2 * P) * scale);
-    const ctx = cv.getContext('2d');
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    ctx.translate(P, P);
-    ctx.shadowColor = 'rgba(4,8,26,0.45)';
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 7;
-    ctx.fillStyle = SKIN === 'neon' ? 'rgba(127,208,255,0.10)' : 'rgba(255,233,200,0.12)';
-    ctx.fill(this.paths(shapeName).interior);
-    ctx.shadowColor = 'transparent';
-    /* pooled scene light beneath the bottle ties it to the backdrop
-       (Neon skips this — it gets a per-colour bloom in drawBottle) */
-    if (SKIN !== 'neon') {
-      const tone = SKIN === 'tidepool' ? '224,255,246' : MODE === 'dark' ? '255,176,92' : '255,219,150';
-      const alpha = MODE === 'dark' ? 0.26 : 0.20;
-      const glow = ctx.createRadialGradient(50, sh.vbH - 4, 2, 50, sh.vbH - 4, 42);
-      glow.addColorStop(0, 'rgba(' + tone + ',' + alpha + ')');
-      glow.addColorStop(1, 'rgba(' + tone + ',0)');
-      ctx.fillStyle = glow;
-      ctx.save();
-      ctx.scale(1, 0.3);
-      ctx.beginPath();
-      ctx.arc(50, (sh.vbH - 4) / 0.3, 42, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-    this.backCache.set(key, cv);
-    return cv;
-  },
-  /* soft radial glow dot, cached per colour — replaces per-particle shadowBlur */
-  glowDot(color) {
-    const cached = this.glowCache.get(color);
-    if (cached) return cached;
-    const cv = this.makeLayer(32, 32);
-    const ctx = cv.getContext('2d');
-    const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    g.addColorStop(0, color + 'cc');
-    g.addColorStop(0.55, color + '55');
-    g.addColorStop(1, color + '00');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 32, 32);
-    this.glowCache.set(color, cv);
-    return cv;
-  },
-  shellLayer(shapeName) {
-    const sh = SHAPES[shapeName];
-    const key = [shapeName, SKIN, MODE, RIM_COLOR, this.dpr].join(':');
-    const cached = this.shellCache.get(key);
-    if (cached) return cached;
-    const scale = Math.max(1, Math.min(2, this.dpr || 1));
-    const cv = this.makeLayer(100 * scale, sh.vbH * scale);
-    const ctx = cv.getContext('2d');
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    const paths = this.paths(shapeName);
-    const [xl, xr, , yb] = sh.box;
-    const shadowRgb = parseInt(GLASS_SHADOW.slice(1), 16);
-    const shadowTint = ((shadowRgb >> 16) & 255) + ',' + ((shadowRgb >> 8) & 255) + ',' + (shadowRgb & 255);
-    /* cylinder side shade pinned to the glass body span */
-    const shade = ctx.createLinearGradient(xl - 4, 0, xr + 4, 0);
-    shade.addColorStop(0, 'rgba(' + shadowTint + ',0.34)');
-    shade.addColorStop(0.16, 'rgba(' + shadowTint + ',0.06)');
-    shade.addColorStop(0.5, 'rgba(255,255,255,0)');
-    shade.addColorStop(0.86, 'rgba(' + shadowTint + ',0.10)');
-    shade.addColorStop(1, 'rgba(' + shadowTint + ',0.38)');
-    ctx.fillStyle = shade;
-    ctx.fill(paths.interior);
-    /* refractive inner edge: bright line hugging the inside of the walls */
-    ctx.save();
-    ctx.clip(paths.interior);
-    ctx.strokeStyle = 'rgba(255,255,255,0.20)';
-    ctx.lineWidth = 3.4;
-    ctx.stroke(paths.interior);
-    ctx.restore();
-    ctx.fillStyle = 'rgba(255,255,255,0.34)';
-    (sh.gloss || []).forEach(g => { this.roundRect(ctx, g.x, g.y, g.w, g.h, g.rx); ctx.globalAlpha = g.o; ctx.fill(); ctx.globalAlpha = 1; });
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    /* soft theme-tinted halo under the crisp rim gives the glass weight */
-    ctx.strokeStyle = SKIN === 'neon' ? 'rgba(150,90,255,0.30)'
-      : SKIN === 'tidepool' ? 'rgba(24,110,120,0.28)'
-      : MODE === 'dark' ? 'rgba(255,176,96,0.30)' : 'rgba(120,78,38,0.26)';
-    ctx.lineWidth = 4.6;
-    ctx.stroke(paths.outline);
-    ctx.strokeStyle = RIM_COLOR;
-    ctx.lineWidth = 2.4;
-    ctx.stroke(paths.outline);
-    /* key light: brighter rim on the left, candle-amber on the right in the dark */
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, 0, 42, sh.vbH); ctx.clip();
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-    ctx.lineWidth = 3.2;
-    ctx.stroke(paths.outline);
-    ctx.restore();
-    if (SKIN === 'apothecary' && MODE === 'dark') {
-      ctx.save();
-      ctx.beginPath(); ctx.rect(58, 0, 42, sh.vbH); ctx.clip();
-      ctx.strokeStyle = 'rgba(255,178,92,0.55)';
-      ctx.lineWidth = 3;
-      ctx.stroke(paths.outline);
-      ctx.restore();
-    }
-    /* bottom rim light (the SVG renderer always had this; canvas was missing it) */
-    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(xl + 9, yb - 4);
-    ctx.quadraticCurveTo(50, yb + 5, xr - 9, yb - 4);
-    ctx.stroke();
-    if (SKIN === 'tidepool') { /* pearl specular */
-      const px2 = xl + (xr - xl) * 0.24, py2 = sh.vbH * 0.30;
-      const pearl = ctx.createRadialGradient(px2, py2, 0, px2, py2, 5);
-      pearl.addColorStop(0, 'rgba(255,255,255,0.85)');
-      pearl.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = pearl;
-      ctx.beginPath(); ctx.arc(px2, py2, 5, 0, Math.PI * 2); ctx.fill();
-    }
-    const lip = sh.lip;
-    const lipG = ctx.createLinearGradient(0, lip.y, 0, lip.y + lip.h);
-    lipG.addColorStop(0, 'rgba(255,255,255,0.5)');
-    lipG.addColorStop(1, 'rgba(255,255,255,0.10)');
-    ctx.fillStyle = lipG;
-    this.roundRect(ctx, lip.x, lip.y, lip.w, lip.h, lip.rx);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(10,14,36,0.55)';
-    ctx.beginPath();
-    ctx.ellipse(50, lip.mouthCy, lip.mouthRx, lip.mouthRy, 0, 0, Math.PI * 2);
-    ctx.fill();
-    /* inner neck shadow just below the mouth reads as glass thickness */
-    const neckG = ctx.createLinearGradient(0, lip.mouthCy, 0, lip.mouthCy + 9);
-    neckG.addColorStop(0, 'rgba(8,10,28,0.28)');
-    neckG.addColorStop(1, 'rgba(8,10,28,0)');
-    ctx.fillStyle = neckG;
-    ctx.fillRect(lip.x + 3, lip.mouthCy, lip.w - 6, 9);
-    this.shellCache.set(key, cv);
-    return cv;
-  },
-  /* completion lid in bottle-local viewBox units, so it follows lift and tilt */
-  drawCork(ctx, sh, c) {
-    if (c.t <= 0) return;
-    const k = sh.cork, pose = corkPose(c.t, corkBodyW(sh));
-    const key = 'lid:' + LID.join(',') + ':' + k.x + ':' + k.w;
-    let wood = this.gradientCache.get(key);
-    if (!wood) {
-      wood = ctx.createLinearGradient(k.x, 0, k.x + k.w, 0);
-      wood.addColorStop(0, LID[0]); wood.addColorStop(0.42, LID[1]); wood.addColorStop(1, LID[2]);
-      this.gradientCache.set(key, wood);
-    }
-    ctx.save();
-    ctx.globalAlpha = pose.alpha;
-    ctx.translate(0, pose.off);
-    ctx.fillStyle = wood;
-    this.roundRect(ctx, k.x, k.y, k.w, k.h, k.r);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(60,35,15,0.5)'; ctx.lineWidth = 1; ctx.stroke();
-    ctx.fillStyle = LID[3];
-    ctx.beginPath(); ctx.ellipse(k.x + k.w / 2, k.y + 2.5, (k.w - 5) / 2, 2.4, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-  },
-  /* liquid element badges — small legible emblems instead of the old scribbles */
-  drawElement(ctx, elem, y, h) {
-    ctx.save();
-    const cx = 50, cy = y + h / 2;
-    if (elem === 'icy') {
-      const g = ctx.createLinearGradient(0, y, 0, y + h);
-      g.addColorStop(0, 'rgba(205,242,255,0.30)');
-      g.addColorStop(1, 'rgba(160,220,250,0.12)');
-      ctx.fillStyle = g; ctx.fillRect(-160, y, 420, h);
-      ctx.strokeStyle = 'rgba(235,250,255,0.5)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(-160, y + 0.6); ctx.lineTo(260, y + 0.6); ctx.stroke();
-      const r = Math.min(h * 0.3, 7);
-      ctx.strokeStyle = 'rgba(240,252,255,0.95)'; ctx.lineWidth = 1.3; ctx.lineCap = 'round';
-      ctx.stroke(new Path2D(snowflakePath(cx, cy, r)));
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      for (const [dx2, dy2, dr] of [[-r * 1.9, -r * 0.7, 1.1], [r * 1.8, r * 0.6, 0.9]]) {
-        ctx.beginPath(); ctx.arc(cx + dx2, cy + dy2, dr, 0, Math.PI * 2); ctx.fill();
-      }
-    } else if (elem === 'electric') {
-      ctx.fillStyle = 'rgba(140,240,255,0.14)'; ctx.fillRect(-160, y, 420, h);
-      const hh = Math.min(h * 0.62, 13);
-      const bolt = new Path2D(boltPath(cx, cy, hh));
-      ctx.fillStyle = 'rgba(255,250,190,0.95)'; ctx.fill(bolt);
-      ctx.strokeStyle = 'rgba(120,235,255,0.9)'; ctx.lineWidth = 0.9; ctx.lineJoin = 'round'; ctx.stroke(bolt);
-      ctx.strokeStyle = 'rgba(190,250,255,0.35)'; ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx - hh * 1.7, cy); ctx.lineTo(cx - hh * 0.8, cy);
-      ctx.moveTo(cx + hh * 0.8, cy); ctx.lineTo(cx + hh * 1.7, cy);
-      ctx.stroke();
-    } else if (elem === 'boiling') {
-      for (const [bx, by, br] of [[cx - 13, y + h - 5, 2.6], [cx - 3, y + h - 7.5, 3.4], [cx + 8, y + h - 4.5, 2.2], [cx + 13, y + h * 0.4, 1.6], [cx - 8, y + h * 0.28, 1.3]]) {
-        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 0.9; ctx.stroke();
-        ctx.beginPath(); ctx.arc(bx - br * 0.35, by - br * 0.35, br * 0.3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
-      }
-    } else if (elem === 'toxic') {
-      ctx.fillStyle = 'rgba(110,255,140,0.16)'; ctx.fillRect(-160, y, 420, h);
-      const cw = Math.min(h * 0.72, 15);
-      this.roundRect(ctx, cx - cw / 2, cy - cw / 2, cw, cw, cw * 0.28);
-      ctx.fillStyle = 'rgba(16,52,28,0.6)'; ctx.fill();
-      ctx.strokeStyle = 'rgba(170,255,190,0.85)'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = 'rgba(214,255,224,0.95)';
-      ctx.font = '700 ' + Math.round(cw * 0.62) + 'px system-ui';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('☠', cx, cy + 0.5);
-    }
-    ctx.restore();
-  },
-  effectsEnabled() { return !RM && activeRenderProfile().id !== 'low'; },
-  prettyEffectsEnabled() { return !RM && activeRenderProfile().id === 'pretty'; },
-  /* Aliquot stream: quadratic bezier from the source rim to the receiver
-     surface; width follows the flow that left the lip tf·sqrt(u) earlier,
-     so the head falls and the tail detaches. Stage coordinates. */
-  drawStream(ctx, job) {
-    const st = job.streamFx;
-    if (!st) return;
-    const sx = st.sx, sy = st.sy, ex = st.tx, ey = st.ty;
-    if (ey <= sy) return;
-    const s = job.s, tp = job.t - job.T1;
-    const cx = sx + s * job.w * 0.16, cy = sy + (ey - sy) * 0.08;
-    const N = 16, L = this._sL || (this._sL = new Float64Array(2 * N + 2)), Rr = this._sR || (this._sR = new Float64Array(2 * N + 2));
-    const Cx = this._sC || (this._sC = new Float64Array(2 * N + 2));
-    let any = false;
-    for (let k = 0; k <= N; k++) {
-      const u = k / N, iu = 1 - u;
-      const x = iu * iu * sx + 2 * iu * u * cx + u * u * ex, y = iu * iu * sy + 2 * iu * u * cy + u * u * ey;
-      let dx = 2 * iu * (cx - sx) + 2 * u * (ex - cx), dy = 2 * iu * (cy - sy) + 2 * u * (ey - cy);
-      const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
-      const e = tp - job.tf * Math.sqrt(u);
-      const f = e > 0 && e < job.T2 ? flowN(e / job.T2) : 0;
-      const hw = f > 0 ? job.maxW * Math.sqrt(f) * (1 - 0.3 * u) * 0.5 : 0;
-      if (hw > 0.2) any = true;
-      L[2 * k] = x - dy * hw; L[2 * k + 1] = y + dx * hw;
-      Rr[2 * k] = x + dy * hw; Rr[2 * k + 1] = y - dx * hw;
-      Cx[2 * k] = x; Cx[2 * k + 1] = y;
-    }
-    if (!any) return;
-    const c0 = COLORS[job.color][0], c1 = COLORS[job.color][1];
-    ctx.save();
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    /* theme glow: wide soft strokes along the centreline (no blur filter) */
-    const prof = activeRenderProfile();
-    if (prof.streamGlow) {
-      ctx.strokeStyle = c0;
-      ctx.beginPath(); ctx.moveTo(Cx[0], Cx[1]);
-      for (let k = 1; k <= N; k++) ctx.lineTo(Cx[2 * k], Cx[2 * k + 1]);
-      ctx.globalAlpha = 0.10 * prof.glowStrength; ctx.lineWidth = job.maxW * 1.9; ctx.stroke();
-      ctx.globalAlpha = 0.18 * prof.glowStrength; ctx.lineWidth = job.maxW * 1.15; ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    const grad = ctx.createLinearGradient(sx, sy, ex, ey); grad.addColorStop(0, c0); grad.addColorStop(1, c1);
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.moveTo(L[0], L[1]);
-    for (let k = 1; k <= N; k++) ctx.lineTo(L[2 * k], L[2 * k + 1]);
-    for (let k = N; k >= 0; k--) ctx.lineTo(Rr[2 * k], Rr[2 * k + 1]);
-    ctx.closePath(); ctx.fill();
-    /* highlight streak on the lit edge, only where the stream is wide */
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1, job.maxW * 0.14);
-    ctx.beginPath();
-    let started = false;
-    for (let k = 0; k <= N; k++) {
-      const x = L[2 * k] * 0.7 + Rr[2 * k] * 0.3, y = L[2 * k + 1] * 0.7 + Rr[2 * k + 1] * 0.3;
-      if (Math.hypot(L[2 * k] - Rr[2 * k], L[2 * k + 1] - Rr[2 * k + 1]) > 3) { if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; } }
-      else started = false;
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    const fl = job.flowD || 0;
-    if (fl > 0.05) {
-      /* impact glint + expanding rings where the stream meets the surface */
-      ctx.globalAlpha = 0.6 * Math.min(1, fl * 2);
-      ctx.drawImage(this.glowDot('#ffffff'), ex - 8, ey - 5, 16, 10);
-      if (this.effectsEnabled()) {
-        const age = job.t - job.T1 - job.tf;
-        for (let r = 0; r < 2; r++) {
-          const u = (age * 1.35 - r * 0.34) % 1; if (u < 0) continue;
-          ctx.globalAlpha = (1 - u) * 0.55 * Math.min(1, fl * 2); ctx.strokeStyle = c0; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.ellipse(ex, ey, job.wD * (0.12 + u * 0.3), job.wD * (0.035 + u * 0.08), 0, 0, Math.PI * 2); ctx.stroke();
-        }
-        if (prettyTidepoolEffects()) {
-          ctx.strokeStyle = 'rgba(255,255,255,0.76)'; ctx.fillStyle = 'rgba(210,255,248,0.16)'; ctx.lineWidth = 1;
-          for (let k = 0; k < 3; k++) {
-            const u = (age * 0.9 + k * 0.31) % 1; if (u < 0) continue;
-            const bx = ex + Math.sin(age * 1.7 + k * 2.1) * job.wD * 0.16;
-            const by = ey + job.wD * 0.08 - u * job.wD * 0.62;
-            ctx.globalAlpha = (1 - u) * 0.58;
-            ctx.beginPath(); ctx.arc(bx, by, job.wD * (0.045 + u * 0.045), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-          }
-        }
-      }
-    }
-    /* splash droplets (stepped in stepJob) */
-    if (job.drops.length) {
-      ctx.fillStyle = c0;
-      for (const d of job.drops) { ctx.globalAlpha = Math.min(1, d.life * 5); ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); }
-    }
-    ctx.restore();
-  },
-  drawBottle(i) {
-    const r = this.rects[i], slot = slots[i];
-    if (!r || !slot) return;
-    const ctx = this.ctx, shapeName = r.shapeName, sh = SHAPES[shapeName];
-    const sx = r.w / 100, sy = r.h / sh.vbH;
-    const pose = poses[i];
-    const tx = pose ? pose.tx : 0;
-    const selectedLift = !pose && slot.el.classList.contains('selected') && !locked.has(i) ? -r.w * 0.22 : 0;
-    const ty = (pose ? pose.ty : 0) + selectedLift;
-    const rot = pose ? pose.a : 0;
-    ctx.save();
-    ctx.translate(r.x + tx, r.y + ty);
-    if (rot) { ctx.translate(r.w / 2, r.h / 2); ctx.rotate(rot); ctx.translate(-r.w / 2, -r.h / 2); }
-    ctx.scale(sx, sy);
-    const paths = this.paths(shapeName), interior = paths.interior;
-    const P = this.PAD;
-    const segs = visual[i] || [];
-    /* Neon: additive bloom tinted by the top liquid + a shelf reflection —
-       two drawImages of a cached sprite, only when the bottle repaints anyway */
-    if (SKIN === 'neon' && segs.length) {
-      const units = segs.reduce((s, x) => s + x.u, 0);
-      if (units > 0.01) {
-        const hid0 = hiddenDepth[i] || 0;
-        const col = hid0 >= units ? HIDDEN_FILL[0] : COLORS[segs[segs.length - 1].c][0];
-        const bloom = this.glowDot(col);
-        const gs = activeRenderProfile().glowStrength;
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 0.26 * gs;
-        ctx.drawImage(bloom, -12, sh.vbH * 0.34 - 62, 124, 150);
-        ctx.globalAlpha = 0.5 * gs;
-        ctx.drawImage(bloom, 4, sh.vbH - 13, 92, 24);
-        ctx.restore();
-      }
-    }
-    ctx.drawImage(this.backLayer(shapeName), -P, -P, 100 + 2 * P, sh.vbH + 2 * P);
-    ctx.save(); ctx.clip(interior);
-    this.drawLiquid(ctx, i, shapeName, sh, segs, rot);
-    ctx.restore();
-    /* streams pour between the receiver's liquid and its glass */
-    const jobs = jobsInto(i);
-    if (jobs) {
-      ctx.save();
-      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      for (const job of jobs) this.drawStream(ctx, job);
-      ctx.restore();
-    }
-    ctx.drawImage(this.shellLayer(shapeName), 0, 0, 100, sh.vbH);
-    if (corks[i] && sh.cork) this.drawCork(ctx, sh, corks[i]);
-    if (veiled[i]) { ctx.fillStyle = 'rgba(48,25,90,0.35)'; ctx.fill(interior); ctx.fillStyle = '#e2d2ff'; ctx.font = '34px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✦', 50, sh.vbH * 0.38); }
-    if (frozen.has(i)) { ctx.fillStyle = 'rgba(170,225,255,0.32)'; ctx.fill(interior); ctx.fillStyle = '#f0faff'; ctx.font = '30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('❄', 50, sh.vbH * 0.72); }
-    ctx.restore();
-  },
-  /* Volume-true liquid (Aliquot method). The interior polygon is rotated by
-     alpha = bottle tilt − slosh; cut lines come from area, so volume is
-     conserved and the surface meets the lip. Fills are built in the surface
-     frame and mapped back to the bottle frame, so the cylinder gradients stay
-     on the glass; glyphs are drawn upright in the surface frame. Bands are
-     painted top-down, each from its top line to the bottom (no seams). */
-  drawLiquid(ctx, i, shapeName, sh, segs, rot) {
-    const cums = this._cums || (this._cums = []);
-    cums.length = 0;
-    const cols = this._cols || (this._cols = []);
-    cols.length = 0;
-    let total = 0;
-    for (const seg of segs) { if (seg.u <= 0.001) continue; total += seg.u; cums.push(total); cols.push(seg.c); }
-    const m = cums.length;
-    if (!m) return;
-    const body = bodies[i];
-    const alpha = rot - (body ? body.phi : 0);
-    const lv = PourPhysics.levelsFor(shapeName, alpha, cums);
-    const c = Math.cos(alpha), s = Math.sin(alpha);
-    const x0 = lv.x0, x1 = lv.x1, yb = lv.yb;
-    const topY = lv.tops[m - 1];
-    /* surface-frame (x, y) → bottle viewBox (pivot at (50, 0)) */
-    const lineTo = (x, y, move) => { const bx = 50 + c * x + s * y, by = -s * x + c * y; if (move) ctx.moveTo(bx, by); else ctx.lineTo(bx, by); };
-    const quad = (yTop) => { ctx.beginPath(); lineTo(x0, yTop, true); lineTo(x1, yTop); lineTo(x1, yb); lineTo(x0, yb); ctx.closePath(); };
-    /* top surface: the Fluid wave + wall meniscus fade out as the bottle
-       tilts (0 → 20°); a decaying sine ripple rides on top */
-    const span = lv.span || { xl: x0, xr: x1 };
-    const upright = Math.max(0, Math.min(1, 1 - Math.abs(rot) / 0.35));
-    const sample = upright > 0 && Fluid.active() ? Fluid.sample(i) : null;
-    const N = Math.max(6, (sample ? sample.h.length : Fluid.N) - 1);
-    const bodyW = corkBodyW(sh);
-    const amp = body ? Math.min(body.ripple, Math.max(0, (yb - 2 - topY) * 0.3)) : 0;
-    const kx = 2 * Math.PI / (bodyW * 0.85), ph = body ? body.rphase : 0;
-    const SX = this._sx || (this._sx = new Float64Array(40)), SY = this._sy || (this._sy = new Float64Array(40));
-    const wallsOnly = span.xr - span.xl < 3;   /* nearly empty: no meniscus to speak of */
-    for (let k = 0; k <= N; k++) {
-      const x = span.xl + (span.xr - span.xl) * k / N;
-      const edge = Math.abs(2 * k / N - 1);
-      let y = topY;
-      if (!wallsOnly) y += upright * ((sample ? sample.h[k] : 0) - Fluid.MENISCUS * Math.pow(edge, 2.2));
-      if (amp > 0.05) y += amp * Math.sin(kx * x - ph);
-      SX[k] = x; SY[k] = y;
-    }
-    const allHidden = (hiddenDepth[i] || 0) >= total - 1e-6;
-    ctx.fillStyle = this.liquidGradient(ctx, allHidden ? 'hidden' : cols[m - 1], shapeName);
-    ctx.beginPath();
-    lineTo(x0, yb, true); lineTo(x0, SY[0]);
-    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k]);
-    lineTo(x1, SY[N]); lineTo(x1, yb); ctx.closePath(); ctx.fill();
-    for (let j = allHidden ? -1 : m - 2; j >= 0; j--) {
-      ctx.fillStyle = this.liquidGradient(ctx, cols[j], shapeName);
-      quad(lv.tops[j]); ctx.fill();
-    }
-    /* mystery bottles: the bottom `hid` layers read as one hidden fill */
-    const hid = Math.min(hiddenDepth[i] || 0, total);
-    let unitLv = null;
-    if (hid > 0.001) {
-      if (!allHidden) {
-        const units = this._units || (this._units = []);
-        units.length = 0;
-        for (let u = 1; u <= Math.ceil(hid - 1e-6); u++) units.push(Math.min(u, hid));
-        unitLv = PourPhysics.levelsFor(shapeName, alpha, units);
-        ctx.fillStyle = this.liquidGradient(ctx, 'hidden', shapeName);
-        quad(unitLv.tops[unitLv.tops.length - 1]); ctx.fill();
-      } else {
-        const units = [];
-        for (let u = 1; u <= Math.ceil(hid - 1e-6); u++) units.push(Math.min(u, hid));
-        unitLv = PourPhysics.levelsFor(shapeName, alpha, units);
-      }
-    }
-    /* vertical depth shading over the whole column (bottle-frame gradient) */
-    ctx.fillStyle = this.depthOverlay(ctx, shapeName);
-    ctx.beginPath(); lineTo(x0, yb, true); lineTo(x0, SY[0]);
-    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k]);
-    lineTo(x1, SY[N]); lineTo(x1, yb); ctx.closePath(); ctx.fill();
-    /* meniscus highlight along the live surface */
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    for (let k = 0; k <= N; k++) lineTo(SX[k], SY[k] + 0.4, k === 0);
-    ctx.stroke();
-    /* glyphs (element emblems, '?' marks): upright in the surface frame, on
-       the bottle axis, fading out between 0° and 20° of tilt */
-    const gA = upright;
-    if (gA > 0.01) {
-      const ta = Math.tan(alpha);
-      ctx.save();
-      ctx.translate(50, 0); ctx.rotate(-alpha);
-      ctx.globalAlpha = gA;
-      /* hidden units keep their secrets: emblems cover only the visible part */
-      const hidTop = unitLv ? unitLv.tops[unitLv.tops.length - 1] : Infinity;
-      for (let j = 0; j < m; j++) {
-        const elem = ELEMENT_MAP[cols[j]];
-        if (!elem || cums[j] <= hid + 1e-6) continue;
-        const yT = lv.tops[j], yB = Math.min(j ? lv.tops[j - 1] : yb - 2, hidTop);
-        const my = (yT + yB) / 2;
-        ctx.save(); ctx.translate(-my * ta - 50, 0);
-        this.drawElement(ctx, elem, yT, yB - yT);
-        ctx.restore();
-      }
-      if (unitLv) {
-        ctx.fillStyle = '#cdd5f2'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        for (let u = 0; u < unitLv.tops.length; u++) {
-          const yT = unitLv.tops[u], yB = u ? unitLv.tops[u - 1] : yb - 2;
-          if (yB - yT < 6) continue;
-          const my = (yT + yB) / 2;
-          ctx.fillText('?', -my * ta, my);
-        }
-      }
-      ctx.restore();
-    }
-  }
-};
-
-function preferredRendererMode() {
-  const raw = (new URLSearchParams(location.search).get('renderer') || localStorage.getItem('vessel_renderer') || window.__vesselRendererMode || 'canvas2d').toLowerCase();
-  return raw === 'canvas' ? 'canvas2d' : raw;
-}
+function preferredRendererMode() { return preferredRenderer(location.search, window.__vesselRendererMode); }
 
 function isCanvasMode() {
   return typeof renderer !== 'undefined' && (renderer.active === 'canvas' || renderer.active === 'canvas2d' || (renderer.backend && (renderer.backend.backend === 'canvas' || renderer.backend.backend === 'canvas2d')));
@@ -2154,10 +1106,11 @@ function revealMystery(i, len) {
 
 function syncCaps() {
   state.forEach((b, i) => {
-    const capped = window.isBottleComplete(b) && !locked.has(i);
+    const capped = Logic.isBottleComplete(b) && !locked.has(i);
     if (capped && hiddenDepth[i]) { hiddenDepth[i] = 0; renderer.renderBottle(i, 0); }
     if (capped && !corks[i]) seatCorkNow(i);
     else if (!capped && corks[i]) { corks[i] = null; paintCorkSvg(i); }
+    setCompletion(slots[i], capped);
     const has = slots[i].el.classList.contains('capped');
     if (capped && !has) slots[i].el.classList.add('capped');
     else if (!capped && has) slots[i].el.classList.remove('capped');
@@ -2174,10 +1127,10 @@ function snapshotBoard() {
   const pending = jobs.map(j => j.entry).filter(Boolean).concat(queue);
   for (const e of pending) {
     hd[e.si] = Math.min(hd[e.si] || 0, Math.max(0, e.srcAfter.length - 1));
-    if (window.isBottleComplete(e.dstAfter)) { hd[e.di] = 0; fr = []; }
+    if (Logic.isBottleComplete(e.dstAfter)) { hd[e.di] = 0; fr = []; }
   }
   return {
-    state: window.cloneState(state),
+    state: Logic.cloneState(state),
     moves,
     hiddenDepth: hd,
     veiled: veiled.slice(),
@@ -2209,11 +1162,12 @@ function rebuildSlotSpecialClasses(i) {
   if (frozen.has(i)) ensureSlotMarker(slotEl, 'ice', '❄');
   else slotEl.querySelectorAll('.ice').forEach(ice => ice.remove());
 
-  slotEl.classList.toggle('capped', window.isBottleComplete(state[i]));
+  slotEl.classList.toggle('capped', Logic.isBottleComplete(state[i]));
+  setCompletion(slots[i], Logic.isBottleComplete(state[i]));
 }
 
 function restoreBoardSnapshot(snap) {
-  state = window.cloneState(snap.state);
+  state = Logic.withCapacities(snap.state, currentGen.capacities);
   moves = snap.moves;
   hiddenDepth = snap.hiddenDepth.slice();
   veiled = snap.veiled.slice();
@@ -2230,55 +1184,86 @@ function restoreBoardSnapshot(snap) {
 /* ---------------- layout (1-3 rows + shelves) ---------------- */
 function layoutStage() {
   const stage = $('#stage');
-  const n = state.length;
-  if (!n) return;
-  const hasTall = shapesByBottle.includes('tall');
-  const W = stage.clientWidth - 14, H = stage.clientHeight - 10;
-  function bwFor(r) {
-    const per = Math.ceil(n / r);
-    const bwW = W / (per + (per + 1) * 0.2);
-    const hUnits = (hasTall ? 3.2 : 2.4) + (r - 1) * 2.4 + (r - 1) * 0.5 + 0.65;
-    return Math.min(bwW, H / hUnits);
-  }
-  let rows = 1, best = bwFor(1);
-  const maxRows = hasTall ? 1 : 4;
-  for (let r = 2; r <= maxRows && r <= n; r++) {
-    const v = bwFor(r);
-    if (v > best * 1.04) { rows = r; best = v; }
-  }
-  const bw = Math.max(30, Math.min(100, Math.floor(best)));
-  document.documentElement.style.setProperty('--bw', bw + 'px');
-
-  if (Number(stage.dataset.rows) !== rows || stage.dataset.n !== String(n)) {
-    stage.querySelectorAll('.row').forEach(r => r.remove());
-    const rowEls = [];
-    for (let r = 0; r < rows; r++) {
-      const el = document.createElement('div'); el.className = 'row';
-      stage.insertBefore(el, $('#fx'));
-      rowEls.push(el);
-    }
-    const base = Math.floor(n / rows), extra = n % rows;
-    let idx = 0;
-    for (let r = 0; r < rows; r++) {
-      const count = base + (r < extra ? 1 : 0);
-      for (let k = 0; k < count; k++) rowEls[r].appendChild(slots[idx++].slot);
-    }
-    stage.dataset.rows = rows; stage.dataset.n = String(n);
+  if (!state.length) return;
+  const layout = boardLayout(shapesByBottle, stage.clientWidth, stage.clientHeight);
+  document.documentElement.style.setProperty('--bw', layout.bottleWidth + 'px');
+  stage.style.setProperty('--tower-width', layout.towerWidth + 'px');
+  stage.style.setProperty('--tower-height', layout.towerHeight + 'px');
+  stage.classList.toggle('with-towers', layout.towers.length > 0);
+  const key = JSON.stringify([layout.grid, layout.towers]);
+  if (stage.dataset.layout !== key) {
+    stage.querySelectorAll('.row, .tower-rail').forEach(r => r.remove());
+    layout.towers.forEach((i, side) => {
+      const rail = document.createElement('div');
+      rail.className = 'tower-rail ' + (side ? 'right' : 'left');
+      rail.appendChild(slots[i].slot); stage.insertBefore(rail, $('#fx'));
+    });
+    layout.grid.forEach(indices => {
+      const row = document.createElement('div'); row.className = 'row';
+      indices.forEach(i => row.appendChild(slots[i].slot));
+      stage.insertBefore(row, $('#fx'));
+    });
+    stage.dataset.layout = key;
+    stage.dataset.rows = layout.grid.length; stage.dataset.n = String(state.length);
   }
 }
 
+/* Session snapshots contain committed state, including queued pours' reveals. */
+function saveSession() {
+  if (!currentGen || !state.length || Logic.isSolved(state) || (mode === 'rush' && rushTimeLeft <= 0)) return;
+  storage.write(SESSION_KEY, {
+    version: 2, gen: currentGen, mode, level, difficulty, dailyDate, challenge: challengeConfig,
+    snapshot: snapshotBoard(), history: undoHistory, undosLeft: undosLeft === Infinity ? -1 : undosLeft,
+    undosUsed, usedHint, usedAuto, rushStage, rushTimeLeft
+  });
+}
+function resumeSession() {
+  const session = readSession(storage);
+  if (!session) { renderMenu(); return; }
+  cancelGeneration(); stopRushTimer();
+  mode = session.mode; level = session.level; difficulty = session.difficulty;
+  dailyDate = session.dailyDate || ''; challengeConfig = session.challenge;
+  rushStage = session.rushStage; rushTimeLeft = session.rushTimeLeft;
+  setupBoard(session.gen);
+  undoHistory = session.history; undosLeft = session.undosLeft === -1 ? Infinity : session.undosLeft;
+  undosUsed = session.undosUsed; usedHint = session.usedHint; usedAuto = session.usedAuto;
+  restoreBoardSnapshot(session.snapshot);
+  if (mode === 'rush') startRushTimer(session.rushTimeLeft);
+  saveSession(); updateHUD();
+}
+function loadChallenge(config) {
+  return generateBoard(config, gen => {
+    mode = 'challenge'; challengeConfig = config; level = 1; stopRushTimer(); setupBoard(gen);
+  });
+}
+function openSharedChallenge() {
+  const config = parseChallenge(location.hash);
+  if (!config) return;
+  // Consume the import link so a reload offers Resume instead of overwriting it.
+  window.history.replaceState(window.history.state, '', location.pathname + location.search);
+  if (config.level) { difficulty = config.difficulty; loadLevel(config.level); }
+  else loadChallenge(config);
+}
+function sharePuzzle() {
+  if (!currentGen) return;
+  const config = mode === 'classic' ? { level, difficulty }
+    : mode === 'daily' ? Logic.dailyConfig(dailyDate)
+    : mode === 'rush' ? Logic.rushConfig(rushStage) : challengeConfig;
+  const url = challengeURL(location.href, config);
+  $('#share-copy').textContent = 'Copy link and result';
+  $('#share-link').value = url;
+  $('#share-result').textContent = Logic.isSolved(state) ? 'Vessel · ' + moves + ' moves · ' + starsFor(moves) + ' stars' : 'Can you sort this puzzle?';
+  openModal($('#share-modal'), $('#share-link'));
+}
+
 /* ---------------- level lifecycle ---------------- */
-function assignShapes(n, fillCount, gen) {
-  const rng = window.mulberry32(window.diffSeed(level, difficulty) + 777);
-  const out = [];
-  for (let i = 0; i < n; i++) out.push(rng() < (n > 9 ? 0.18 : 0.3) ? 'flask' : 'classic');
-  if (n <= 7) { /* dramatic tall bottles on small boards */
-    const a = Math.floor(rng() * n);
-    let b = Math.floor(rng() * n);
-    if (b === a) b = (b + 1) % n;
-    out[a] = 'tall'; if (n >= 5) out[b] = 'tall';
-  }
-  return out;
+function assignShapes(n) {
+  const rng = Logic.mulberry32(Logic.diffSeed(level, difficulty) + 777);
+  return Array.from({length:n}, (_, i) => {
+    if (Logic.capacityOf(state[i]) > Logic.CAP) return 'tower';
+    if (save.bottleCollection !== 'mixed') return save.bottleCollection;
+    return rng() < 0.22 ? 'flask' : 'round';
+  });
 }
 
 function applySpecials(gen) {
@@ -2315,21 +1300,25 @@ function visibleLayerCount(i) {
 }
 function layerWord(n) { return n === 1 ? 'one layer' : n === 2 ? 'two layers' : n === 3 ? 'three layers' : n === 4 ? 'four layers' : n + ' layers'; }
 function bottleAriaLabel(i) {
-  const parts = ['Bottle ' + (i + 1)];
+  const parts = ['Bottle ' + (i + 1), state[i].length + ' of ' + Logic.capacityOf(state[i]) + ' segments'];
   if (frozen.has(i)) parts.push('frozen');
   if (veiled[i]) parts.push('sealed');
   if (!state[i] || state[i].length === 0) parts.push('empty');
   else {
     parts.push(layerWord(visibleLayerCount(i)));
     if (hiddenDepth[i] >= state[i].length) parts.push('contents hidden');
-    else parts.push('top ' + COLOR_NAMES[state[i][state[i].length - 1]]);
+    else parts.push('visible bottom to top: ' + state[i].slice(hiddenDepth[i] || 0).map(c => COLOR_NAMES[c] + (save.symbols ? ' ' + (c + 1) : '')).join(', '));
   }
-  if (window.isBottleComplete(state[i])) parts.push('complete');
+  if (Logic.isBottleComplete(state[i])) parts.push('complete');
   if (sel === i) parts.push('selected');
   return parts.join(', ');
 }
 function updateBottleLabels() {
-  slots.forEach((slot, i) => slot.btn.setAttribute('aria-label', bottleAriaLabel(i)));
+  slots.forEach((slot, i) => {
+    slot.btn.setAttribute('aria-label', bottleAriaLabel(i));
+    const count = slot.el.querySelector('.capacity-label');
+    if (count) count.textContent = state[i].length + ' / ' + Logic.capacityOf(state[i]);
+  });
 }
 function applyBottleFocus(i, moveDomFocus) {
   if (!slots.length) return;
@@ -2371,8 +1360,10 @@ function handleGameKey(e) {
 }
 
 function setupBoard(gen) {
+  boardRevision++; cancelSolution();
   /* boards can come from a cache — never mutate the generated original */
-  state = gen.state.map(b => b.slice());
+  currentGen = structuredClone(gen);
+  state = Logic.withCapacities(gen.state, gen.capacities);
   par = gen.par;
   undosAllowed = gen.undos; undosLeft = gen.undos;
   visual = state.map(mergeRuns);
@@ -2387,11 +1378,11 @@ function setupBoard(gen) {
   clearHintGlow();
   shapesByBottle = assignShapes(state.length, gen.colors * gen.sets, gen);
   const specials = applySpecials(gen);
-  needCaps = gen.colors * gen.sets;
   buildElementMap(gen);
 
   const stage = $('#stage');
-  stage.querySelectorAll('.row').forEach(r => r.remove());
+  stage.querySelectorAll('.row, .tower-rail').forEach(r => r.remove());
+  delete stage.dataset.layout;
   stage.dataset.n = ''; stage.dataset.rows = '';
   $('#fx').innerHTML = '';
   slots = state.map((b, i) => {
@@ -2415,6 +1406,11 @@ function setupBoard(gen) {
     ring.style.top = (sh.mouthFrac * 100).toFixed(1) + '%';
     btn.appendChild(ring);
     slot.appendChild(glow); slot.appendChild(shadow); slot.appendChild(btn);
+    if (shapeName === 'tower') {
+      const count = document.createElement('span'); count.className = 'capacity-label'; count.setAttribute('aria-hidden', 'true'); slot.appendChild(count);
+      const ticks = svgEl('path', { fill: 'none', stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 2, d: Array.from({length:11},(_,u) => 'M73,' + sh.volToY((u+1)/12) + ' h8').join(' ') });
+      svg.appendChild(ticks);
+    }
     if (frozen.has(i)) {
       slot.classList.add('frozen');
       const ice = document.createElement('span'); ice.className = 'ice'; ice.textContent = '❄';
@@ -2441,14 +1437,16 @@ function setupBoard(gen) {
   updateHUD();
   $('#overlay').classList.remove('show');
   updateBottleLabels();
+  saveSession();
 }
 
 
 function loadLevel(lvl) {
+  cancelGeneration();
   mode = 'classic';
   stopRushTimer();
   level = lvl;
-  setupBoard(window.generateLevel(lvl, difficulty));
+  setupBoard(Logic.generateLevel(lvl, difficulty));
   if (!save.seenHint && lvl === 1) { $('#hint').textContent = 'Tap a bottle, then tap where to pour'; $('#hint').style.opacity = 1; }
 }
 
@@ -2459,35 +1457,56 @@ function todayStr(offsetDays) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+const generatorClient = new WorkerClient();
+let generationId = 0;
+let generationPending = false;
+let dailyDate = '';
+function cancelGeneration() {
+  generationId++; generatorClient.cancel(); generationPending = false;
+  document.body.classList.remove('generating');
+}
+async function generateBoard(config, prepare) {
+  cancelGeneration();
+  const id = generationId;
+  generationPending = true;
+  document.body.classList.add('generating');
+  $('#loading-status').textContent = 'Mixing your puzzle…';
+  try {
+    const gen = await generatorClient.run('generate', config, 15000);
+    if (id !== generationId) return;
+    if (!gen) throw new Error('Could not mix this puzzle. Please try another.');
+    $('#loading-status').textContent = '';
+    prepare(gen);
+  } catch (error) {
+    if (error.name !== 'AbortError' && id === generationId) {
+      $('#loading-status').textContent = error.message;
+      toastMsg(error.message, 3500);
+    }
+  } finally {
+    if (id === generationId) { generationPending = false; document.body.classList.remove('generating'); }
+  }
+}
 function loadDaily() {
-  mode = 'daily';
   stopRushTimer();
-  const cfg = window.dailyConfig(todayStr());
-  const gen = window.generateFromSeed(cfg.seed, cfg.colors, cfg.sets, cfg.empties);
-  if (!gen) { toastMsg('Today’s puzzle would not mix — try Classic'); return; }
-  level = 1;
-  setupBoard(gen);
+  const date = todayStr();
+  return generateBoard(Logic.dailyConfig(date), gen => {
+    mode = 'daily'; dailyDate = date; level = 1; setupBoard(gen);
+  });
 }
 
 /* ---------------- rush mode ---------------- */
-function startRush() {
-  rushStage = 1;
-  loadRushStage();
-}
-
+function startRush() { rushStage = 1; return loadRushStage(); }
 function loadRushStage() {
-  mode = 'rush';
-  clearTimeout(rushNextT);
-  const cfg = window.rushConfig(rushStage);
-  const gen = window.generateFromSeed(cfg.seed, cfg.colors, cfg.sets, cfg.empties);
-  if (!gen) { toastMsg('Rush hit a wall — try Classic'); return; }
-  level = rushStage;
-  setupBoard(gen);
-  startRushTimer(window.rushTimeFor(gen.par));
+  stopRushTimer();
+  return generateBoard(Logic.rushConfig(rushStage), gen => {
+    mode = 'rush'; level = rushStage; setupBoard(gen);
+    startRushTimer(Logic.rushTimeFor(gen.par));
+  });
 }
 
 function startRushTimer(sec) {
   rushTimeLeft = sec;
+  saveSession();
   clearInterval(rushTicker);
   rushGrace = null;
   rushTicker = setInterval(() => {
@@ -2496,6 +1515,7 @@ function startRushTimer(sec) {
        reached the final second — pours queued after that do not stop it */
     if (rushTimeLeft <= 1 && rushGrace && rushGrace.some(e => !e.finished)) return;
     rushTimeLeft--;
+    saveSession();
     if (rushTimeLeft === 1) rushGrace = jobs.map(j => j.entry).filter(Boolean).concat(queue);
     if (rushTimeLeft === 10) AudioFX.ice();
     updateHUD();
@@ -2510,6 +1530,7 @@ function stopRushTimer() {
 }
 
 function rushFail() {
+  storage.remove(SESSION_KEY);
   setSelected(null);
   const cleared = rushStage - 1;
   if (cleared > save.rushBest) { save.rushBest = cleared; persist(); }
@@ -2561,8 +1582,7 @@ function buildOrb() {
 }
 function orbUpdate(pulse) {
   if (!orbFill) return;
-  const capped = state.filter(b => window.isBottleComplete(b)).length;
-  orbFrac = needCaps ? capped / needCaps : 0;
+  orbFrac = Logic.completionProgress(state);
   const h = 46 * orbFrac;
   orbFill.setAttribute('y', 59 - h);
   orbFill.setAttribute('height', h + 1);
@@ -2575,9 +1595,12 @@ function orbUpdate(pulse) {
 function updateHUD() {
   const lvlEl = $('#hud-level'), subEl = $('#hud-sub');
   /* compact copy — the old three-part line wrapped on phone widths */
-  if (mode === 'daily') {
+  if (mode === 'challenge') {
+    lvlEl.textContent = 'Shared Challenge';
+    subEl.textContent = 'Moves ' + moves + ' · Par ' + par;
+  } else if (mode === 'daily') {
     lvlEl.textContent = 'Daily Challenge';
-    subEl.textContent = todayStr().slice(5).replace('-', '/') + ' · Moves ' + moves;
+    subEl.textContent = dailyDate.slice(5).replace('-', '/') + ' · Moves ' + moves;
   } else if (mode === 'rush') {
     lvlEl.textContent = 'Rush · Stage ' + rushStage;
     subEl.textContent = '⏱ ' + Math.max(0, rushTimeLeft) + 's · Moves ' + moves;
@@ -2615,9 +1638,10 @@ function shake(i) {
   Fluid.slosh(i, 3.4);   /* invalid jab rocks the surface */
   Fluid.start();
 }
-function canBeSource(i) { return state[i].length > 0 && !window.isBottleComplete(state[i]); }
+function canBeSource(i) { return state[i].length > 0; }
 
 function unveil(i) {
+  boardRevision++; cancelSolution();
   veiled[i] = false;
   hiddenDepth[i] = Math.max(0, state[i].length - 1);
   const slot = slots[i];
@@ -2628,6 +1652,7 @@ function unveil(i) {
   AudioFX.reveal(); buzz(10);
   renderer.renderBottle(i, 0);
   updateBottleLabels();
+  saveSession();
 }
 
 function thawAll() {
@@ -2653,7 +1678,7 @@ function thawAll() {
 
 function onTap(i) {
   AudioFX.ensure();
-  if (autoPlaying) return;
+  if (autoPlaying || generationPending) return;
   if (frozen.has(i)) { shake(i); AudioFX.ice(); buzz([8, 20, 8]); return; }
   if (veiled[i]) { unveil(i); return; }
   if (sel === null) {
@@ -2662,7 +1687,7 @@ function onTap(i) {
     return;
   }
   if (sel === i) { setSelected(null); AudioFX.swap(); return; }
-  if (window.canPour(state, sel, i)) {
+  if (Logic.canPour(state, sel, i)) {
     const s = sel; setSelected(null);
     commitMove(s, i, !locked.has(s));
   } else if (canBeSource(i)) {
@@ -2802,15 +1827,15 @@ function overflowFor(job, s) {
 }
 
 /* bottle-local viewBox point (u, v) → stage px under pose (tx, ty, a) */
-function worldPt(h, k, tx, ty, a, u, v) {
-  const cx = h.w / 2, cy = h.h / 2, lx = u * k - cx, ly = v * k - cy, c = Math.cos(a), s = Math.sin(a);
+function worldPt(h, k, tx, ty, a, u, v, scale = 1) {
+  const cx = h.w / 2, cy = h.h / 2, lx = (u * k - cx) * scale, ly = (v * k - cy) * scale, c = Math.cos(a), s = Math.sin(a);
   return { x: h.x + tx + cx + lx * c - ly * s, y: h.y + ty + cy + lx * s + ly * c };
 }
-function setPose(i, tx, ty, a) {
-  poses[i] = { tx, ty, a };
+function setPose(i, tx, ty, a, scale = 1) {
+  poses[i] = { tx, ty, a, scale };
   /* canvas reads poses[] directly; only the SVG fallback moves the DOM
      (keeps the invisible hit targets home and skips per-frame style work) */
-  if (!isCanvasMode()) slots[i].btn.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) rotate(' + (a * 180 / Math.PI).toFixed(3) + 'deg)';
+  if (!isCanvasMode()) slots[i].btn.style.transform = 'translate(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px) rotate(' + (a * 180 / Math.PI).toFixed(3) + 'deg) scale(' + scale.toFixed(5) + ')';
 }
 function clearPose(i) {
   poses[i] = null;
@@ -2820,12 +1845,12 @@ function clearPose(i) {
   slots[i].el.classList.remove('pouring');
 }
 /* pose that puts the source's lip corner at (lipX, lipY) with angle a */
-function poseSourceLip(job, lipX, lipY, a) {
-  const h = job.hs, k = job.kS, cx = h.w / 2, cy = h.h / 2;
-  const lx = job.lipU * k - cx, ly = job.lipV * k - cy, c = Math.cos(a), s = Math.sin(a);
+function poseSourceLip(job, lipX, lipY, a, scale = 1) {
+  const h = job.hs, k = job.baseKS, cx = h.w / 2, cy = h.h / 2;
+  const lx = (job.lipU * k - cx) * scale, ly = (job.lipV * k - cy) * scale, c = Math.cos(a), s = Math.sin(a);
   const tx = lipX - (h.x + cx + lx * c - ly * s), ty = lipY - (h.y + cy + lx * s + ly * c);
-  setPose(job.si, tx, ty, a);
-  job.pose = { tx, ty, a };
+  setPose(job.si, tx, ty, a, scale);
+  job.pose = { tx, ty, a, scale };
 }
 
 function createJob(si, di, n, color, srcBefore, dstBefore, srcAfter, dstAfter, lifted) {
@@ -2834,14 +1859,17 @@ function createJob(si, di, n, color, srcBefore, dstBefore, srcAfter, dstAfter, l
   const hs = home(si), hd = home(di);
   const snS = shapesByBottle[si], snD = shapesByBottle[di];
   const gS = pourGeo(snS), gD = pourGeo(snD);
-  const kS = hs.w / 100, kD = hd.w / 100;
+  // Screen-height bottles briefly scale down for transfer so their tilted
+  // bodies remain visible on a narrow phone, then return to full height.
+  const pourScale = snS === 'tower' ? Math.min(1, sr.width * 0.46 / hs.h, sr.height * 0.5 / hs.h) : 1;
+  const baseKS = hs.w / 100, kS = baseKS * pourScale, kD = hd.w / 100;
   const job = {
-    si, di, n, color, snS, snD, gS, gD, hs, hd, kS, kD,
+    si, di, n, color, snS, snD, gS, gD, hs, hd, kS, kD, baseKS, pourScale,
     w: gS.bodyW * kS, wD: gD.bodyW * kD, stageW: sr.width, stageTop: sr.top,
     V0: srcBefore.length, dstUnits0: dstBefore.length,
     snapS: mergeRuns(srcBefore), snapD: mergeRuns(dstBefore),
     afterS: mergeRuns(srcAfter), afterD: mergeRuns(dstAfter),
-    dstComplete: window.isBottleComplete(dstAfter),
+    dstComplete: Logic.isBottleComplete(dstAfter),
     t: 0, srcDone: false, dstDone: false, retStarted: false, voice: null,
     streamOrigin: null, streamFx: null, svgStream: false, drops: [], flowD: 0, done: false
   };
@@ -2855,7 +1883,7 @@ function createJob(si, di, n, color, srcBefore, dstBefore, srcAfter, dstAfter, l
   if (o1 > 0 && o2 < o1) s = -s;
   job.s = s;
   job.lipU = 50 + s * gS.lipHalf; job.lipV = gS.top;
-  job.lip0 = { x: hs.x + job.lipU * kS, y: hs.y + job.lipV * kS + (lifted ? -0.22 * hs.w : 0) };
+  job.lip0 = { x: hs.x + job.lipU * baseKS, y: hs.y + job.lipV * baseKS + (lifted ? -0.22 * hs.w : 0) };
   const P = pourPoint(job, job.thStart);
   const dist = Math.hypot(P.x - job.lip0.x, P.y - job.lip0.y);
   job.T1 = clampN(0.2 + dist / (job.w * 22), 0.24, 0.42);
@@ -2883,10 +1911,12 @@ function stepJob(job, dt) {
   const bS = bodies[si], bD = bodies[di];
   const svg = !isCanvasMode();
   if (!job.srcDone) {
-    let lipX = 0, lipY = 0, ang = 0;
+    let lipX = 0, lipY = 0, ang = 0, scale = job.pourScale;
     if (t < job.T1) {
       const u = t / job.T1, e = ease3(u);
-      ang = s * job.thStart * easeSine(u);
+      scale = lerpN(1, job.pourScale, smoothstep(Math.min(1, u * 3)));
+      const turn = job.pourScale < 1 ? Math.max(0, (u - 0.25) / 0.75) : u;
+      ang = s * job.thStart * easeSine(turn);
       const P = pourPoint(job, job.thStart);
       lipX = lerpN(job.lip0.x, P.x, e);
       lipY = lerpN(job.lip0.y, P.y, e) - Math.sin(Math.PI * e) * job.arc;
@@ -2915,19 +1945,21 @@ function stepJob(job, dt) {
         if (svg) renderer.renderBottle(si, 0);
       } else {
         const e = ease3(u);
-        ang = job.angEnd * (1 - easeSine(u));
+        const turn = job.pourScale < 1 ? Math.min(1, u / 0.55) : u;
+        ang = job.angEnd * (1 - easeSine(turn));
+        scale = lerpN(job.pourScale, 1, ease3(Math.max(0, (u - 0.55) / 0.45)));
         const lift = sel === si ? -0.22 * job.hs.w : 0;
-        const hx = job.hs.x + job.lipU * job.kS, hy = job.hs.y + job.lipV * job.kS + lift;
+        const hx = job.hs.x + job.lipU * job.baseKS, hy = job.hs.y + job.lipV * job.baseKS + lift;
         lipX = lerpN(job.lipEnd.x, hx, e);
         lipY = lerpN(job.lipEnd.y, hy, e) - Math.sin(Math.PI * e) * w * 0.25;
       }
     }
     if (!job.srcDone) {
-      poseSourceLip(job, lipX, lipY, ang);
+      poseSourceLip(job, lipX, lipY, ang, scale);
       /* the stream leaves from the outer rim; it freezes once the source
          stops pouring so the tail falls straight */
       if (t >= job.T1 && !job.retStarted) {
-        job.streamOrigin = worldPt(job.hs, job.kS, job.pose.tx, job.pose.ty, ang, 50 + s * job.gS.rimHalf, job.gS.rimBot);
+        job.streamOrigin = worldPt(job.hs, job.baseKS, job.pose.tx, job.pose.ty, ang, 50 + s * job.gS.rimHalf, job.gS.rimBot, scale);
       }
       if (svg) renderer.renderBottle(si, ang * 180 / Math.PI);
     }
@@ -2940,7 +1972,7 @@ function stepJob(job, dt) {
       job.flowD = fl;
       if (bD) bD.ripple = Math.max(bD.ripple, job.gD.bodyW * (0.018 + 0.05 * fl));
       if (!job.voice && u < 0.9) { job.voice = AudioFX.startPour(); buzz(12); }
-      if (job.voice) AudioFX.updatePour(job.voice, fl, (job.dstUnits0 + job.n * E) / 4, dt);
+      if (job.voice) AudioFX.updatePour(job.voice, fl, (job.dstUnits0 + job.n * E) / Logic.capacityOf(state[di]), dt);
       if (fl > 0.3 && CanvasRenderer.effectsEnabled() && Math.random() < dt * 26 * fl) spawnDrop(job);
       if (u >= 1) {
         job.dstDone = true;
@@ -3063,6 +2095,7 @@ function kickSlosh(i, v) {
    Specials (mystery reveal, orb, thaw) fire when the pour's job completes. */
 let queue = [];
 let settleArmed = false;   /* a pour finished since the board last settled */
+let boardRevision = 0;
 let boardGen = 0;          /* bumps on every board setup; stale timers check it */
 function pendingCount() { return jobs.length + queue.length; }
 function refreshBusy() {
@@ -3073,20 +2106,24 @@ function refreshBusy() {
 }
 
 function commitMove(si, di, lifted) {
+  boardRevision++; cancelSolution();
   undoHistory.push(snapshotBoard());
   if (undoHistory.length > 300) undoHistory.shift();
-  const n = window.pourAmount(state, si, di);
+  const n = Logic.pourAmount(state, si, di);
   const color = state[si][state[si].length - 1];
-  const srcBefore = state[si].slice(), dstBefore = state[di].slice();
-  window.applyPour(state, si, di);
+  const srcBefore = Logic.cloneBottle(state[si]), dstBefore = Logic.cloneBottle(state[di]);
+  corks[si] = null; paintCorkSvg(si); setCompletion(slots[si], false);
+  slots[si].el.classList.remove('capped');
+  Logic.applyPour(state, si, di);
   moves++;
   if (!save.seenHint) { save.seenHint = true; persist(); $('#hint').style.opacity = 0; }
   const entry = {
-    si, di, n, color, srcBefore, dstBefore, srcAfter: state[si].slice(), dstAfter: state[di].slice(),
+    si, di, n, color, srcBefore, dstBefore, srcAfter: Logic.cloneBottle(state[si]), dstAfter: Logic.cloneBottle(state[di]),
     lifted: !!lifted, at: performance.now()
   };
   entry.done = new Promise(r => { entry.resolve = () => { entry.finished = true; r(); }; });
   queue.push(entry);
+  saveSession();
   AudioFX.swap();
   pumpQueue();
   refreshBusy();
@@ -3109,6 +2146,8 @@ function pumpQueue() {
 
 /* start a queued pour; returns true when it finished synchronously (reduced motion) */
 function startEntry(q) {
+  corks[q.si] = null; paintCorkSvg(q.si); setCompletion(slots[q.si], false);
+  slots[q.si].el.classList.remove('capped');
   /* the source only starts lifted if it was still up from its selection */
   const lifted = q.lifted && performance.now() - q.at < 40;
   const job = createJob(q.si, q.di, q.n, q.color, q.srcBefore, q.dstBefore, q.srcAfter, q.dstAfter, lifted);
@@ -3168,10 +2207,10 @@ function onBoardSettled() {
   visual = state.map(mergeRuns);
   renderer.renderAll();
   if (pendingLayout) { pendingLayout = false; renderer.syncLayout(); }
-  if (window.isSolved(state)) {
+  if (Logic.isSolved(state)) {
     const gen = boardGen;
     wait(RM ? 100 : 350).then(() => {
-      if (gen !== boardGen || pendingCount() || !window.isSolved(state) || $('#overlay').classList.contains('show')) return;
+      if (gen !== boardGen || pendingCount() || !Logic.isSolved(state) || $('#overlay').classList.contains('show')) return;
       onWin();
     });
   } else if (!autoPlaying && !anyUsefulMove()) {
@@ -3188,7 +2227,7 @@ function flushAll() {
   jobs = [];
   for (const q of queue) {
     revealMystery(q.si, q.srcAfter.length);
-    if (window.isBottleComplete(q.dstAfter)) {
+    if (Logic.isBottleComplete(q.dstAfter)) {
       hiddenDepth[q.di] = 0;
       if (frozen.size) thawAll();
     }
@@ -3226,10 +2265,10 @@ function doPour(si, di) {
 /* a position is stuck when no pour between usable bottles is legal */
 function anyUsefulMove() {
   for (let i = 0; i < state.length; i++) {
-    if (frozen.has(i) || !state[i].length || window.isBottleComplete(state[i])) continue;
+    if (frozen.has(i) || !state[i].length) continue;
     for (let j = 0; j < state.length; j++) {
       if (i === j || frozen.has(j)) continue;
-      if (window.canPour(state, i, j)) return true;
+      if (Logic.canPour(state, i, j)) return true;
     }
   }
   return false;
@@ -3276,6 +2315,7 @@ function spawnSparkles(host, count, spread) {
 /* ---------------- undo / restart ---------------- */
 function undo() {
   if (!undoHistory.length || undosLeft <= 0 || autoPlaying) return;
+  boardRevision++; cancelSolution();
   flushAll();
   const snap = undoHistory.pop();
   undosUsed++;
@@ -3283,6 +2323,7 @@ function undo() {
   setSelected(null);
   AudioFX.stopAllPours();
   restoreBoardSnapshot(snap);
+  saveSession();
   AudioFX.undo();
   updateBottleLabels();
 }
@@ -3291,117 +2332,26 @@ function undo() {
    The same solver that verifies every level also plays it: hints show
    the first move of a fresh optimal-ish solution from the current
    position; autoplay performs the whole line with real pours. */
-const SOLVER_WORKER_TIMEOUT = 4500;
-let solverWorker = null;
+const solverClient = new WorkerClient();
 let solverRequestId = 0;
-let solverReject = null;
-let solverTimer = null;
 let solutionPending = false;
-
-function solverWorkerSource() {
-  return `'use strict';
-const CAP = ${window.CAP};
-const cloneState = ${window.cloneState.toString()};
-const stateKey = ${window.stateKey.toString()};
-const topRun = ${window.topRun.toString()};
-const isBottleComplete = ${window.isBottleComplete.toString()};
-const isBottleClear = ${window.isBottleClear.toString()};
-const isSolved = ${window.isSolved.toString()};
-const pourAmount = ${window.pourAmount.toString()};
-const applyPour = ${window.applyPour.toString()};
-const solve = ${window.solve.toString()};
-self.onmessage = e => {
-  const { id, state, frozen, budget } = e.data || {};
-  try {
-    const frozenSet = frozen && frozen.length ? new Set(frozen) : null;
-    const res = solve(cloneState(state || []), budget || 250000, frozenSet);
-    self.postMessage({ id, solution: res.solution || null, nodes: res.nodes || 0, aborted: !!res.aborted });
-  } catch (err) {
-    self.postMessage({ id, error: err && err.message ? err.message : String(err) });
-  }
-};`;
-}
-
-function getSolverWorker() {
-  if (solverWorker) return solverWorker;
-  const blob = new Blob([solverWorkerSource()], { type: 'application/javascript' });
-  solverWorker = new Worker(URL.createObjectURL(blob));
-  return solverWorker;
-}
-
-function cancelSolution(reason) {
-  if (solverReject) solverReject(new Error(reason || 'cancelled'));
-  solverReject = null;
-  clearTimeout(solverTimer);
-  solverTimer = null;
-  if (solverWorker) {
-    solverWorker.terminate();
-    solverWorker = null;
-  }
+function cancelSolution() {
+  solverRequestId++;
+  solverClient.cancel();
   solutionPending = false;
-  updateHUD();
 }
-
-
-function solveOnMainThread(requestedState, requestedFrozen, budget) {
-  return new Promise(resolve => {
-    setTimeout(() => {
-      const frozenSet = requestedFrozen && requestedFrozen.size ? new Set(requestedFrozen) : null;
-      const res = window.solve(window.cloneState(requestedState || []), budget || 250000, frozenSet);
-      resolve({ solution: res.solution || null, nodes: res.nodes || 0, aborted: !!res.aborted });
-    }, 0);
-  });
-}
-
-function requestSolution({ state: requestedState, frozen: requestedFrozen, budget }) {
-  cancelSolution('cancelled');
+async function requestSolution({ state: requestedState, frozen: requestedFrozen, budget }) {
+  cancelSolution();
+  const id = solverRequestId;
   solutionPending = true;
   updateHUD();
-  const id = ++solverRequestId;
-  let worker;
   try {
-    worker = getSolverWorker();
-  } catch (err) {
-    return solveOnMainThread(requestedState, requestedFrozen, budget).finally(() => {
-      if (id === solverRequestId) { solutionPending = false; updateHUD(); }
-    });
+    const result = await solverClient.run('solve', { state: Logic.cloneState(requestedState), capacities: requestedState.map(Logic.capacityOf), frozen: [...(requestedFrozen || [])], budget: budget || 250000 }, 4500);
+    if (id !== solverRequestId) throw new DOMException('Cancelled', 'AbortError');
+    return result;
+  } finally {
+    if (id === solverRequestId) { solutionPending = false; updateHUD(); }
   }
-  return new Promise((resolve, reject) => {
-    const finish = fn => value => {
-      clearTimeout(solverTimer);
-      solverTimer = null;
-      solverReject = null;
-      solutionPending = false;
-      updateHUD();
-      fn(value);
-    };
-    const resolveDone = finish(resolve);
-    const rejectDone = finish(reject);
-    const fallback = () => {
-      if (id !== solverRequestId) return;
-      if (solverWorker) { solverWorker.terminate(); solverWorker = null; }
-      solveOnMainThread(requestedState, requestedFrozen, Math.min(budget || 250000, 180000)).then(resolveDone, rejectDone);
-    };
-    solverReject = rejectDone;
-    solverTimer = setTimeout(fallback, SOLVER_WORKER_TIMEOUT);
-    worker.onmessage = e => {
-      if (!e.data || e.data.id !== id) return;
-      clearTimeout(solverTimer);
-      solverTimer = null;
-      solverReject = null;
-      solutionPending = false;
-      updateHUD();
-      if (e.data.error) fallback();
-      else resolve(e.data);
-    };
-    worker.onerror = () => fallback();
-    worker.postMessage({
-      id,
-      state: window.cloneState(requestedState),
-      frozen: requestedFrozen ? Array.from(requestedFrozen) : [],
-      budget: budget || 250000
-    });
-  });
 }
 
 function clearHintGlow() {
@@ -3412,18 +2362,21 @@ let hintGlowT = null;
 async function showHint() {
   if (autoPlaying || solutionPending || !state.length) return;
   flushAll();
-  if (window.isSolved(state)) return;
+  if (Logic.isSolved(state)) return;
   if (mode === 'rush') { toastMsg('Hints are paused in Rush for timer fairness ⚡', 2200); AudioFX.invalid(); return; }
   AudioFX.ensure();
   toastMsg('Thinking…', 1200);
   let res;
+  const revision = boardRevision;
   try {
     res = await requestSolution({ state, frozen, budget: 250000 });
   } catch (err) {
+    if (err.name === 'AbortError' || revision !== boardRevision) return;
     toastMsg((err && err.message === 'timeout') ? 'Still thinking — try a smaller board or undo ↩' : 'Could not find a hint yet — try again or undo ↩', 3000);
     AudioFX.invalid();
     return;
   }
+  if (revision !== boardRevision) return;
   if (res.aborted) { toastMsg('Ran out of search budget — undo ↩ a little', 3000); AudioFX.invalid(); return; }
   const sol = res.solution && res.solution.length ? res.solution : null;
   if (!sol) { toastMsg('No solution found from here — undo ↩ a little', 3000); AudioFX.invalid(); return; }
@@ -3437,6 +2390,7 @@ async function showHint() {
   const what = veiled[i] || (hiddenDepth[i] || 0) >= state[i].length ? 'that bottle' : 'the ' + COLOR_NAMES[c];
   toastMsg('Hint: pour ' + what + ' into the glowing bottle — ' + sol.length + ' to go');
   usedHint = true;
+  saveSession();
   unlockAch('oracle');
   AudioFX.reveal(); buzz(8);
 }
@@ -3449,18 +2403,21 @@ async function showHint() {
 async function autoSolve() {
   if (autoPlaying || solutionPending || !state.length) return;
   flushAll();
-  if (window.isSolved(state)) return;
+  if (Logic.isSolved(state)) return;
   if (mode === 'rush') { toastMsg('Auto-solve is paused in Rush for timer fairness ⚡', 2400); AudioFX.invalid(); return; }
   AudioFX.ensure();
   toastMsg('Thinking…', 1200);
   let res;
+  const revision = boardRevision;
   try {
     res = await requestSolution({ state, frozen, budget: 350000 });
   } catch (err) {
+    if (err.name === 'AbortError' || revision !== boardRevision) return;
     toastMsg((err && err.message === 'timeout') ? 'Timed out searching — control is back' : 'Could not find a hint yet — try again or undo ↩', 3200);
     AudioFX.invalid();
     return;
   }
+  if (revision !== boardRevision) return;
   if (res.aborted) { toastMsg('Hit the search budget — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
   const sol = res.solution && res.solution.length ? res.solution : null;
   if (!sol) { toastMsg('No solution found from here — undo ↩ a few moves first', 3200); AudioFX.invalid(); return; }
@@ -3528,7 +2485,7 @@ const THEMES = [
     rim: { light: 'rgba(255,255,255,0.95)', dark: 'rgba(225,240,255,0.82)' }, shadow: '#3a2410',
     preview: 'radial-gradient(125% 85% at 50% -10%, #fff8ea, #e7cf9f 68%, #caa46a)' },
   { id: 'neon', name: 'Neon Arcade', palette: NEON_COLORS, hidden: ['#5a4b86', '#2e2550'],
-    modes: false, kicker: 'Arcade', tag: 'Sort to the beat.',
+    modes: false, kicker: 'Arcade', tag: 'Find your flow.',
     rim: { light: 'rgba(190,240,255,0.9)', dark: 'rgba(190,240,255,0.9)' }, shadow: '#06021a',
     preview: 'radial-gradient(circle at 50% 78%, rgba(255,76,198,0.85), transparent 58%), linear-gradient(#160a28, #1d0c33)' },
   { id: 'tidepool', name: 'Tidepool Glass', palette: TIDE_COLORS, hidden: ['#d8f3ee', '#4d7f86'],
@@ -3624,6 +2581,8 @@ function renderSettings() {
   setSwitch('#sw-sound', !!save.sound);
   setSwitch('#sw-haptics', !!save.haptics);
   setSwitch('#sw-fluid', !!save.fluid);
+  setSwitch('#sw-symbols', save.symbols);
+  $('#bottle-collection').value = save.bottleCollection;
   setSwitch('#sw-dark', save.mode === 'dark');
   const rq = $('#render-quality');
   if (rq) rq.value = save.renderQuality;
@@ -3636,13 +2595,14 @@ function renderSettings() {
 function starsFor(m) { return m <= par ? 3 : m <= Math.ceil(par * 1.5) ? 2 : 1; }
 
 function onWin() {
+  storage.remove(SESSION_KEY);
   if (mode === 'rush') return onRushStageClear();
   const st = usedAuto ? 1 : starsFor(moves);
   let meta = moves + ' moves · par ' + par;
 
   if (mode === 'daily') {
-    const today = todayStr();
-    if (save.daily.lastWin !== today) {
+    const today = dailyDate;
+    if (today === todayStr() && save.daily.lastWin !== today) {
       save.daily.streak = save.daily.lastWin === todayStr(-1) ? save.daily.streak + 1 : 1;
       save.daily.lastWin = today;
     }
@@ -3651,6 +2611,9 @@ function onWin() {
     if (save.daily.streak >= 3) unlockAch('streak3');
     $('#win-title').textContent = 'Daily complete!';
     meta += ' · 🔥 ' + save.daily.streak + '-day streak';
+    $('#btn-next').classList.add('hidden');
+  } else if (mode === 'challenge') {
+    $('#win-title').textContent = 'Challenge complete!';
     $('#btn-next').classList.add('hidden');
   } else {
     const prev = save.progress[difficulty][level];
@@ -3670,7 +2633,7 @@ function onWin() {
     $('#win-title').textContent = 'Level complete';
     const best = save.progress[difficulty][level].best;
     if (best < moves) meta += ' · best ' + best;
-    $('#btn-next').classList.toggle('hidden', level >= window.MAX_LEVEL);
+    $('#btn-next').classList.toggle('hidden', level >= Logic.MAX_LEVEL);
   }
 
   if (usedAuto) meta += ' · auto-solved ✨';
@@ -3912,12 +2875,13 @@ function exitToMenu() {
 }
 
 function unlockedUpTo() {
-  let u = Math.min(10, window.MAX_LEVEL);
-  while (u < window.MAX_LEVEL && save.progress[difficulty][u]) u++;
+  let u = Math.min(10, Logic.MAX_LEVEL);
+  while (u < Logic.MAX_LEVEL && save.progress[difficulty][u]) u++;
   return u;
 }
 
 function renderMenu() {
+  $('#btn-resume').classList.toggle('hidden', !readSession(storage));
   document.querySelectorAll('#diff-seg button').forEach(b => b.classList.toggle('on', b.dataset.d === difficulty));
   $('#chip-stars').textContent = '★ ' + totalStars();
   $('#chip-streak').textContent = '🔥 ' + (save.daily.streak || 0) + ' day streak';
@@ -3928,7 +2892,7 @@ function renderMenu() {
   const grid = $('#level-grid');
   grid.innerHTML = '';
   const maxOpen = unlockedUpTo();
-  for (let l = 1; l <= window.MAX_LEVEL; l++) {
+  for (let l = 1; l <= Logic.MAX_LEVEL; l++) {
     const t = document.createElement('button');
     t.className = 'tile';
     const p = save.progress[difficulty][l];
@@ -3950,11 +2914,12 @@ function renderMenu() {
 function buildHeroBottles() {
   const wrap = $('.hero-bottles');
   const demos = [
-    ['classic', [{ c: 4, u: 4 }]],
+    ['round', [{ c: 0, u: 1 }, { c: 2, u: 1 }, { c: 5, u: 1 }, { c: 2, u: 1 }]],
     ['flask', [{ c: 6, u: 2 }, { c: 7, u: 2 }]],
     ['tall', [{ c: 1, u: 1 }, { c: 2, u: 2 }, { c: 5, u: 1 }]]
   ];
   demos.forEach(([shapeName, segs]) => {
+    shapeName = save.bottleCollection === 'mixed' ? shapeName : save.bottleCollection;
     const sh = SHAPES[shapeName];
     const svg = buildBottleSVG(shapeName, { cork: true, label: true });
     const g = svg.querySelector('.liquids');
@@ -3973,6 +2938,9 @@ function buildHeroBottles() {
 
 /* ---------------- wiring ---------------- */
 function goMenu() {
+  saveSession();
+  cancelGeneration();
+  boardRevision++; cancelSolution();
   flushAll();
   stopRushTimer();
   AudioFX.stopAllPours();
@@ -3984,7 +2952,8 @@ function goMenu() {
 }
 
 function restartCurrent() {
-  if (mode === 'daily') loadDaily();
+  if (mode === 'challenge') loadChallenge(challengeConfig);
+  else if (mode === 'daily') loadDaily();
   else if (mode === 'rush') loadRushStage();
   else loadLevel(level);
 }
@@ -4054,8 +3023,9 @@ function init() {
     /* liquid spans the interior bottom up to the capacity line (physics module) */
     const geo = PourPhysics.SHAPE_GEO[k];
     SHAPES[k].B = geo.bottom; SHAPES[k].T = geo.cap;
-    SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / 4;
-    SHAPES[k].volToY = frac => PourPhysics.uprightLevel(k, frac * 4);
+    SHAPES[k].capacity = geo.capacity || Logic.CAP;
+    SHAPES[k].unit = (SHAPES[k].B - SHAPES[k].T) / SHAPES[k].capacity;
+    SHAPES[k].volToY = frac => PourPhysics.uprightLevel(k, frac * SHAPES[k].capacity);
   }
   Fluid.enabled = save.fluid !== false;
   applyRenderQuality();
@@ -4091,7 +3061,7 @@ function init() {
     else restartCurrent();
   });
   $('#btn-menu').addEventListener('click', () => { exitToMenu(); });
-  $('#btn-next').addEventListener('click', () => { $('#overlay').classList.remove('show'); if (level < window.MAX_LEVEL) loadLevel(level + 1); });
+  $('#btn-next').addEventListener('click', () => { $('#overlay').classList.remove('show'); if (level < Logic.MAX_LEVEL) loadLevel(level + 1); });
 
   /* modes */
   $('#card-daily').addEventListener('click', () => { AudioFX.select(); loadDaily(); });
@@ -4100,6 +3070,25 @@ function init() {
   /* AI assistant */
   $('#btn-hint').addEventListener('click', showHint);
 
+  $('#btn-resume').addEventListener('click', resumeSession);
+  $('#btn-challenge').addEventListener('click', () => loadChallenge({ seed: crypto.getRandomValues(new Uint32Array(1))[0], colors: 5, sets: 1, empties: 2 }));
+  $('#btn-share').addEventListener('click', sharePuzzle);
+  $('#btn-share-win').addEventListener('click', sharePuzzle);
+  $('#share-close').addEventListener('click', () => closeModal($('#share-modal')));
+  $('#share-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('#share-result').textContent + '\n' + $('#share-link').value); $('#share-copy').textContent = 'Copied!'; }
+    catch { $('#share-link').focus(); $('#share-link').select(); $('#share-copy').textContent = 'Select and copy the link'; }
+  });
+  $('#bottle-collection').addEventListener('change', e => { save.bottleCollection = e.target.value; persist(); refreshBottles(); });
+  $('#sw-symbols').addEventListener('click', () => { save.symbols = !save.symbols; persist(); renderSettings(); });
+  window.addEventListener('hashchange', openSharedChallenge);
+  window.addEventListener('pagehide', saveSession);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveSession(); });
+  if (storage.read('vessel_session_v1') && !storage.get('vessel_tower_upgrade_seen')) {
+    $('#loading-status').textContent = 'Towers now hold 12 segments. Start a fresh puzzle; your earned progress is saved.';
+    storage.set('vessel_tower_upgrade_seen', '1');
+  }
+  openSharedChallenge();
   /* settings & achievements */
   $('#btn-settings').addEventListener('click', () => { AudioFX.select(); renderSettings(); openModal($('#settings-modal'), $('#sw-sound')); });
   $('#settings-close').addEventListener('click', () => { AudioFX.swap(); closeModal($('#settings-modal')); renderMenu(); });
@@ -4129,7 +3118,7 @@ function init() {
   $('#background-quality').addEventListener('change', e => {
     save.backgroundQuality = e.target.value === 'basic' ? 'basic' : 'hifi';
     save.backgroundQualityUserSet = true;
-    try { localStorage.setItem('vessel_background', save.backgroundQuality); } catch (err) {}
+    storage.set('vessel_background', save.backgroundQuality);
     persist();
     applyBackgroundQuality();
     renderSettings();
@@ -4138,7 +3127,12 @@ function init() {
   $('#sw-dark').addEventListener('click', () => { toggleMode(); renderSettings(); });
   $('#btn-reset').addEventListener('click', () => {
     if (!confirm('Erase all progress, stars and achievements?')) return;
-    save = JSON.parse(JSON.stringify(DEFAULT_SAVE));
+    save = createDefaultSave();
+    difficulty = save.difficulty;
+    Fluid.enabled = save.fluid;
+    storage.remove(SESSION_KEY);
+    currentGen = null; state = []; undoHistory = [];
+    stopRushTimer(); cancelGeneration(); cancelSolution();
     persist();
     AudioFX.syncMute();
     applyRenderQuality();
@@ -4210,7 +3204,7 @@ window.__vesselPerf = {
   get activeBackgroundAsset() { return activeBackgroundAsset ? activeBackgroundAsset.webp960 : null; },
   get backgroundAsset() { return activeBackgroundAsset ? {
     key: activeBackgroundAsset.key,
-    png: activeBackgroundAsset.png,
+    fallback: activeBackgroundAsset.fallback,
     avif960: activeBackgroundAsset.avif960,
     avif1365: activeBackgroundAsset.avif1365,
     webp960: activeBackgroundAsset.webp960,
