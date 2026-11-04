@@ -450,12 +450,12 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 }
 
 .slot {
-  position: relative; width: var(--bw); height: var(--bh);
+  position: relative; width: calc(var(--bw) * var(--s, 1)); height: calc(var(--bh) * var(--s, 1));
   animation: slotIn 0.55s cubic-bezier(0.25, 1.5, 0.45, 1) backwards;
   animation-delay: var(--d, 0ms);
 }
 @keyframes slotIn { 0% { opacity: 0; transform: translateY(26px) scale(0.92); } 100% { opacity: 1; transform: none; } }
-.slot.tall { height: calc(var(--bw) * 3.2); }
+.slot.tall { height: calc(var(--bw) * 3.2 * var(--s, 1)); }
 .slot .shadow {
   position: absolute; left: 10%; right: 10%; bottom: calc(var(--bw) * -0.10); height: calc(var(--bw) * 0.16);
   background: radial-gradient(50% 50% at 50% 50%, rgba(3, 6, 20, 0.55), transparent 72%);
@@ -811,3 +811,37 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
   .elem-icy, .elem-electric, .elem-boil, .elem-toxic { animation: none !important; }
   * { transition-duration: 0.01s !important; }
 }
+
+.utility-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 8px 0; }
+#loading-status { min-height: 1.3em; margin: 4px 12px; text-align: center; font-size: 14px; }
+.generating #loading-status { opacity: 0.75; }
+#share-link { width: 100%; padding: 12px; margin: 10px 0; border-radius: 8px; border: 1px solid var(--glass-edge); color: var(--ink); background: var(--glass-solid); user-select: text; }
+.sheet { max-height: 88dvh; overflow-y: auto; }
+.fabs { gap: 10px; }
+.fabs { display: flex; flex-direction: column; }
+#btn-share { color: #fff; }
+.generating #stage::after { content: 'Mixing your puzzle…'; position: absolute; top: 4px; left: 50%; transform: translateX(-50%); border-radius: 20px; background: var(--card-bg); color: var(--ink); padding: 10px 16px; z-index: 100; }
+
+/* Board = [tower][rows][tower]; towers share the small-bottle scale and stand
+   on the lowest shelf line, directly beside the grid. */
+.board { display: flex; align-items: flex-end; justify-content: center; gap: var(--tower-gap, 0px); }
+.board-rows { display: flex; flex-direction: column; align-items: center; gap: calc(var(--bw) * 0.5); }
+.tower-rail { flex: none; width: var(--tower-width); height: var(--tower-height); }
+.slot.s-tower { width: var(--tower-width); height: var(--tower-height); }
+.with-towers { --bh: calc(var(--bw) * 2.4); }
+#stage.with-towers { padding-top: 24px; padding-bottom: 60px; }
+.with-towers .fabs { right: 50%; transform: translateX(50%); flex-direction: row; }
+
+.capacity-label { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 3px 6px; border-radius: 9px; background: #211332dd; color: #fff; font: 700 11px system-ui; white-space: nowrap; pointer-events: none; }
+.completion-effect { position: absolute; inset: 0; pointer-events: none; z-index: 4; overflow: visible; }
+.splash-drop { position: absolute; left: 50%; border-radius: 50%; opacity: 0; }
+.celebrating .splash-drop { animation: splash-drop 1.4s cubic-bezier(.25,.6,.5,1) var(--d, 0s) forwards; }
+@keyframes splash-drop {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(.4); }
+  10% { opacity: 1; }
+  45% { transform: translate(calc(-50% + var(--x) * .7), var(--peak)) scale(1); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--x)), var(--y)) scale(.7); }
+}
+.splash-ripple { position: absolute; left: 50%; border: 2px solid #fff; border-radius: 50%; opacity: 0; transform: translate(-50%, -50%) scale(.3); }
+.celebrating .splash-ripple { animation: splash-ripple .8s ease-out .1s; }
+@keyframes splash-ripple { 0% { opacity: .9; transform: translate(-50%, -50%) scale(.3); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); } }

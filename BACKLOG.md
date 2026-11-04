@@ -1,5 +1,38 @@
 # Vessel — Backlog
 
+## Open — next up
+
+- **Par is the greedy solver's first line, not the optimum,** so stars are
+  generous on big boards.
+- **Real-device re-test** of frame timing on phone and tablet (see below).
+
+## Shipped — colour-splash finish, equal volumes, small early towers
+
+- Finish effect (option D): droplets in the liquid's colour jump out of the
+  mouth and rain down beside the bottle, plus a ripple on the surface
+  (`src/completion-effect.js`). Replaces the spiral and the cork sparkles.
+- Every shape shows the same liquid area per segment: small shapes are drawn
+  at a volume scale (`volumeScale()` in pour-physics: flask 1.31×, classic
+  1.15×, tall 1.09× round); towers are built to match round.
+- Towers hold 8 segments in early levels (Relaxed 1–6, Normal 1–4, Expert 1–2,
+  Rush stages 1–3) and 12 afterwards. Relaxed L1 par 18 → 9. Rules version 4.
+
+## Shipped — permanent 12-segment towers + reliability pass
+
+- Two 12-segment towers in every mode, on top of the configured small empties
+  (Relaxed 2, Normal/Expert/Daily/Rush 1). Colours 0 and 1 carry 8 extra units
+  each; winning needs both towers full and monochrome. Rules version 3.
+- Towers use the small-bottle scale: one tower segment holds exactly the area of
+  one round-bottle segment, and towers stand beside the grid in one flex row
+  (`.board`), bottoms on the lowest shelf line.
+- Completion: finite spiral + cork. The persistent glow and "✓ Full" badge were removed.
+- Early levels retuned; all 90 classic levels re-baked (`npm run bake`).
+- Validated saves and sessions, cancellable worker hints/generation, colourblind
+  numbers, resume with undo history, versioned share links (older links are
+  reported as outdated, not opened under new rules), offline PWA with explicit
+  update, lint + unit + Playwright CI.
+
+
 ## Shipped — Aliquot mechanics port (pour physics, cork, sound, input)
 
 Ported from `reference/aliquot.html` (mechanics only; Vessel keeps its look).
@@ -12,9 +45,9 @@ Ported from `reference/aliquot.html` (mechanics only; Vessel keeps its look).
 
 ### Left / follow-ups
 - **Real-device check:** first phone test felt laggy. Since then: idle bottles are cached in an offscreen layer during pours, poses stay in memory in canvas mode (no DOM writes), and the physics polygon is simplified exactly. At 4× CPU throttle headless, frame p50 went from 67 ms to 17 ms. Needs a re-test on the phone.
-- **Headspace:** fill line lowered 20 % of the column after device feedback (classic 74.4, tall 87.2, flask 68.4 in `SHAPE_GEO.cap`); a full bottle now starts pouring at 69–78° instead of ~42°.
+- **Headspace:** superseded by the tower upgrade; full capacity now fills into the shoulder (see `SHAPE_GEO.cap`).
 - **SVG fallback** still uses its old tilt heuristic for liquid (not volume-true). Its stream follows the lip, and it has no slosh oscillator.
-- **Colour-blind symbols:** not ported; the `symbols` setting was removed earlier. Element emblems follow the new band geometry.
+- **Colour-blind symbols:** shipped again as numbered labels (see above). Element emblems follow the new band geometry.
 - **Frozen timing:** frozen bottles thaw when the completing pour lands (as before), so a very fast tapper can hit a still-frozen bottle once.
 - **QA:** `scripts/qa-rapid-tap.mjs` (Playwright, manual) covers rapid taps, undo mid-pour and the win path. `?slowmo=N` slows board motion for inspection.
 

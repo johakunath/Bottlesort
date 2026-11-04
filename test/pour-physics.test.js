@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PourPhysics as P } from '../src/pour-physics.js';
 
-const SHAPES = ['classic', 'tall', 'flask'];
+const SHAPES = ['tower', 'round', 'classic', 'tall', 'flask'];
 const deg = d => d * Math.PI / 180;
 
 function rotated(poly, a) {
@@ -70,7 +70,7 @@ test('upright levels match an independent volume integration within 0.5 units', 
       const y0 = g.bottom - (k - 1) * dy, y1 = g.bottom - k * dy;
       cum.push(cum[k - 1] + (P.shapeWidthAt(sn, y0) + P.shapeWidthAt(sn, y1)) / 2 * dy);
     }
-    const kCap = Math.round((g.bottom - g.cap) / dy), unit = cum[kCap] / 4;
+    const kCap = Math.round((g.bottom - g.cap) / dy), unit = cum[kCap] / (g.capacity || 4);
     for (const v of [0.5, 1, 1.7, 2, 3, 4]) {
       let k = 0; while (cum[k] < v * unit) k++;
       const yRef = g.bottom - k * dy;
@@ -78,7 +78,7 @@ test('upright levels match an independent volume integration within 0.5 units', 
       assert.ok(Math.abs(lv - yRef) < 0.5, `${sn} v=${v}: ${lv.toFixed(2)} vs ${yRef.toFixed(2)}`);
       assert.ok(Math.abs(P.uprightLevel(sn, v) - yRef) < 0.5, `${sn} uprightLevel v=${v}`);
     }
-    assert.ok(Math.abs(P.uprightLevel(sn, 4) - g.cap) < 0.5, sn + ' 4 layers fill to cap');
+    assert.ok(Math.abs(P.uprightLevel(sn, g.capacity || 4) - g.cap) < 0.5, sn + ' full capacity fills to cap');
   }
 });
 
@@ -89,7 +89,7 @@ test('volume is conserved at any tilt', () => {
       const a = deg(d), r = rotated(m.poly, a);
       const total = P.areaBelow(r.xs, r.ys, r.n, -1e9);
       assert.ok(Math.abs(total - m.totalA) / m.totalA < 1e-9, sn + ' polygon area at ' + d);
-      const cums = [0.6, 1.5, 3, 4];
+      const cums = [0.6, 1.5, 3, 4].map(v => v * (P.SHAPE_GEO[sn].capacity || 4) / 4);
       const lv = P.levelsFor(sn, a, cums);
       cums.forEach((v, k) => {
         const got = P.areaBelow(r.xs, r.ys, r.n, lv.tops[k]) / m.unitA;
@@ -100,10 +100,14 @@ test('volume is conserved at any tilt', () => {
   }
 });
 
-test('a full bottle has headspace: it starts pouring between 60° and 85°', () => {
+test('full bottles fill into the shoulders and retain safe pouring headspace', () => {
   for (const sn of SHAPES) {
-    const th = P.thetaFor(sn, 4) * 180 / Math.PI;
-    assert.ok(th >= 60 && th <= 85, sn + ' starts at ' + th.toFixed(1));
+    const capacity = P.SHAPE_GEO[sn].capacity || 4;
+    const th = P.thetaFor(sn, capacity) * 180 / Math.PI;
+    const g = P.SHAPE_GEO[sn], full = P.uprightLevel(sn, capacity);
+    assert.ok(Math.abs(full - g.cap) < 0.01, sn + ' full surface');
+    assert.ok((full - g.top) / (g.bottom - g.top) < 0.2, sn + ' no empty-looking extra layer');
+    assert.ok(th >= 45 && th <= 85, sn + ' starts at ' + th.toFixed(1));
   }
 });
 

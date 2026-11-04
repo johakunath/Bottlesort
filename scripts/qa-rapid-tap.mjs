@@ -7,7 +7,7 @@
 import { chromium } from 'playwright';
 const [rm = 'no-preference', renderer = 'canvas2d', lvl = '14', diff = 'normal', gap = '16'] = process.argv.slice(2);
 const url = (process.env.VESSEL_URL || 'http://127.0.0.1:5173/') + '?renderer=' + renderer;
-const b = await chromium.launch();
+const b = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--no-sandbox'] });
 const pg = await b.newPage({ viewport: { width: 400, height: 850 }, reducedMotion: rm });
 const errs = [];
 pg.on('pageerror', e => errs.push(e.message));
