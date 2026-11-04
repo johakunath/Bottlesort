@@ -27,3 +27,10 @@ test('failed overwrite or removal never resurrects an older persisted value', ()
   assert.equal(st.get('x'),'old'); st.set('x','new'); assert.equal(st.get('x'),'new');
   st.remove('x'); assert.equal(st.get('x'),null);
 });
+test('achievement unlock timestamps survive a save round trip', () => {
+  const stamp = 1762230000000;
+  const save = normalizeSave(JSON.parse(JSON.stringify({ ach: { first: stamp, legacy: true, bad: -1, odd: 'x' }, seenSpecials: { frozen: 1 } })));
+  assert.deepEqual(save.ach, { first: stamp, legacy: true });
+  assert.deepEqual(save.seenSpecials, { frozen: true });
+  assert.deepEqual(normalizeSave(JSON.parse(JSON.stringify(save))).ach, save.ach);
+});

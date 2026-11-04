@@ -40,7 +40,10 @@ export function normalizeSave(input) {
   }
   for (const key of ['ach', 'seenSpecials']) {
     if (record(input[key])) for (const [k, v] of Object.entries(input[key])) {
-      if (/^[a-z][a-z0-9_-]{0,40}$/i.test(k) && (v === true || v === 1)) out[key][k] = true;
+      if (!/^[a-z][a-z0-9_-]{0,40}$/i.test(k)) continue;
+      // Achievements store their unlock time (Date.now()); keep it. Flags may be true/1.
+      if (Number.isInteger(v) && v > 0) out[key][k] = key === 'ach' ? v : true;
+      else if (v === true) out[key][k] = true;
     }
   }
   if (Number.isInteger(input.rushBest) && input.rushBest >= 0) out.rushBest = input.rushBest;
