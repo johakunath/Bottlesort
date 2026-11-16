@@ -2,6 +2,15 @@
 
 ## Open — next up
 
+- **3D spike verdict** (`/spike3d.html`, source `src/spike3d/main.js`): Three.js
+  bottles with a layered-liquid shader over the painted backdrops. Renders only
+  while something moves; no post-processing or refraction. Not linked from the
+  game and not in the offline cache. Judge on a real phone (look, smoothness,
+  heat with Auto-play on 25 bottles), then either port it as a third renderer
+  backend or delete the page and the `three` dependency. Known gaps: liquid
+  volume while tilted is approximate (the game's `pour-physics.js` is not wired
+  in), one bottle shape, no towers, corks or specials.
+
 - **Par is the greedy solver's first line, not the optimum,** so stars are
   generous on big boards.
 - **Real-device re-test** of frame timing on phone and tablet (see below).
