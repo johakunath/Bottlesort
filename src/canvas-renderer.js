@@ -25,7 +25,7 @@ const CanvasRenderer = {
     if (!this.ensure()) return false;
     const stage = env.$('#stage');
     const sr = stage.getBoundingClientRect();
-    this.dpr = Math.max(1, Math.min(env.activeRenderProfile().dprCap, window.devicePixelRatio || 1));
+    this.dpr = Math.max(1, Math.min(env.activeDprCap(), window.devicePixelRatio || 1));
     const w = Math.max(1, Math.round(sr.width * this.dpr));
     const h = Math.max(1, Math.round(sr.height * this.dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
@@ -33,6 +33,7 @@ const CanvasRenderer = {
       this.gradientCache.clear();
       this.shellCache.clear();
       this.backCache.clear();
+      this.sprites.length = 0;
     }
     this.canvas.style.width = sr.width + 'px';
     this.canvas.style.height = sr.height + 'px';
@@ -47,7 +48,6 @@ const CanvasRenderer = {
   renderBottle() { return this.requestRender(); },
   requestRender() {
     if (!this.ensure()) return this;
-    this.staticGen++;   /* something outside the animation loop changed: rebuild the idle layer */
     if (this.renderQueued || env.Motion.running) return this;   /* Motion paints every frame anyway */
     this.renderQueued = true;
     env.FrameGate.request('canvas-render', () => {
@@ -56,48 +56,104 @@ const CanvasRenderer = {
     });
     return this;
   },
-  /* Bottles that are not animating are painted once into an offscreen idle
-     layer; while pours run, each frame blits that layer and redraws only the
-     moving bottles. The layer is rebuilt when the moving set changes or when
-     anything outside the animation loop asks for a render. */
-  staticGen: 0,
+  /* Every bottle at rest is cached as its own sprite, keyed by everything
+     that changes its look (liquid, specials, cork, theme, size). A frame with
+     nothing moving is one drawImage per bottle. While pours run, the resting
+     bottles are composed once into an offscreen idle layer; each frame blits
+     that layer and redraws only the moving bottles. Starting a pour therefore
+     costs a few sprite blits, not a full repaint of the board. */
   staticKey: null,
   staticCanvas: null,
+  sprites: [],
+  spriteSeq: 0,
+  elemKey: '',
+  spriteSig(i, r) {
+    const segs = env.visual[i] || [];
+    let sig = r.shapeName + '|' + r.w + 'x' + r.h + '@' + r.x + ',' + r.y + '|' + this.dpr + '|' + env.SKIN + env.MODE + '|' +
+      env.activeRenderProfile().id + '|' + (env.save.symbols ? 1 : 0) + '|' + (env.hiddenDepth[i] || 0) + '|' +
+      (env.veiled[i] ? 1 : 0) + (env.frozen.has(i) ? 1 : 0) + '|' + (env.corks[i] ? env.corks[i].t : -1) + '|' + this.elemKey + '|';
+    for (const seg of segs) sig += seg.c + ':' + seg.u + ',';
+    return sig;
+  },
+  /* sprite for resting bottle i, repainted only when its signature changes */
+  sprite(i) {
+    const r = this.rects[i];
+    if (!r || !env.slots[i]) return null;
+    const sig = this.spriteSig(i, r);
+    let sp = this.sprites[i];
+    if (sp && sp.sig === sig) return sp;
+    const sh = env.SHAPES[r.shapeName], dpr = this.dpr;
+    /* margin covers the baked shadow, the Neon bloom and the seated lid */
+    const M = Math.ceil(24 * Math.max(r.w / 100, r.h / sh.vbH)) + 2;
+    const ox = Math.floor((r.x - M) * dpr), oy = Math.floor((r.y - M) * dpr);
+    const w = Math.ceil((r.x + r.w + M) * dpr) - ox, h = Math.ceil((r.y + r.h + M) * dpr) - oy;
+    if (!sp || sp.cv.width !== w || sp.cv.height !== h) sp = this.sprites[i] = { cv: this.makeLayer(w, h) };
+    const sctx = sp.cv.getContext('2d'), main = this.ctx;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, w, h);
+    /* same device-pixel phase as the board, so the blit is 1:1 (no resample blur) */
+    sctx.setTransform(dpr, 0, 0, dpr, -ox, -oy);
+    this.ctx = sctx;
+    try { this.drawBottle(i, true); }
+    finally { this.ctx = main; }
+    sp.sig = sig; sp.ox = ox; sp.oy = oy; sp.ver = ++this.spriteSeq;
+    return sp;
+  },
+  /* selection lift is applied at blit time, so selecting never repaints a sprite */
+  liftPx(i) {
+    const r = this.rects[i], slot = env.slots[i];
+    return slot && slot.el.classList.contains('selected') && !env.locked.has(i) ? Math.round(-r.w * 0.22 * this.dpr) : 0;
+  },
   renderNow() {
     if (!this.ensure()) return;
     if (this.rects.length !== env.slots.length) this.syncLayout();
-    this.clear();
     env.PerfMeter.mark('canvas2d', performance.now());
     const n = env.state.length;
+    let ek = '';
+    for (const c in env.ELEMENT_MAP) ek += c + env.ELEMENT_MAP[c][0];
+    this.elemKey = ek;
     /* a bottle that started moving stays in the live set until the whole
-       board is still, so the idle layer is rebuilt only when the set grows */
+       board is still, so the idle layer is recomposed only when the set grows */
     const live = this._live || (this._live = new Set());
     let any = false;
     for (let i = 0; i < n; i++) if (env.bottleAnimating(i)) { live.add(i); any = true; }
     if (!any) live.clear();
     const act = this._act || (this._act = []);
     act.length = 0;
-    let key = this.staticGen + ':';
-    for (let i = 0; i < n; i++) if (live.has(i)) { act.push(i); key += i + ','; }
+    const idle = this._idle || (this._idle = []);
+    idle.length = 0;
+    let key = '';
+    for (let i = 0; i < n; i++) {
+      if (live.has(i)) { act.push(i); key += 'L,'; continue; }
+      const sp = this.sprite(i);
+      idle.push(sp);
+      key += sp ? sp.ver + '.' + this.liftPx(i) + ',' : '-,';
+    }
+    const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
     if (!act.length) {
-      for (let i = 0; i < n; i++) this.drawBottle(i);
+      let k = 0;
+      for (let i = 0; i < n; i++) { const sp = idle[k++]; if (sp) ctx.drawImage(sp.cv, sp.ox, sp.oy + this.liftPx(i)); }
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.staticKey = null;
       return;
     }
-    const W = this.canvas.width, H = this.canvas.height;
     if (key !== this.staticKey || !this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) {
       if (!this.staticCanvas || this.staticCanvas.width !== W || this.staticCanvas.height !== H) this.staticCanvas = this.makeLayer(W, H);
-      const sctx = this.staticCanvas.getContext('2d'), main = this.ctx;
+      const sctx = this.staticCanvas.getContext('2d');
       sctx.setTransform(1, 0, 0, 1, 0, 0);
       sctx.clearRect(0, 0, W, H);
-      sctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      this.ctx = sctx;
-      try { for (let i = 0; i < n; i++) if (!act.includes(i)) this.drawBottle(i); }
-      finally { this.ctx = main; }
+      let k = 0;
+      for (let i = 0; i < n; i++) {
+        if (live.has(i)) continue;
+        const sp = idle[k++];
+        if (sp) sctx.drawImage(sp.cv, sp.ox, sp.oy + this.liftPx(i));
+      }
       this.staticKey = key;
     }
-    const ctx = this.ctx;
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.staticCanvas, 0, 0); ctx.restore();
+    ctx.drawImage(this.staticCanvas, 0, 0);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     /* bottles in flight are drawn last so they pass over their neighbours */
     for (const i of act) if (!env.flyingSource(i)) this.drawBottle(i);
     for (const i of act) if (env.flyingSource(i)) this.drawBottle(i);
@@ -105,8 +161,8 @@ const CanvasRenderer = {
   renderAll() {
     return this.requestRender();
   },
-  setTheme() { this.staticGen++; this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
-  setQuality(q) { this.quality = q || 'auto'; this.shellCache.clear(); this.backCache.clear(); return this; },
+  setTheme() { this.sprites.length = 0; this.gradientCache.clear(); this.shellCache.clear(); this.backCache.clear(); this.glowCache.clear(); this.renderAll(); return this; },
+  setQuality(q) { this.quality = q || 'auto'; this.sprites.length = 0; this.shellCache.clear(); this.backCache.clear(); return this; },
   destroy() { this.renderQueued = false; this.clear(); return this; },
   roundRect(ctx, x, y, w, h, r) {
     r = Math.min(r || 0, w / 2, h / 2);
@@ -177,7 +233,7 @@ const CanvasRenderer = {
     const cached = this.backCache.get(key);
     if (cached) return cached;
     const P = this.PAD;
-    const scale = Math.max(1, Math.min(2, this.dpr || 1));
+    const scale = Math.max(1, Math.min(3, this.dpr || 1));
     const cv = this.makeLayer((100 + 2 * P) * scale, (sh.vbH + 2 * P) * scale);
     const ctx = cv.getContext('2d');
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -227,7 +283,7 @@ const CanvasRenderer = {
     const key = [shapeName, env.SKIN, env.MODE, env.RIM_COLOR, this.dpr].join(':');
     const cached = this.shellCache.get(key);
     if (cached) return cached;
-    const scale = Math.max(1, Math.min(2, this.dpr || 1));
+    const scale = Math.max(1, Math.min(3, this.dpr || 1));
     const cv = this.makeLayer(100 * scale, sh.vbH * scale);
     const ctx = cv.getContext('2d');
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
@@ -479,14 +535,15 @@ const CanvasRenderer = {
     }
     ctx.restore();
   },
-  drawBottle(i) {
+  /* atRest: paint for the sprite cache (no pose, no selection lift) */
+  drawBottle(i, atRest) {
     const r = this.rects[i], slot = env.slots[i];
     if (!r || !slot) return;
     const ctx = this.ctx, shapeName = r.shapeName, sh = env.SHAPES[shapeName];
     const sx = r.w / 100, sy = r.h / sh.vbH;
-    const pose = env.poses[i];
+    const pose = atRest ? null : env.poses[i];
     const tx = pose ? pose.tx : 0;
-    const selectedLift = !pose && slot.el.classList.contains('selected') && !env.locked.has(i) ? -r.w * 0.22 : 0;
+    const selectedLift = !atRest && !pose && slot.el.classList.contains('selected') && !env.locked.has(i) ? -r.w * 0.22 : 0;
     const ty = (pose ? pose.ty : 0) + selectedLift;
     const rot = pose ? pose.a : 0;
     ctx.save();

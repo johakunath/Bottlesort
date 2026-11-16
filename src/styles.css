@@ -652,7 +652,8 @@ body[data-skin="neon"] .cork-g, body[data-skin="neon"] .label-g { display: none;
 .mode-card .mc-name { font-family: var(--head-font); font-weight: 600; font-size: clamp(16px, 2.6vmin, 20px); }
 .mode-card .mc-sub { font-size: clamp(11px, 1.7vmin, 13px); color: var(--ink-dim); font-weight: 800; }
 .mode-card.done { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: inset 0 0 24px color-mix(in srgb, var(--accent) 8%, transparent); }
-.section-label { color: var(--ink-dim); font-size: clamp(11px, 1.8vmin, 13px); font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; margin: 2px 0 -6px; }
+/* sits on the painted backdrop, so it carries its own frosted pill to stay readable */
+.section-label { color: var(--ink); font-size: clamp(11px, 1.8vmin, 13px); font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; margin: 2px auto -6px; padding: 5px 14px; border-radius: 999px; background: var(--glass-solid); width: fit-content; }
 .credit { color: var(--ink-dim); opacity: 0.75; font-size: 12px; font-weight: 700; margin: 0; }
 
 /* ---------------- AI assistant FABs ---------------- */

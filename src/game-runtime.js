@@ -109,13 +109,13 @@ const RENDER_PROFILES = {
     settleMs: 70, streamGlow: false
   },
   normal: {
-    id: 'normal', label: 'Normal', targetFps: 60, dprCap: 1.5,
+    id: 'normal', label: 'Normal', targetFps: 60, dprCap: 2,
     fluidSamples: 11, particleScale: 0.75, glowStrength: 0.75,
     idleAnimations: true, celebrationIntensity: 0.75,
     settleMs: 120, streamGlow: true
   },
   pretty: {
-    id: 'pretty', label: 'Pretty', targetFps: 60, dprCap: 2,
+    id: 'pretty', label: 'Pretty', targetFps: 60, dprCap: 3,
     fluidSamples: 17, particleScale: 1, glowStrength: 1,
     idleAnimations: true, celebrationIntensity: 1,
     settleMs: 180, streamGlow: true
@@ -174,8 +174,10 @@ function chooseAutoRenderQuality() {
   const touch = isTouchDevice();
   if (RM || save.lowPowerEffects) return 'low';
   if (touch) return 'normal';
-  if (cores <= 4 || area < 520000) return 'low';
-  if (cores <= 6 || area < 850000) return 'normal';
+  /* resting bottles are cached sprites, so only very weak machines need Low;
+     auto-demotion still steps down if frames run long */
+  if (cores <= 2) return 'low';
+  if (cores <= 4 || area < 520000) return 'normal';
   return 'pretty';
 }
 function isTouchDevice() {
@@ -184,6 +186,10 @@ function isTouchDevice() {
 function activeRenderProfile() {
   return RENDER_PROFILES[renderQualityEffective] || RENDER_PROFILES.normal;
 }
+/* Resolution the board is drawn at. Slow frames first lower this cap (sharp →
+   standard) before the whole profile is demoted. */
+let runtimeDprCap = Infinity;
+function activeDprCap() { return Math.min(activeRenderProfile().dprCap, runtimeDprCap); }
 function explicitPrettyEffects() {
   return !RM && save.renderQuality === 'pretty' && activeRenderProfile().id === 'pretty';
 }
@@ -240,6 +246,7 @@ function applyBackgroundQuality() {
 }
 function applyRenderQuality(reason) {
   renderQualityUser = save.renderQuality;
+  runtimeDprCap = Infinity;
   renderQualityEffective = save.renderQuality === 'auto' ? chooseAutoRenderQuality() : save.renderQuality;
   renderQualityDemotionReason = reason || (save.renderQuality === 'auto' ? 'auto device baseline' : '');
   const p = activeRenderProfile();
@@ -255,6 +262,13 @@ function applyRenderQuality(reason) {
   else if (document.body && document.body.dataset.screen === 'menu') { startAmbient(); MenuLife.start(); }
 }
 function demoteRenderQuality(reason) {
+  if (activeDprCap() > 1.5 && (window.devicePixelRatio || 1) > 1.5) {
+    runtimeDprCap = 1.5;
+    renderQualityDemotionReason = 'resolution lowered: ' + (reason || 'slow frames');
+    if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
+    if (state.length && slots.length) renderer.renderAll();
+    return true;
+  }
   const idx = QUALITY_ORDER.indexOf(renderQualityEffective);
   if (idx <= 0) return false;
   renderQualityEffective = QUALITY_ORDER[idx - 1];
@@ -385,7 +399,7 @@ const PerfMeter = (() => {
         droppedFrames,
         currentRenderer: renderer,
         targetFps: targetFps(),
-        dpr: rounded(Math.min(window.devicePixelRatio || 1, activeRenderProfile().dprCap), 2),
+        dpr: rounded(Math.min(window.devicePixelRatio || 1, activeDprCap()), 2),
         qualityProfile: qualityProfile(),
         renderQuality: renderQualityEffective,
         renderQualitySetting: save.renderQuality,
@@ -402,24 +416,30 @@ const PerfMeter = (() => {
   return api;
 })();
 
+/* Frame scheduler. Callbacks always run inside requestAnimationFrame, so
+   they stay locked to the display refresh. A lower target rate (30 FPS dust,
+   the low profile) is reached by skipping refreshes, never with a timer: a
+   timer that fires a moment after a refresh loses that whole frame, which
+   halved the frame rate on slower phones. */
 const FrameGate = (() => {
   const last = new Map();
   function frameMs(fps) { return 1000 / (fps || activeRenderProfile().targetFps || 60); }
   return {
     reset(key) { if (key) last.delete(key); else last.clear(); },
-    remaining(key, now, fps) {
-      const prev = last.get(key) || 0;
-      if (!prev) return 0;
-      return Math.max(0, frameMs(fps) - (now - prev));
-    },
     note(key, now) { last.set(key, now); },
+    cancel(token) { if (token) { token.cancelled = true; cancelAnimationFrame(token.raf); } },
     request(key, cb, fps) {
-      const now = performance.now();
-      const delay = this.remaining(key, now, fps);
-      return setTimeout(() => requestAnimationFrame(ts => {
-        this.note(key, ts);
+      const token = { cancelled: false, raf: 0 };
+      const tick = ts => {
+        if (token.cancelled) return;
+        const prev = last.get(key) || 0;
+        /* 3 ms of slack absorbs refresh jitter around the target interval */
+        if (prev && ts - prev < frameMs(fps) - 3) { token.raf = requestAnimationFrame(tick); return; }
+        last.set(key, ts);
         cb(ts);
-      }), delay);
+      };
+      token.raf = requestAnimationFrame(tick);
+      return token;
     }
   };
 })();
@@ -1011,6 +1031,7 @@ const CanvasRenderer = createCanvasRenderer({
   get SHAPES() { return SHAPES; },
   get SKIN() { return SKIN; },
   get activeRenderProfile() { return activeRenderProfile; },
+  get activeDprCap() { return activeDprCap; },
   get bodies() { return bodies; },
   get boltPath() { return boltPath; },
   get bottleAnimating() { return bottleAnimating; },
@@ -2779,7 +2800,7 @@ function confetti() {
 /* ---------------- ambient dust ---------------- */
 let ambientOn = false;
 let ambientGen = 0;     /* invalidates callbacks already handed to rAF on stop/restart */
-let ambientRaf = 0;
+let ambientRaf = null;
 let ambientResize = null;
 
 function clearAmbientCanvas() {
@@ -2853,8 +2874,8 @@ function stopAmbient() {
   ambientOn = false;
   ambientGen++;
   if (ambientRaf) {
-    clearTimeout(ambientRaf);
-    ambientRaf = 0;
+    FrameGate.cancel(ambientRaf);
+    ambientRaf = null;
   }
   FrameGate.reset('ambient');
   if (ambientResize) {
@@ -3244,7 +3265,7 @@ window.__vesselPerf = {
   get renderQualitySetting() { return save.renderQuality; },
   get renderProfile() { return Object.assign({}, activeRenderProfile()); },
   get autoDemotionReason() { return renderQualityDemotionReason; },
-  get dprCap() { return activeRenderProfile().dprCap; },
+  get dprCap() { return activeDprCap(); },
   get dpr() { return PerfMeter.snapshot().dpr; },
   get qualityProfile() { return PerfMeter.snapshot().qualityProfile; },
   get perfSampleCount() { return PerfMeter.snapshot().sampleCount; },
