@@ -256,7 +256,7 @@ function applyRenderQuality(reason) {
   document.documentElement.style.setProperty('--render-glow', String(p.glowStrength));
   applyBackgroundQuality();
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
-  if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
+  if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
   if (!p.idleAnimations) { stopAmbient(); MenuLife.stop(); }
   else if (document.body && document.body.dataset.screen === 'menu') { startAmbient(); MenuLife.start(); }
@@ -265,7 +265,7 @@ function demoteRenderQuality(reason) {
   if (activeDprCap() > 1.5 && (window.devicePixelRatio || 1) > 1.5) {
     runtimeDprCap = 1.5;
     renderQualityDemotionReason = 'resolution lowered: ' + (reason || 'slow frames');
-    if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
+    if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
     if (state.length && slots.length) renderer.renderAll();
     return true;
   }
@@ -279,7 +279,7 @@ function demoteRenderQuality(reason) {
   resetFluidRuntime();
   document.documentElement.style.setProperty('--render-glow', String(p.glowStrength));
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
-  if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
+  if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
   if (!p.idleAnimations) { stopAmbient(); MenuLife.stop(); }
   return true;
@@ -481,7 +481,7 @@ const Motion = {
   frame(now) {
     const dt = Math.min(0.05, Math.max(0.001, (now - this.last) / 1000)) / SLOWMO;
     this.last = now;
-    PerfMeter.mark(isCanvasMode() ? 'canvas-motion' : 'svg-motion', now);
+    PerfMeter.mark(renderer.active === 'webgl' ? 'webgl-motion' : isCanvasMode() ? 'canvas-motion' : 'svg-motion', now);
     for (const fn of [...this.tasks]) {
       let keep = false;
       try { keep = fn(dt, now); } catch (e) { console.error(e); }
@@ -1013,7 +1013,7 @@ const SvgRenderer = createSvgRenderer({
   get visual() { return visual; }
 });
 
-const CanvasRenderer = createCanvasRenderer({
+const boardEnv = {
   get $() { return $; },
   get COLORS() { return COLORS; },
   get ELEMENT_MAP() { return ELEMENT_MAP; },
@@ -1032,6 +1032,10 @@ const CanvasRenderer = createCanvasRenderer({
   get SKIN() { return SKIN; },
   get activeRenderProfile() { return activeRenderProfile; },
   get activeDprCap() { return activeDprCap; },
+  get jobs() { return jobs; },
+  get shapeWidthAt() { return shapeWidthAt; },
+  get onContextLost() { return onGlContextLost; },
+  get glForced() { return glForced; },
   get bodies() { return bodies; },
   get boltPath() { return boltPath; },
   get bottleAnimating() { return bottleAnimating; },
@@ -1055,12 +1059,35 @@ const CanvasRenderer = createCanvasRenderer({
   get state() { return state; },
   get veiled() { return veiled; },
   get visual() { return visual; }
-});
+};
+const CanvasRenderer = createCanvasRenderer(boardEnv);
 
 function preferredRendererMode() { return preferredRenderer(location.search, window.__vesselRendererMode); }
 
+/* true when the board is painted off-DOM (Canvas 2D or WebGL): the slots are
+   then invisible hit targets and poses stay in memory */
 function isCanvasMode() {
-  return typeof renderer !== 'undefined' && (renderer.active === 'canvas' || renderer.active === 'canvas2d' || (renderer.backend && (renderer.backend.backend === 'canvas' || renderer.backend.backend === 'canvas2d')));
+  return typeof renderer !== 'undefined' && (renderer.active === 'canvas2d' || renderer.active === 'webgl');
+}
+
+/* The WebGL renderer (and Three.js with it) loads on demand, after the first
+   board is already up in Canvas 2D. If it cannot load or start, or the
+   context is lost later, the board simply stays on / returns to Canvas 2D. */
+let GlRenderer = null;
+let glLoading = false;
+function loadGlRenderer() {
+  if (GlRenderer || glLoading || preferredRendererMode() !== 'webgl') return;
+  glLoading = true;
+  import('./gl-renderer.js').then(mod => {
+    GlRenderer = mod.createGlRenderer(boardEnv);
+    if (!state.length || !slots.length) return;
+    /* never swap renderers under a running pour; the settle hook re-syncs */
+    if (pendingCount() === 0) { renderer.syncLayout(); renderer.renderAll(); } else pendingLayout = true;
+  }).catch(e => { console.warn('WebGL renderer unavailable; staying on Canvas 2D.', e); });
+}
+function glForced() { return new URLSearchParams(location.search).get('renderer') === 'webgl'; }
+function onGlContextLost() {
+  if (state.length && slots.length) { renderer.syncLayout(); renderer.renderAll(); }
 }
 
 const renderer = {
@@ -1074,13 +1101,22 @@ const renderer = {
   chooseBackend() {
     const mode = preferredRendererMode();
     const stage = $('#stage');
-    if (mode === 'canvas2d' && CanvasRenderer.ensure()) {
-      this.active = 'canvas2d'; this.backend = CanvasRenderer; stage.classList.add('canvas-active');
+    const was = this.active;
+    if (mode === 'webgl' && GlRenderer && GlRenderer.ensure()) {
+      this.active = 'webgl'; this.backend = GlRenderer;
+    } else if (mode !== 'svg' && CanvasRenderer.ensure()) {
+      this.active = 'canvas2d'; this.backend = CanvasRenderer;
     } else {
-      this.active = 'svg'; this.backend = SvgRenderer; stage.classList.remove('canvas-active');
-      if (mode === 'canvas2d') console.warn('Canvas 2D renderer unavailable; falling back to SVG.');
+      this.active = 'svg'; this.backend = SvgRenderer;
+      if (mode !== 'svg') console.warn('Canvas renderer unavailable; falling back to SVG.');
     }
-    slots.forEach(slot => slot && slot.el && slot.el.classList.toggle('canvas-dom-proxy', this.active === 'canvas2d'));
+    if (was !== this.active) {   /* the outgoing backend must not leave pixels behind */
+      if (was === 'canvas2d') CanvasRenderer.clear();
+      if (was === 'webgl' && GlRenderer) GlRenderer.clear();
+    }
+    stage.classList.toggle('canvas-active', this.active !== 'svg');
+    stage.dataset.renderer = this.active;
+    slots.forEach(slot => slot && slot.el && slot.el.classList.toggle('canvas-dom-proxy', this.active !== 'svg'));
     return this;
   },
   syncLayout() {
@@ -1095,7 +1131,7 @@ const renderer = {
     return this.backend.renderBottle(i, renderOpts);
   },
   renderAll() {
-    if (this.active === 'canvas2d') this.backend.renderAll();
+    if (this.active !== 'svg') this.backend.renderAll();
     else state.forEach((b, i) => this.renderBottle(i, { tiltDeg: 0 }));
     return this;
   },
@@ -1667,7 +1703,7 @@ function setSelected(i) {
     if (!isCanvasMode()) sweepSheen(slots[i].svg);
   }
   updateBottleLabels();
-  if (renderer.active === 'canvas2d') renderer.renderAll();
+  if (isCanvasMode()) renderer.renderAll();
 }
 function shake(i) {
   const el = slots[i].el;
@@ -3067,6 +3103,7 @@ function init() {
   Fluid.enabled = save.fluid !== false;
   applyRenderQuality();
   applyTheme();
+  loadGlRenderer();
   buildDefs();
   buildOrb();
   buildHeroBottles();

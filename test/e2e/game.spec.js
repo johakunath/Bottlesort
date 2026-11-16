@@ -19,9 +19,10 @@ test('collections, labels, resume, undo, and sharing on mobile', async ({page}) 
 });
 
 test('both renderers finish queued pours and restore undo state', async ({page}) => {
-  for (const renderer of ['canvas2d','svg']) {
+  for (const renderer of ['webgl','canvas2d','svg']) {
     await page.goto('/?renderer='+renderer); await page.waitForFunction(()=>!!window.__vessel);
     await page.evaluate(()=>window.__vessel.loadLevel(1));
+    if (renderer==='webgl') await page.waitForFunction(()=>window.__vesselRenderer.active==='webgl');
     const sol=await solution(page), initial=await page.evaluate(()=>JSON.stringify(window.__vessel.state));
     await pour(page,sol[0]); await page.evaluate(()=>window.__vessel.undo());
     expect(await page.evaluate(()=>JSON.stringify(window.__vessel.state))).toBe(initial);

@@ -10,8 +10,7 @@ function offlineBuild() {
     closeBundle() {
       const root = resolve('dist');
       const files = readdirSync(root, { recursive: true, withFileTypes: true })
-        /* the 3D spike is a test page: reachable online, never part of the offline cache */
-        .filter(e => e.isFile() && e.name !== 'sw.js' && !e.name.startsWith('spike3d'))
+        .filter(e => e.isFile() && e.name !== 'sw.js')
         .map(e => resolve(e.parentPath, e.name)).sort();
       const hash = createHash('sha256');
       files.forEach(f => hash.update(readFileSync(f)));
@@ -39,4 +38,4 @@ self.addEventListener('fetch', event => {
     }
   };
 }
-export default defineConfig({ plugins: [offlineBuild()], build: { rollupOptions: { input: { main: resolve('index.html'), spike3d: resolve('spike3d.html') } } } });
+export default defineConfig({ plugins: [offlineBuild()], build: { rollupOptions: { input: { main: resolve('index.html') } } } });

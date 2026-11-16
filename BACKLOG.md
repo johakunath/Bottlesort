@@ -2,18 +2,24 @@
 
 ## Open — next up
 
-- **3D spike verdict** (`/spike3d.html`, source `src/spike3d/main.js`): Three.js
-  bottles with a layered-liquid shader over the painted backdrops. Renders only
-  while something moves; no post-processing or refraction. Not linked from the
-  game and not in the offline cache. Judge on a real phone (look, smoothness,
-  heat with Auto-play on 25 bottles), then either port it as a third renderer
-  backend or delete the page and the `three` dependency. Known gaps: liquid
-  volume while tilted is approximate (the game's `pour-physics.js` is not wired
-  in), one bottle shape, no towers, corks or specials.
-
+- **3D renderer follow-ups** (`src/gl-renderer.js`): redesigned element
+  emblems and effects; Neon bloom and the pooled shelf light of the Canvas 2D
+  look are not ported; impact rings where the stream lands are not ported.
 - **Par is the greedy solver's first line, not the optimum,** so stars are
   generous on big boards.
 - **Real-device re-test** of frame timing on phone and tablet (see below).
+
+## Shipped — WebGL board (Three.js), Canvas 2D as fallback
+
+- The board is drawn as lit 3D glass by `src/gl-renderer.js` (default). It
+  reads the same runtime adapter as the Canvas 2D renderer and uses the same
+  volume-true cut lines, so rules, poses, pour timing and hit targets are
+  unchanged. Three.js loads on demand after start-up.
+- Frames are drawn only when the runtime asks (nothing at rest), with no
+  post-processing. The spike on a Xiaomi 17 stayed cool and smooth.
+- Fallback chain: WebGL → Canvas 2D → SVG. Software-only WebGL is refused and a
+  lost context returns the board to Canvas 2D. `?renderer=webgl|canvas2d|svg`
+  forces one.
 
 ## Shipped — colour-splash finish, equal volumes, small early towers
 
