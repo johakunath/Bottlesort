@@ -25,7 +25,8 @@ const WAVE_N = 17;
 const STREAM_N = 16;
 const MAX_DROPS = 96;
 const ATLAS_CELLS = 4, ATLAS_PX = 96;
-const GLYPH = { icy: 0, electric: 1, boiling: 2, toxic: 3, digit0: 4, question: 13 };
+const GLYPH = { digit0: 4, question: 13 };
+const ELEMENT_ID = { icy: 1, electric: 2, boiling: 3, toxic: 4 };
 /* translucent washes the element emblems lay over their band (as in the 2D renderer) */
 const ELEMENT_TINT = { icy: [0.78, 0.94, 1.0, 0.22], electric: [0.55, 0.94, 1.0, 0.14], toxic: [0.43, 1.0, 0.55, 0.16] };
 
@@ -39,6 +40,7 @@ const GLASS_VERT = `
 const GLASS_FRAG = `
   uniform vec3 uRim; uniform vec4 uTint; uniform float uH;
   uniform float uTicks[11]; uniform int uTickN;
+  uniform vec4 uGlow; uniform float uSheen;
   varying vec3 vN; varying vec3 vV; varying vec3 vL;
   void main() {
     vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
@@ -59,6 +61,12 @@ const GLASS_FRAG = `
       col = mix(col, uTint.rgb, uTint.a / max(uTint.a + a, 0.001));
       a = a + uTint.a * (1.0 - a);
     }
+    /* selection: rim light in the bottle's top colour */
+    float glow = uGlow.a * (0.25 + 0.75 * fres);
+    col = mix(col, uGlow.rgb, clamp(glow, 0.0, 1.0) * 0.8); a += glow * 0.55;
+    /* win wave: a slanted band of light crossing the glass */
+    float sheen = smoothstep(16.0, 0.0, abs(vL.x + 0.3 * vL.y - uSheen));
+    col = mix(col, vec3(1.0), sheen * 0.8); a += sheen * 0.5;
     gl_FragColor = vec4(col, clamp(a, 0.0, 0.96));
   }`;
 
@@ -73,7 +81,22 @@ const LIQUID_FRAG = `
   uniform float uTops[${MAX_LAYERS}]; uniform vec3 uLight[${MAX_LAYERS}]; uniform vec3 uDark[${MAX_LAYERS}]; uniform int uCount;
   uniform vec2 uSpan; uniform float uWave[${WAVE_N}]; uniform int uWaveN; uniform float uUpright; uniform float uMeniscus; uniform vec3 uRipple;
   uniform vec4 uDecal[${MAX_DECALS}]; uniform int uDecalN; uniform sampler2D uAtlas; uniform vec3 uDeep; uniform float uYb;
+  uniform int uElem[${MAX_LAYERS}]; uniform float uBot; uniform float uTime; uniform vec3 uImpact; uniform vec2 uFlash; uniform float uSheen;
   varying vec3 vN; varying vec3 vL;
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float tri(float x) { return abs(fract(x) - 0.5) * 2.0; }
+  /* rising bubbles in band coordinates: by = distance below the band top, bh = band height */
+  vec2 bubbles(float bx, float by, float bh, float cellW, float speed, float seed) {
+    float cx = floor(bx / cellW), h = hash(vec2(cx, seed));
+    float r = 1.3 + 2.6 * hash(vec2(cx, seed + 3.1));
+    float rise = fract(h + uTime * speed * (0.6 + 0.8 * hash(vec2(cx, seed + 7.7))));
+    vec2 c = vec2((cx + 0.3 + 0.4 * hash(vec2(cx, seed + 1.3))) * cellW, (1.0 - rise) * bh);
+    r *= smoothstep(0.0, 0.2, rise) * smoothstep(0.0, 0.12, 1.0 - rise);
+    float d = length(vec2(bx, by) - c);
+    float rim = smoothstep(0.75, 0.15, abs(d - r)), fill = smoothstep(r, r - 0.6, d);
+    float spec = smoothstep(r * 0.36, 0.0, length(vec2(bx, by) - c + vec2(r * 0.35)));
+    return vec2(max(rim * 0.85, spec * fill), fill * 0.26);     /* (white amount, soft fill) */
+  }
   void main() {
     /* bottle frame (u - 50, v) → surface frame: the bottle rotated by alpha about (50, 0) */
     vec2 q = vec2(vL.x, uH - vL.y);
@@ -90,21 +113,70 @@ const LIQUID_FRAG = `
     if (ys < top) discard;
     float aa = max(fwidth(ys) * 1.2, 0.35);
     vec3 light = uLight[0], dark = uDark[0];
+    int elem = uElem[0];
+    float bandTop = uCount > 1 ? uTops[0] : top, bandBot = uBot;
     for (int j = 1; j < ${MAX_LAYERS}; j++) {
       if (j >= uCount) break;
       float k = 1.0 - smoothstep(uTops[j - 1] - aa, uTops[j - 1] + aa, ys);
       light = mix(light, uLight[j], k); dark = mix(dark, uDark[j], k);
+      if (ys < uTops[j - 1]) { elem = uElem[j]; bandBot = uTops[j - 1]; bandTop = j == uCount - 1 ? top : uTops[j]; }
     }
     if (!gl_FrontFacing) {
       /* the far wall seen through the cut: reads as the liquid's top surface */
-      gl_FragColor = vec4(mix(light, vec3(1.0), 0.36), 1.0);
+      vec3 surf = mix(light, vec3(1.0), 0.36);
+      /* pour impact: rings spreading over the surface from where the stream lands */
+      float rr = length(vec2(xs - uImpact.x, vL.z));
+      surf = mix(surf, vec3(1.0), uImpact.y * 0.6 * smoothstep(0.35, 1.0, sin(rr * 0.55 - uImpact.z * 14.0)) * smoothstep(34.0, 4.0, rr));
+      gl_FragColor = vec4(surf, 1.0);
       return;
     }
     vec3 n = normalize(vN);
     vec3 col = mix(dark, light, smoothstep(0.08, 0.86, clamp(n.z, 0.0, 1.0)));
     col += vec3(1.0) * smoothstep(0.16, 0.0, abs(n.x + 0.5)) * 0.14;            /* inner highlight */
     col = mix(col, uDeep, 0.2 * smoothstep(uYb - 70.0, uYb, ys));                /* deeper toward the base */
-    /* emblems, colour-blind numbers and '?' marks, upright in the surface frame */
+    /* elements live in the liquid itself (purely cosmetic): frost, arcs, bubbles, murk */
+    float by = ys - bandTop, bh = max(bandBot - bandTop, 0.001);
+    if (elem == 1) {
+      float frost = 2.6 + 3.2 * tri(xs / 9.0) + 1.8 * tri(xs / 3.7 + 0.3);
+      col = mix(col, vec3(0.96, 0.99, 1.0), 0.78 * smoothstep(frost + 0.6, frost - 0.6, by) * step(7.0, bh));
+      vec2 g = vec2(xs, by) / 13.0, id = floor(g);
+      vec2 o = (fract(g) - 0.5 - 0.5 * (vec2(hash(id), hash(id + 9.2)) - 0.5)) * 13.0;
+      float tw = 0.6 + 0.4 * sin(uTime * 3.0 + hash(id + 2.0) * 6.28);
+      float star = smoothstep(1.0, 0.0, abs(o.x) * abs(o.y) * 1.6 + dot(o, o) * 0.09) * step(0.45, hash(id + 4.0));
+      col = mix(col, vec3(1.0), star * tw * smoothstep(frost, frost + 3.0, by));
+    } else if (elem == 2) {
+      float flick = floor(uTime * 14.0);
+      float amp = min(bh * 0.26, 7.0);
+      /* a jagged polyline through random heights: reads as a spark, not a sawtooth */
+      float sx0 = xs / 6.5 + hash(vec2(flick, 1.0)) * 4.0, si = floor(sx0), sf = fract(sx0);
+      float zig = (mix(hash(vec2(si, flick)), hash(vec2(si + 1.0, flick)), sf) - 0.5) * 2.0 * amp;
+      float d = abs(by - bh * 0.5 - zig);
+      col = mix(col, vec3(1.0, 0.98, 0.72), 0.45 * exp(-d * 0.45));
+      col = mix(col, vec3(1.0), smoothstep(1.3, 0.25, d));
+    } else if (elem == 3) {
+      vec2 b = max(bubbles(xs + 40.0, by, bh, 12.0, 0.55, 1.0), bubbles(xs + 46.0, by, bh, 17.0, 0.35, 5.0));
+      col = mix(col, vec3(1.0), clamp(b.x + b.y, 0.0, 1.0));
+    } else if (elem == 4) {
+      /* slow murky veils in a darker shade of the band's own colour, so the hue stays readable */
+      float w = sin(by * 0.34 + 1.7 * sin(xs * 0.1 + uTime * 0.7) + 0.6 * sin(xs * 0.23 - by * 0.08));
+      col = mix(col, dark * 0.5, 0.32 * smoothstep(0.1, 0.85, w));
+      vec2 g = vec2(xs, by + uTime * 2.0) / 10.0, id = floor(g);
+      vec2 o = (fract(g) - 0.5) * 10.0 - (vec2(hash(id), hash(id + 5.0)) - 0.5) * 5.0;
+      col = mix(col, vec3(0.86, 1.0, 0.55), smoothstep(1.5, 0.6, length(o)) * step(0.62, hash(id + 1.0)) * 0.9);
+    }
+    /* pour impact: a column of bubbles driven down under the stream */
+    if (uImpact.y > 0.01) {
+      float depth = ys - top, col0 = xs - uImpact.x;
+      vec2 b = bubbles(col0 + 60.0, depth, 34.0, 6.5, 2.4, 11.0);
+      col = mix(col, vec3(1.0), clamp(b.x + b.y, 0.0, 1.0) * uImpact.y * smoothstep(15.0, 3.0, abs(col0)) * smoothstep(34.0, 10.0, depth));
+    }
+    /* completion: light sweeps up through the bottle in its own colour */
+    if (uFlash.x > 0.001) {
+      float band = smoothstep(46.0, 0.0, abs(ys - mix(uYb, uYb - 190.0, uFlash.y)));
+      col = mix(col, mix(light, vec3(1.0), 0.6), uFlash.x * (0.28 + 0.6 * band));
+    }
+    col = mix(col, vec3(1.0), smoothstep(16.0, 0.0, abs(vL.x + 0.3 * vL.y - uSheen)) * 0.45);   /* win wave */
+    /* colour-blind numbers and '?' marks, upright in the surface frame */
     for (int d = 0; d < ${MAX_DECALS}; d++) {
       if (d >= uDecalN) break;
       vec4 dc = uDecal[d];
@@ -197,7 +269,7 @@ export function createGlRenderer(env) {
   }
 
   /* ---- glyph atlas: emblems, digits, '?' ---- */
-  let atlas = null;
+  let atlas = null, glowTex = null, unitPlane = null;
   function buildAtlas() {
     const cv = document.createElement('canvas');
     cv.width = cv.height = ATLAS_CELLS * ATLAS_PX;
@@ -210,34 +282,6 @@ export function createGlRenderer(env) {
       ctx.restore();
     };
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    cell(GLYPH.icy, () => {
-      const r = 0.45;
-      ctx.strokeStyle = 'rgba(240,252,255,0.97)'; ctx.lineWidth = 0.085;
-      ctx.stroke(new Path2D(env.snowflakePath(0, 0, r)));
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      for (const [dx, dy, dr] of [[-r * 1.9, -r * 0.7, 0.075], [r * 1.8, r * 0.6, 0.06]]) { ctx.beginPath(); ctx.arc(dx, dy, dr, 0, Math.PI * 2); ctx.fill(); }
-    });
-    cell(GLYPH.electric, () => {
-      const hh = 1.1, bolt = new Path2D(env.boltPath(0, 0, hh));
-      ctx.fillStyle = 'rgba(255,250,190,0.97)'; ctx.fill(bolt);
-      ctx.strokeStyle = 'rgba(120,235,255,0.95)'; ctx.lineWidth = 0.07; ctx.stroke(bolt);
-    });
-    cell(GLYPH.boiling, () => {
-      for (const [bx, by, br] of [[-0.62, 0.5, 0.17], [-0.12, 0.3, 0.23], [0.42, 0.55, 0.15], [0.66, -0.3, 0.11], [-0.38, -0.5, 0.09]]) {
-        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.32)'; ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 0.06; ctx.stroke();
-        ctx.beginPath(); ctx.arc(bx - br * 0.35, by - br * 0.35, br * 0.3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
-      }
-    });
-    cell(GLYPH.toxic, () => {
-      ctx.beginPath(); ctx.roundRect(-0.8, -0.8, 1.6, 1.6, 0.44);
-      ctx.fillStyle = 'rgba(16,52,28,0.62)'; ctx.fill();
-      ctx.strokeStyle = 'rgba(170,255,190,0.9)'; ctx.lineWidth = 0.09; ctx.stroke();
-      ctx.fillStyle = 'rgba(214,255,224,0.97)'; ctx.font = '700 1.05px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('☠', 0, 0.05);
-    });
     const text = (idx, s, fill) => cell(idx, () => {
       ctx.font = '700 1.5px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.strokeStyle = '#111'; ctx.lineWidth = 0.3; ctx.strokeText(s, 0, 0.06);
@@ -253,7 +297,7 @@ export function createGlRenderer(env) {
 
   const makeGlassMat = () => new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.DoubleSide, vertexShader: GLASS_VERT, fragmentShader: GLASS_FRAG,
-    uniforms: { uRim: { value: new THREE.Vector3(1, 1, 1) }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uH: { value: 120 }, uTicks: { value: new Array(11).fill(0) }, uTickN: { value: 0 } }
+    uniforms: { uRim: { value: new THREE.Vector3(1, 1, 1) }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uH: { value: 120 }, uTicks: { value: new Array(11).fill(0) }, uTickN: { value: 0 }, uGlow: { value: new THREE.Vector4(1, 1, 1, 0) }, uSheen: { value: 1e6 } }
   });
   const makeLiquidMat = () => new THREE.ShaderMaterial({
     side: THREE.DoubleSide, vertexShader: LIQUID_VERT, fragmentShader: LIQUID_FRAG,
@@ -265,7 +309,9 @@ export function createGlRenderer(env) {
       uSpan: { value: new THREE.Vector2() }, uWave: { value: new Array(WAVE_N).fill(0) }, uWaveN: { value: 1 },
       uUpright: { value: 1 }, uMeniscus: { value: 2.4 }, uRipple: { value: new THREE.Vector3() },
       uDecal: { value: Array.from({ length: MAX_DECALS }, () => new THREE.Vector4()) }, uDecalN: { value: 0 },
-      uAtlas: { value: atlas }, uDeep: { value: new THREE.Vector3(0.15, 0.09, 0.04) }
+      uAtlas: { value: atlas }, uDeep: { value: new THREE.Vector3(0.15, 0.09, 0.04) },
+      uElem: { value: new Array(MAX_LAYERS).fill(0) }, uBot: { value: 224 }, uTime: { value: 0 },
+      uImpact: { value: new THREE.Vector3(0, 0, 0) }, uFlash: { value: new THREE.Vector2(0, 0) }, uSheen: { value: 1e6 }
     }
   });
   const makeLidMat = () => new THREE.ShaderMaterial({
@@ -289,6 +335,7 @@ export function createGlRenderer(env) {
     drops: null,
     renderQueued: false,
     w: 0, h: 0,
+    time: 0, dt: 0, lastNow: 0, live: false, busy: false, keepAlive: false, wave: -1, waveX: 0,
     ensure() {
       if (this.failed) return false;
       if (this.ok) return true;
@@ -305,6 +352,12 @@ export function createGlRenderer(env) {
       this.scene = new THREE.Scene();
       this.camera = new THREE.OrthographicCamera(0, 1, 0, -1, -4000, 4000);
       atlas = buildAtlas();
+      const gc = document.createElement('canvas'); gc.width = gc.height = 64;
+      const gctx = gc.getContext('2d'), gg = gctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gg.addColorStop(0, 'rgba(255,255,255,0.8)'); gg.addColorStop(0.55, 'rgba(255,255,255,0.3)'); gg.addColorStop(1, 'rgba(255,255,255,0)');
+      gctx.fillStyle = gg; gctx.fillRect(0, 0, 64, 64);
+      glowTex = new THREE.CanvasTexture(gc);
+      unitPlane = new THREE.PlaneGeometry(1, 1);
       /* splash droplets: one point cloud for every running pour */
       const dg = new THREE.BufferGeometry();
       dg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_DROPS * 3), 3));
@@ -340,7 +393,7 @@ export function createGlRenderer(env) {
     buildItems() {
       const key = env.shapesByBottle.join(',');
       if (key === this.itemsKey && this.items.length === env.slots.length) return;
-      for (const it of this.items) { this.scene.remove(it.root); it.liquidMat.dispose(); it.glassMat.dispose(); if (it.lidMat) it.lidMat.dispose(); }
+      for (const it of this.items) { this.scene.remove(it.root); it.liquidMat.dispose(); it.glassMat.dispose(); it.bloomMat.dispose(); it.shelfMat.dispose(); if (it.lidMat) it.lidMat.dispose(); }
       this.items = env.shapesByBottle.map(sn => {
         const g = shapeGeometry(sn), sh = env.SHAPES[sn];
         const root = new THREE.Group(), body = new THREE.Group();
@@ -360,8 +413,16 @@ export function createGlRenderer(env) {
         body.add(liquid, glass, lip);
         let lid = null, lidMat = null;
         if (g.lid) { lidMat = makeLidMat(); lid = new THREE.Mesh(g.lid, lidMat); lid.renderOrder = 3; lid.visible = false; body.add(lid); }
+        /* Neon halo sprites (hidden on other skins) */
+        const bloomMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+        const shelfMat = bloomMat.clone();
+        const bloom = new THREE.Mesh(unitPlane, bloomMat), shelfGlow = new THREE.Mesh(unitPlane, shelfMat);
+        bloom.scale.set(150, sh.vbH * 0.9, 1); bloom.position.set(0, -sh.vbH * 0.06, -60);
+        shelfGlow.scale.set(110, 30, 1); shelfGlow.position.set(0, -g.H + 2, -60);
+        bloom.renderOrder = shelfGlow.renderOrder = -1; bloom.visible = shelfGlow.visible = false;
+        body.add(bloom, shelfGlow);
         this.scene.add(root);
-        return { root, body, liquid, liquidMat, glass, glassMat, lid, lidMat, sn, sh, H: g.H };
+        return { root, body, liquid, liquidMat, glass, glassMat, lid, lidMat, bloom, bloomMat, shelfGlow, shelfMat, sn, sh, H: g.H };
       });
       this.itemsKey = key;
     },
@@ -381,11 +442,34 @@ export function createGlRenderer(env) {
     renderNow() {
       if (!this.ensure()) return;
       if (this.rects.length !== env.slots.length || this.items.length !== env.slots.length) this.syncLayout();
-      env.PerfMeter.mark('webgl', performance.now());
+      const now = performance.now();
+      env.PerfMeter.mark('webgl', now);
+      /* effect clock: advances only while the board is animating, so a resting board is a still image */
+      this.live = env.Motion.running;
+      this.dt = this.live && this.lastNow ? Math.min(0.05, (now - this.lastNow) / 1000) : 0;
+      this.lastNow = now;
+      this.time = (this.time + this.dt) % 600;
+      this.busy = false;
+      if (this.wave >= 0) {
+        this.wave += this.dt / 0.9;
+        if (this.wave >= 1 || !this.live) this.wave = -1;
+        else { this.waveX = -0.25 * this.w + 1.5 * this.w * this.wave; this.busy = true; }
+      }
       const n = Math.min(env.state.length, this.items.length);
       for (let i = 0; i < n; i++) this.updateBottle(i);
       this.updateStreams();
       this.three.render(this.scene, this.camera);
+      /* fading effects ask the shared loop for a few more frames */
+      if (this.busy && !this.keepAlive) {
+        this.keepAlive = true;
+        env.Motion.add(() => { if (!this.busy) this.keepAlive = false; return this.busy; });
+      }
+    },
+    /* a band of light crosses the board, left to right (called on a win) */
+    winWave() {
+      if (!this.ok || env.RM) return;
+      this.wave = 0; this.waveX = -1e6; this.busy = true;
+      if (!this.keepAlive) { this.keepAlive = true; env.Motion.add(() => { if (!this.busy) this.keepAlive = false; return this.busy; }); }
     },
 
     updateBottle(i) {
@@ -409,6 +493,40 @@ export function createGlRenderer(env) {
       else gu.uTint.value.set(0, 0, 0, 0);
 
       this.updateLiquid(i, it, rot);
+      const lu2 = it.liquidMat.uniforms;
+
+      /* selection glow in the top colour */
+      const segs = env.visual[i] || [], topSeg = segs.length ? segs[segs.length - 1] : null;
+      let units = 0; for (const sg of segs) units += sg.u;
+      const topHex = !topSeg ? null : (env.hiddenDepth[i] || 0) >= units - 1e-6 ? env.HIDDEN_FILL[0] : env.COLORS[topSeg.c][0];
+      if (lift && topHex) { hexRgb(topHex, tmp3); gu.uGlow.value.set(tmp3[0] * 0.5 + 0.5, tmp3[1] * 0.5 + 0.5, tmp3[2] * 0.5 + 0.5, 0.75); }
+      else gu.uGlow.value.w = 0;
+
+      /* pour impact: strength follows the stream, then fades */
+      let hit = 0, hitX = it.impactX || 0;
+      const into = env.jobsInto(i);
+      if (into) for (const job of into) if (job.flowD > 0.05 && job.streamFx) { hit = Math.max(hit, Math.min(1, job.flowD * 2)); hitX = (job.streamFx.tx - r.x) / sx - 50; }
+      it.impact = this.live ? Math.max(hit, (it.impact || 0) * Math.exp(-this.dt * 4.5)) : 0;
+      if (it.impact < 0.02) it.impact = 0; else this.busy = true;
+      it.impactX = hitX;
+      lu2.uImpact.value.set(hitX, it.impact, this.time);
+
+      /* completion flash rides the lid's fall */
+      const ck = env.corks[i];
+      if (ck && ck.t > 0 && ck.t < 1) lu2.uFlash.value.set(Math.sin(Math.PI * ck.t), ck.t); else lu2.uFlash.value.set(0, 0);
+
+      /* win wave position in this bottle's own units */
+      const sheen = this.wave >= 0 ? (this.waveX - (r.x + r.w / 2)) / sx : 1e6;
+      gu.uSheen.value = sheen; lu2.uSheen.value = sheen;
+
+      /* Neon: additive halo behind the vessel in its top colour, plus a shelf reflection */
+      const neon = env.SKIN === 'neon' && !!topHex;
+      it.bloom.visible = it.shelfGlow.visible = neon;
+      if (neon) {
+        const gs = env.activeRenderProfile().glowStrength;
+        it.bloomMat.color.set(topHex);
+        it.bloomMat.opacity = 0.34 * gs; it.shelfMat.color.set(topHex); it.shelfMat.opacity = 0.5 * gs;
+      }
 
       if (it.lid) {
         const c = env.corks[i];
@@ -453,9 +571,10 @@ export function createGlRenderer(env) {
       const hidTop = unitLv ? unitLv.tops[unitLv.tops.length - 1] : Infinity;
       /* layers, bottom first: the hidden block (if any), then every visible run */
       let count = 0;
-      const push = (top, pair, tint) => {
+      const push = (top, pair, tint, elem) => {
         if (count >= MAX_LAYERS) return;
         u.uTops.value[count] = top;
+        u.uElem.value[count] = elem ? ELEMENT_ID[elem] : 0;
         hexRgb(pair[0], tmp3); if (tint) blend(tmp3, tint);
         u.uLight.value[count].set(tmp3[0], tmp3[1], tmp3[2]);
         hexRgb(pair[1], tmp3); if (tint) blend(tmp3, tint);
@@ -468,10 +587,12 @@ export function createGlRenderer(env) {
         for (let j = 0; j < m; j++) {
           if (cums[j] <= hid + 1e-6) continue;
           const elem = env.save.symbols ? null : env.ELEMENT_MAP[cols[j]];
-          push(lv.tops[j], env.COLORS[cols[j]], elem ? ELEMENT_TINT[elem] : null);
+          push(lv.tops[j], env.COLORS[cols[j]], elem ? ELEMENT_TINT[elem] : null, elem);
         }
       }
       u.uCount.value = count;
+      u.uBot.value = lv.yb - 2;
+      u.uTime.value = this.time;
 
       /* live surface */
       const span = lv.span || { xl: lv.x0, xr: lv.x1 };
@@ -494,15 +615,10 @@ export function createGlRenderer(env) {
       const ta = Math.tan(alpha);
       const decal = (my, half, cell) => { if (dn < MAX_DECALS) u.uDecal.value[dn++].set(-my * ta, my, half, cell); };
       if (upright > 0.01) {
-        for (let j = 0; j < m && !allHidden; j++) {
-          const elem = env.ELEMENT_MAP[cols[j]];
-          if ((!elem && !env.save.symbols) || cums[j] <= hid + 1e-6) continue;
-          const yT = lv.tops[j], yB = Math.min(j ? lv.tops[j - 1] : lv.yb - 2, hidTop), h = yB - yT, my = (yT + yB) / 2;
-          if (env.save.symbols) { if (h > 12) decal(my, 10, GLYPH.digit0 + cols[j]); }
-          else if (elem === 'icy') decal(my, Math.min(h * 0.3, 7) * 2.2, GLYPH.icy);
-          else if (elem === 'electric') decal(my, Math.min(h * 0.62, 13) * 0.62, GLYPH.electric);
-          else if (elem === 'boiling') decal(my, Math.min(h * 0.5, 15), GLYPH.boiling);
-          else if (elem === 'toxic') decal(my, Math.min(h * 0.72, 15) * 0.62, GLYPH.toxic);
+        if (env.save.symbols) for (let j = 0; j < m && !allHidden; j++) {
+          if (cums[j] <= hid + 1e-6) continue;
+          const yT = lv.tops[j], yB = Math.min(j ? lv.tops[j - 1] : lv.yb - 2, hidTop);
+          if (yB - yT > 12) decal((yT + yB) / 2, 10, GLYPH.digit0 + cols[j]);
         }
         if (unitLv) for (let k = 0; k < unitLv.tops.length; k++) {
           const yT = unitLv.tops[k], yB = k ? unitLv.tops[k - 1] : lv.yb - 2;

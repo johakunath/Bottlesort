@@ -2669,6 +2669,7 @@ function starsFor(m) { return m <= par ? 3 : m <= Math.ceil(par * 1.5) ? 2 : 1; 
 
 function onWin() {
   storage.remove(SESSION_KEY);
+  if (renderer.backend.winWave) renderer.backend.winWave();
   if (mode === 'rush') return onRushStageClear();
   const st = usedAuto ? 1 : starsFor(moves);
   let meta = moves + ' moves · par ' + par;

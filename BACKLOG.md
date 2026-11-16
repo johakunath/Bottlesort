@@ -2,9 +2,6 @@
 
 ## Open — next up
 
-- **3D renderer follow-ups** (`src/gl-renderer.js`): redesigned element
-  emblems and effects; Neon bloom and the pooled shelf light of the Canvas 2D
-  look are not ported; impact rings where the stream lands are not ported.
 - **Par is the greedy solver's first line, not the optimum,** so stars are
   generous on big boards.
 - **Real-device re-test** of frame timing on phone and tablet (see below).
@@ -17,6 +14,12 @@
   unchanged. Three.js loads on demand after start-up.
 - Frames are drawn only when the runtime asks (nothing at rest), with no
   post-processing. The spike on a Xiaomi 17 stayed cool and smooth.
+- Elements are drawn in the liquid itself (frost rim and glints, a spark,
+  rising bubbles, murky veils) instead of emblems; they are cosmetic only.
+  Effects: pour impact rings and bubble column, completion flash, selection rim
+  glow, win wave, Neon halo. All run on an effect clock that only advances
+  while the board animates, so a resting board is a still image. The Canvas 2D
+  and SVG fallbacks keep the old emblems.
 - Fallback chain: WebGL → Canvas 2D → SVG. Software-only WebGL is refused and a
   lost context returns the board to Canvas 2D. `?renderer=webgl|canvas2d|svg`
   forces one.
