@@ -403,7 +403,7 @@ export function createGlRenderer(env) {
       if (!this.ensure()) return false;
       const stage = env.$('#stage');
       const sr = stage.getBoundingClientRect();
-      this.dpr = Math.max(1, Math.min(env.activeDprCap(), window.devicePixelRatio || 1));
+      this.dpr = env.boardPixelRatio();
       const w = Math.max(1, sr.width), h = Math.max(1, sr.height);
       if (w !== this.w || h !== this.h || this.three.getPixelRatio() !== this.dpr) {
         this.w = w; this.h = h;

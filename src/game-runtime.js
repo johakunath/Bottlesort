@@ -196,6 +196,14 @@ function activeRenderProfile() {
    standard) before the whole profile is demoted. */
 let runtimeDprCap = Infinity;
 function activeDprCap() { return Math.min(activeRenderProfile().dprCap, runtimeDprCap); }
+/* Board render scale. Screens at 1× (typical desktop monitors at 100 % scaling)
+   are supersampled at 2× and scaled down by the browser, so thin highlights,
+   bubbles and outlines stay smooth; Low keeps native resolution. */
+function boardPixelRatio() {
+  const native = window.devicePixelRatio || 1;
+  const wanted = activeRenderProfile().id === 'low' ? native : Math.max(native, 2);
+  return Math.max(1, Math.min(activeDprCap(), wanted));
+}
 function explicitPrettyEffects() {
   return !RM && save.renderQuality === 'pretty' && activeRenderProfile().id === 'pretty';
 }
@@ -268,7 +276,7 @@ function applyRenderQuality(reason) {
   else if (document.body && document.body.dataset.screen === 'menu') { startAmbient(); MenuLife.start(); }
 }
 function demoteRenderQuality(reason) {
-  if (activeDprCap() > 1.5 && (window.devicePixelRatio || 1) > 1.5) {
+  if (boardPixelRatio() > 1.5) {
     runtimeDprCap = 1.5;
     renderQualityDemotionReason = 'resolution lowered: ' + (reason || 'slow frames');
     if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
@@ -405,7 +413,7 @@ const PerfMeter = (() => {
         droppedFrames,
         currentRenderer: renderer,
         targetFps: targetFps(),
-        dpr: rounded(Math.min(window.devicePixelRatio || 1, activeDprCap()), 2),
+        dpr: rounded(boardPixelRatio(), 2),
         qualityProfile: qualityProfile(),
         renderQuality: renderQualityEffective,
         renderQualitySetting: save.renderQuality,
@@ -1039,6 +1047,7 @@ const boardEnv = {
   get SKIN() { return SKIN; },
   get activeRenderProfile() { return activeRenderProfile; },
   get activeDprCap() { return activeDprCap; },
+  get boardPixelRatio() { return boardPixelRatio; },
   get jobs() { return jobs; },
   get shapeWidthAt() { return shapeWidthAt; },
   get onContextLost() { return onGlContextLost; },
