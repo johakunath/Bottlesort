@@ -1235,7 +1235,6 @@ function restoreBoardSnapshot(snap) {
   state.forEach((b, i) => rebuildSlotSpecialClasses(i));
   renderer.renderAll();
   syncCaps();
-  orbUpdate(false);
   updateHUD();
 }
 
@@ -1506,7 +1505,6 @@ function setupBoard(gen) {
   renderer.renderAll();
   syncCaps();
   applyBottleFocus(focusedBottle, false);
-  orbUpdate(false);
   updateHUD();
   $('#overlay').classList.remove('show');
   updateBottleLabels();
@@ -1627,59 +1625,21 @@ function onRushStageClear() {
   }, RM ? 250 : 1300);
 }
 
-/* ---------------- magic orb (fills as bottles complete) ---------------- */
-let orbFill = null, orbSurf = null, orbFrac = 0;
-function buildOrb() {
-  const host = $('#orb');
-  if (!host) return;
-  const svg = svgEl('svg', { viewBox: '0 0 60 64' });
-  const defs = svgEl('defs', {});
-  const clip = svgEl('clipPath', { id: 'orbClip' });
-  clip.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23 }));
-  defs.appendChild(clip);
-  const og = svgEl('linearGradient', { id: 'orbGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
-  og.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#ffe2b3' }));
-  og.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#e8893a' }));
-  defs.appendChild(og);
-  svg.appendChild(defs);
-  svg.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23, fill: 'rgba(255,255,255,0.06)' }));
-  const lg = svgEl('g', { 'clip-path': 'url(#orbClip)' });
-  orbFill = svgEl('rect', { x: 2, y: 59, width: 56, height: 0, fill: 'url(#orbGrad)' });
-  orbSurf = svgEl('ellipse', { cx: 30, cy: 59, rx: 22, ry: 3, fill: '#ffe9c4', opacity: 0.8 });
-  lg.appendChild(orbFill); lg.appendChild(orbSurf);
-  svg.appendChild(lg);
-  svg.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23, fill: 'none', stroke: 'rgba(255,255,255,0.5)', 'stroke-width': 2.2 }));
-  svg.appendChild(svgEl('ellipse', { cx: 22, cy: 26, rx: 6, ry: 9, fill: 'rgba(255,255,255,0.35)', transform: 'rotate(-24 22 26)' }));
-  svg.appendChild(svgEl('rect', { x: 24, y: 4, width: 12, height: 9, rx: 4, fill: 'url(#lipGrad)', stroke: 'rgba(255,255,255,0.4)', 'stroke-width': 1.2 }));
-  host.appendChild(svg);
-}
-function orbUpdate(pulse) {
-  if (!orbFill) return;
-  orbFrac = Logic.completionProgress(state);
-  const h = 46 * orbFrac;
-  orbFill.setAttribute('y', 59 - h);
-  orbFill.setAttribute('height', h + 1);
-  orbSurf.setAttribute('cy', 59 - h);
-  orbSurf.setAttribute('opacity', orbFrac > 0.01 ? 0.8 : 0);
-  const host = $('#orb');
-  if (pulse && host) { host.classList.remove('pulse'); void host.offsetWidth; host.classList.add('pulse'); }
-}
-
 function updateHUD() {
   const lvlEl = $('#hud-level'), subEl = $('#hud-sub');
   /* compact copy — the old three-part line wrapped on phone widths */
   if (mode === 'challenge') {
     lvlEl.textContent = 'Shared Challenge';
-    subEl.textContent = 'Moves ' + moves + ' · Par ' + par;
+    subEl.textContent = moves + (moves === 1 ? ' move' : ' moves') + ' · par ' + par;
   } else if (mode === 'daily') {
     lvlEl.textContent = 'Daily Challenge';
-    subEl.textContent = dailyDate.slice(5).replace('-', '/') + ' · Moves ' + moves;
+    subEl.textContent = dailyDate.slice(5).replace('-', '/') + ' · ' + moves + (moves === 1 ? ' move' : ' moves');
   } else if (mode === 'rush') {
     lvlEl.textContent = 'Rush · Stage ' + rushStage;
-    subEl.textContent = '⏱ ' + Math.max(0, rushTimeLeft) + 's · Moves ' + moves;
+    subEl.textContent = Math.max(0, rushTimeLeft) + ' s left · ' + moves + (moves === 1 ? ' move' : ' moves');
   } else {
     lvlEl.textContent = 'Level ' + level;
-    subEl.textContent = 'Moves ' + moves + ' · Par ' + par;
+    subEl.textContent = moves + (moves === 1 ? ' move' : ' moves') + ' · par ' + par;
   }
   subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
@@ -2165,7 +2125,7 @@ function kickSlosh(i, v) {
    HUD) and queues its animation. A queued pour starts when neither of its
    bottles is claimed by a running pour or an earlier queued one, so each
    bottle's pours play in order and independent pours run side by side.
-   Specials (mystery reveal, orb, thaw) fire when the pour's job completes. */
+   Specials (mystery reveal, thaw) fire when the pour's job completes. */
 let queue = [];
 let settleArmed = false;   /* a pour finished since the board last settled */
 let boardRevision = 0;
@@ -2247,7 +2207,6 @@ function postJob(job, quiet) {
   const { si, di } = job;
   revealMystery(si, job.entry ? job.entry.srcAfter.length : state[si].length);
   if (job.dstComplete) {
-    orbUpdate(!quiet);
     if (frozen.size) thawAll();
   }
   if (!quiet) { sloshBottle(di, Math.min(2, job.n)); sloshBottle(si, 0.5); }
@@ -2315,7 +2274,6 @@ function flushAll() {
   visual = state.map(mergeRuns);
   refreshBusy();
   syncCaps();
-  orbUpdate(false);
   renderer.renderAll();
   updateHUD();
 }
@@ -2714,8 +2672,6 @@ function onWin() {
   $('#win-stars').innerHTML = [1, 2, 3].map(k => '<span class="' + (k <= st ? '' : 'off') + '">★</span>').join('');
   $('#win-meta').textContent = meta;
   $('#overlay').classList.add('show');
-  const orbHost = $('#orb');
-  if (orbHost && !RM) { orbHost.classList.add('burst'); spawnSparkles(orbHost, 10, 0.7); setTimeout(() => orbHost.classList.remove('burst'), 900); }
   AudioFX.win(); buzz([20, 50, 20, 50, 60]);
   if (!RM) {
     confetti();
@@ -2954,14 +2910,27 @@ function unlockedUpTo() {
   return u;
 }
 
+const LOCK_ICON = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9.5" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+/* the Classic level the player is on: the first open one without a result */
+function nextLevel() {
+  const max = unlockedUpTo();
+  for (let l = 1; l <= max; l++) if (!save.progress[difficulty][l]) return l;
+  return max;
+}
 function renderMenu() {
-  $('#btn-resume').classList.toggle('hidden', !readSession(storage));
+  /* one call to action: resume an unfinished puzzle, else the next Classic level */
+  const hasSession = !!readSession(storage);
+  const next = nextLevel(), started = Object.keys(save.progress[difficulty]).length > 0;
+  $('#btn-resume').classList.toggle('hidden', !hasSession);
+  $('#btn-play').classList.toggle('hidden', hasSession);
+  $('#play-title').textContent = (started ? 'Continue' : 'Play') + ' · Level ' + next;
+  $('#play-sub').textContent = cap1(difficulty);
   document.querySelectorAll('#diff-seg button').forEach(b => b.classList.toggle('on', b.dataset.d === difficulty));
-  $('#chip-stars').textContent = '★ ' + totalStars();
-  $('#chip-streak').textContent = '🔥 ' + (save.daily.streak || 0) + ' day streak';
+  $('#chip-stars').textContent = totalStars();
   const doneToday = save.daily.lastWin === todayStr();
   $('#card-daily').classList.toggle('done', doneToday);
-  $('#daily-sub').textContent = doneToday ? '✓ Done · back tomorrow' : 'Play today’s puzzle';
+  const streak = save.daily.streak || 0;
+  $('#daily-sub').textContent = doneToday ? 'Done · back tomorrow' : streak > 0 ? streak + '-day streak' : 'Today’s puzzle';
   $('#rush-sub').textContent = save.rushBest > 0 ? 'Best · stage ' + save.rushBest : 'Race the clock';
   const grid = $('#level-grid');
   grid.innerHTML = '';
@@ -2973,16 +2942,16 @@ function renderMenu() {
     const open = l <= maxOpen;
     if (!open) t.classList.add('locked');
     if (p) t.classList.add('done');
+    if (open && l === next) t.classList.add('next');
     let starsHTML = '';
     if (p) starsHTML = [1, 2, 3].map(k => '<span class="' + (k <= p.stars ? '' : 'off') + '">★</span>').join('');
     t.innerHTML = '<div class="num">' + l + '</div>' +
-      (open ? '<div class="stars">' + starsHTML + '</div>' : '<div class="lock">🔒</div>');
+      (open ? '<div class="stars">' + starsHTML + '</div>' : '<div class="lock">' + LOCK_ICON + '</div>');
     if (open) t.addEventListener('click', () => { AudioFX.select(); loadLevel(l); });
     else t.addEventListener('click', () => { AudioFX.invalid(); });
     t.setAttribute('aria-label', 'Level ' + l + (open ? '' : ' locked'));
     grid.appendChild(t);
   }
-  $('#btn-sound-menu').textContent = save.sound ? '🔊 Sound on' : '🔇 Sound off';
 }
 
 function buildHeroBottles() {
@@ -3106,7 +3075,6 @@ function init() {
   applyTheme();
   loadGlRenderer();
   buildDefs();
-  buildOrb();
   buildHeroBottles();
   renderMenu();
   window.history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling */
@@ -3117,19 +3085,10 @@ function init() {
       difficulty = b.dataset.d; save.difficulty = difficulty; persist();
       AudioFX.select(); renderMenu();
     }));
-  $('#btn-sound-menu').addEventListener('click', () => {
-    save.sound = !save.sound; persist(); AudioFX.syncMute(); renderMenu(); AudioFX.select();
-  });
+  $('#btn-play').addEventListener('click', () => { AudioFX.select(); loadLevel(nextLevel()); });
   $('#btn-back').addEventListener('click', () => { AudioFX.swap(); exitToMenu(); });
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-restart').addEventListener('click', () => { if (!autoPlaying) { AudioFX.swap(); flushAll(); restartCurrent(); } });
-  $('#btn-sound').addEventListener('click', () => {
-    save.sound = !save.sound; persist(); AudioFX.syncMute();
-    $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
-    AudioFX.select();
-  });
-  $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
-
   $('#btn-replay').addEventListener('click', () => {
     $('#overlay').classList.remove('show');
     if (mode === 'rush') startRush();      /* a fresh run after Time's up */
@@ -3146,7 +3105,6 @@ function init() {
   $('#btn-hint').addEventListener('click', showHint);
 
   $('#btn-resume').addEventListener('click', resumeSession);
-  $('#btn-challenge').addEventListener('click', () => loadChallenge({ seed: crypto.getRandomValues(new Uint32Array(1))[0], colors: 5, sets: 1, empties: 1 }));
   $('#btn-share').addEventListener('click', sharePuzzle);
   $('#btn-share-win').addEventListener('click', sharePuzzle);
   $('#share-close').addEventListener('click', () => closeModal($('#share-modal')));
@@ -3232,7 +3190,7 @@ function init() {
 }
 
 window.__vessel = {
-  loadLevel, onTap, undo, loadDaily, startRush, showHint, autoSolve, requestSolution, cancelSolution, totalStars,
+  loadLevel, loadChallenge, onTap, undo, loadDaily, startRush, showHint, autoSolve, requestSolution, cancelSolution, totalStars,
   get mode() { return mode; },
   get rushStage() { return rushStage; },
   get rushTimeLeft() { return rushTimeLeft; },
@@ -3246,7 +3204,6 @@ window.__vessel = {
   get shapes() { return shapesByBottle; },
   get veiled() { return veiled; },
   get frozen() { return frozen; },
-  get orbFrac() { return orbFrac; },
   get corks() { return corks; },
   get jobs() { return jobs; }
 };

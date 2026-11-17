@@ -6,6 +6,19 @@
   generous on big boards.
 - **Real-device re-test** of frame timing on phone and tablet (see below).
 
+## Shipped — play-first menu, slim in-game bar, grouped settings
+
+- Menu: one call to action (Resume puzzle, else Continue · Level N), Daily and
+  Rush as a slim row, Awards and Settings as corner buttons, levels on the
+  first screen. Stat chips, the sound button and "New challenge" are gone
+  (shared puzzle links still open as challenges).
+- In-game bar: back, title with the full move count, undo, restart. The orb
+  and the sound button were removed; sound lives in Settings only.
+- Settings: Look (themes, dark mode), Play, and a folded Advanced section
+  (graphics quality, backdrop, liquid motion, erase progress).
+- UI icons are inline SVG instead of OS emoji. Light themes have darker ink,
+  more opaque cards and stronger borders.
+
 ## Shipped — WebGL board (Three.js), Canvas 2D as fallback
 
 - The board is drawn as lit 3D glass by `src/gl-renderer.js` (default). It
