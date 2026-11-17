@@ -55,7 +55,9 @@ loading the entire runtime and full backlog for every change.
   session restore preserve it. Two towers are mandatory in every mode.
 - Each board includes `towerCap - 4` additional units for each of two colors, enough
   to fill both towers. Winning requires both towers to be full and monochrome.
-  A full small bottle can still pour into a tower. Style settings affect only small bottles.
+  A full small bottle can still pour into a tower.
+- Small-bottle shapes unlock with Classic progress (`SHAPE_TIERS` in `src/bottle-design.js`):
+  round from level 1, flask from 5, classic from 11, tall from 18. Daily and challenges use all four.
 - Every bottle shows the same liquid area per segment: small shapes get a
   volume scale (`volumeScale()`, flask 1.31× round) and towers match round.
   Towers hold 8 segments in early levels, 12 later (`towerCapFor()`). The towers and stand directly beside the grid, bottoms on

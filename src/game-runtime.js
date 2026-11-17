@@ -5,7 +5,7 @@ import { createCanvasRenderer } from './canvas-renderer.js';
 import { SESSION_KEY, readSession, parseChallenge, isOutdatedChallenge, challengeURL } from './session.js';
 import { WorkerClient } from './worker-client.js';
 import { storage, SAVE_KEY, createDefaultSave, normalizeSave, preferredRenderer } from './storage.js';
-import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, towerShapeName, isTowerShape } from './bottle-design.js';
+import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, towerShapeName, isTowerShape, shapePool, pickSmallShapes } from './bottle-design.js';
 import { createAudio } from './audio.js';
 import { VesselLogic as Logic } from './game-logic.js';
 /* ============================================================
@@ -164,7 +164,8 @@ const HIFI_BACKGROUNDS = {
     avif1365: '/assets/optimized/tidepool-hifi-backdrop-1365.avif',
     webp960: '/assets/optimized/tidepool-hifi-backdrop-960.webp',
     webp1365: '/assets/optimized/tidepool-hifi-backdrop-1365.webp',
-    overlay: 'radial-gradient(78% 60% at 50% 40%, rgba(227, 255, 247, 0.12), transparent 72%)'
+    /* darkened so the pale glass stands out against the bright water */
+    overlay: 'linear-gradient(rgba(4, 40, 52, 0.34), rgba(4, 40, 52, 0.34))'
   }
 };
 
@@ -176,9 +177,19 @@ function chooseAutoRenderQuality() {
   if (touch) return 'normal';
   /* resting bottles are cached sprites, so only very weak machines need Low;
      auto-demotion still steps down if frames run long */
-  if (cores <= 2) return 'low';
+  if (cores <= 2) return isDesktop() ? 'normal' : 'low';
   if (cores <= 4 || area < 520000) return 'normal';
   return 'pretty';
+}
+/* Rising beads and element effects in resting liquid, on the game screen. They
+   keep running after an automatic quality drop; only reduced motion, the
+   Liquid motion switch, or choosing Low by hand turns them off. */
+function liquidIdle() {
+  return !RM && save.fluid !== false && save.renderQuality !== 'low' && document.body.dataset.screen === 'game' && state.length > 0;
+}
+/* mouse-first machine (desktop or laptop, touchscreen laptops included) */
+function isDesktop() {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 }
 function isTouchDevice() {
   return (navigator.maxTouchPoints || 0) > 1 || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
@@ -190,6 +201,14 @@ function activeRenderProfile() {
    standard) before the whole profile is demoted. */
 let runtimeDprCap = Infinity;
 function activeDprCap() { return Math.min(activeRenderProfile().dprCap, runtimeDprCap); }
+/* Board render scale. Screens at 1× (typical desktop monitors at 100 % scaling)
+   are supersampled at 2× and scaled down by the browser, so thin highlights,
+   bubbles and outlines stay smooth; Low keeps native resolution. */
+function boardPixelRatio() {
+  const native = window.devicePixelRatio || 1;
+  const wanted = activeRenderProfile().id === 'low' ? native : Math.max(native, 2);
+  return Math.max(1, Math.min(activeDprCap(), wanted));
+}
 function explicitPrettyEffects() {
   return !RM && save.renderQuality === 'pretty' && activeRenderProfile().id === 'pretty';
 }
@@ -216,10 +235,9 @@ function throttleFluidRuntime(reason) {
   return false;
 }
 function preferredBackgroundQuality() {
-  const params = new URLSearchParams(location.search);
-  const query = (params.get('background') || '').toLowerCase();
-  if (query === 'basic' || query === 'hifi') return query;
-  return save.backgroundQualityUserSet === true && save.backgroundQuality === 'basic' ? 'basic' : 'hifi';
+  /* painted art always; ?background=basic stays as a QA switch */
+  const query = (new URLSearchParams(location.search).get('background') || '').toLowerCase();
+  return query === 'basic' ? 'basic' : 'hifi';
 }
 function activeBackgroundKey() {
   if (SKIN === 'apothecary') return MODE === 'dark' ? 'apothecaryDark' : 'apothecaryLight';
@@ -262,7 +280,7 @@ function applyRenderQuality(reason) {
   else if (document.body && document.body.dataset.screen === 'menu') { startAmbient(); MenuLife.start(); }
 }
 function demoteRenderQuality(reason) {
-  if (activeDprCap() > 1.5 && (window.devicePixelRatio || 1) > 1.5) {
+  if (boardPixelRatio() > 1.5) {
     runtimeDprCap = 1.5;
     renderQualityDemotionReason = 'resolution lowered: ' + (reason || 'slow frames');
     if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
@@ -270,7 +288,9 @@ function demoteRenderQuality(reason) {
     return true;
   }
   const idx = QUALITY_ORDER.indexOf(renderQualityEffective);
-  if (idx <= 0) return false;
+  /* desktops never drop below Normal on their own; Low stays available by hand */
+  const floor = isDesktop() ? QUALITY_ORDER.indexOf('normal') : 0;
+  if (idx <= floor) return false;
   renderQualityEffective = QUALITY_ORDER[idx - 1];
   renderQualityDemotionReason = reason || ('frame time exceeded ' + activeRenderProfile().targetFps + ' FPS budget');
   const p = activeRenderProfile();
@@ -399,7 +419,7 @@ const PerfMeter = (() => {
         droppedFrames,
         currentRenderer: renderer,
         targetFps: targetFps(),
-        dpr: rounded(Math.min(window.devicePixelRatio || 1, activeDprCap()), 2),
+        dpr: rounded(boardPixelRatio(), 2),
         qualityProfile: qualityProfile(),
         renderQuality: renderQualityEffective,
         renderQualitySetting: save.renderQuality,
@@ -1019,6 +1039,7 @@ const boardEnv = {
   get ELEMENT_MAP() { return ELEMENT_MAP; },
   get Fluid() { return Fluid; },
   get FrameGate() { return FrameGate; },
+  get liquidIdle() { return liquidIdle; },
   get GLASS_SHADOW() { return GLASS_SHADOW; },
   get HIDDEN_FILL() { return HIDDEN_FILL; },
   get LID() { return LID; },
@@ -1032,6 +1053,7 @@ const boardEnv = {
   get SKIN() { return SKIN; },
   get activeRenderProfile() { return activeRenderProfile; },
   get activeDprCap() { return activeDprCap; },
+  get boardPixelRatio() { return boardPixelRatio; },
   get jobs() { return jobs; },
   get shapeWidthAt() { return shapeWidthAt; },
   get onContextLost() { return onGlContextLost; },
@@ -1330,11 +1352,12 @@ function sharePuzzle() {
 /* ---------------- level lifecycle ---------------- */
 function assignShapes(n) {
   const rng = Logic.mulberry32(Logic.diffSeed(level, difficulty) + 777);
-  return Array.from({length:n}, (_, i) => {
-    if (Logic.capacityOf(state[i]) > Logic.CAP) return towerShapeName(Logic.capacityOf(state[i]));
-    if (save.bottleCollection !== 'mixed') return save.bottleCollection;
-    return rng() < 0.22 ? 'flask' : 'round';
-  });
+  const towerAt = i => Logic.capacityOf(state[i]) > Logic.CAP;
+  const small = Array.from({length:n}, (_, i) => i).filter(i => !towerAt(i));
+  const picked = pickSmallShapes(small.length, shapePool(mode, level), rng);
+  const out = Array.from({length:n}, (_, i) => towerAt(i) ? towerShapeName(Logic.capacityOf(state[i])) : null);
+  small.forEach((i, k) => { out[i] = picked[k]; });
+  return out;
 }
 
 function applySpecials(gen) {
@@ -2613,12 +2636,9 @@ function renderSettings() {
   setSwitch('#sw-haptics', !!save.haptics);
   setSwitch('#sw-fluid', !!save.fluid);
   setSwitch('#sw-symbols', save.symbols);
-  $('#bottle-collection').value = save.bottleCollection;
   setSwitch('#sw-dark', save.mode === 'dark');
   const rq = $('#render-quality');
   if (rq) rq.value = save.renderQuality;
-  const bq = $('#background-quality');
-  if (bq) bq.value = save.backgroundQuality;
   renderThemeGrid();
 }
 
@@ -2962,7 +2982,6 @@ function buildHeroBottles() {
     ['tall', [{ c: 1, u: 1 }, { c: 2, u: 2 }, { c: 5, u: 1 }]]
   ];
   demos.forEach(([shapeName, segs]) => {
-    shapeName = save.bottleCollection === 'mixed' ? shapeName : save.bottleCollection;
     const sh = SHAPES[shapeName];
     const svg = buildBottleSVG(shapeName, { cork: true, label: true });
     const g = svg.querySelector('.liquids');
@@ -3112,7 +3131,6 @@ function init() {
     try { await navigator.clipboard.writeText($('#share-result').textContent + '\n' + $('#share-link').value); $('#share-copy').textContent = 'Copied!'; }
     catch { $('#share-link').focus(); $('#share-link').select(); $('#share-copy').textContent = 'Select and copy the link'; }
   });
-  $('#bottle-collection').addEventListener('change', e => { save.bottleCollection = e.target.value; persist(); refreshBottles(); });
   $('#sw-symbols').addEventListener('click', () => { save.symbols = !save.symbols; persist(); renderSettings(); });
   window.addEventListener('hashchange', openSharedChallenge);
   window.addEventListener('pagehide', saveSession);
@@ -3145,15 +3163,6 @@ function init() {
     save.renderQuality = e.target.value;
     persist();
     applyRenderQuality(save.renderQuality === 'auto' ? 'auto profile selected' : '');
-    renderSettings();
-    AudioFX.select();
-  });
-  $('#background-quality').addEventListener('change', e => {
-    save.backgroundQuality = e.target.value === 'basic' ? 'basic' : 'hifi';
-    save.backgroundQualityUserSet = true;
-    storage.set('vessel_background', save.backgroundQuality);
-    persist();
-    applyBackgroundQuality();
     renderSettings();
     AudioFX.select();
   });
@@ -3202,6 +3211,7 @@ window.__vessel = {
   get slots() { return slots; },
   get hiddenDepth() { return hiddenDepth; },
   get shapes() { return shapesByBottle; },
+  get elements() { return ELEMENT_MAP; },
   get veiled() { return veiled; },
   get frozen() { return frozen; },
   get corks() { return corks; },

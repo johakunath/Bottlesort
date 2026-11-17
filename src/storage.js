@@ -15,22 +15,21 @@ export function createDefaultSave() {
   return {
     progress: { relaxed: {}, normal: {}, expert: {} }, sound: true, difficulty: 'normal',
     seenHint: false, seenSpecials: {}, theme: 'apothecary', mode: 'light', haptics: true,
-    fluid: true, symbols: false, bottleCollection: 'mixed', ach: {},
+    fluid: true, symbols: false, ach: {},
     daily: { streak: 0, lastWin: '' }, rushBest: 0, lowPowerEffects: false,
-    renderQuality: 'auto', backgroundQuality: 'hifi', backgroundQualityUserSet: false
+    renderQuality: 'auto'
   };
 }
 const record = x => x && typeof x === 'object' && !Array.isArray(x);
 export function normalizeSave(input) {
   const out = createDefaultSave();
   if (!record(input)) return out;
-  for (const key of ['sound', 'haptics', 'fluid', 'symbols', 'seenHint', 'lowPowerEffects', 'backgroundQualityUserSet']) {
+  for (const key of ['sound', 'haptics', 'fluid', 'symbols', 'seenHint', 'lowPowerEffects']) {
     if (typeof input[key] === 'boolean') out[key] = input[key];
   }
-  for (const [key, values] of Object.entries({ difficulty: ['relaxed', 'normal', 'expert'], theme: ['apothecary', 'neon', 'tidepool'], mode: ['light', 'dark'], renderQuality: ['auto', 'low', 'normal', 'pretty'], backgroundQuality: ['basic', 'hifi'], bottleCollection: ['mixed', 'round', 'tall', 'flask'] })) {
+  for (const [key, values] of Object.entries({ difficulty: ['relaxed', 'normal', 'expert'], theme: ['apothecary', 'neon', 'tidepool'], mode: ['light', 'dark'], renderQuality: ['auto', 'low', 'normal', 'pretty'] })) {
     if (values.includes(input[key])) out[key] = input[key];
   }
-  if (!out.backgroundQualityUserSet) out.backgroundQuality = 'hifi';
   for (const d of Object.keys(out.progress)) {
     if (!record(input.progress?.[d])) continue;
     for (const [level, p] of Object.entries(input.progress[d])) {

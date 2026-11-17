@@ -43,7 +43,9 @@ export function boardLayout(shapes, width, height) {
     const candidate = size(r);
     if (candidate > best * 1.04) { rows = r; best = candidate; }
   }
-  const bottleWidth = Math.max(12, Math.min(100, Math.floor(best)));
+  // 130 px cap: large enough to fill a 1440p column, small enough that easy levels
+  // do not turn into a few giant bottles.
+  const bottleWidth = Math.max(12, Math.min(130, Math.floor(best)));
   return {
     towers, grid: split(rows), bottleWidth, scale,
     towerWidth: bottleWidth, towerHeight: Math.round(bottleWidth * towerAspect), towerGap: bottleWidth * TOWER_GAP

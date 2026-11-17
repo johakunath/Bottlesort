@@ -25,7 +25,7 @@ const CanvasRenderer = {
     if (!this.ensure()) return false;
     const stage = env.$('#stage');
     const sr = stage.getBoundingClientRect();
-    this.dpr = Math.max(1, Math.min(env.activeDprCap(), window.devicePixelRatio || 1));
+    this.dpr = env.boardPixelRatio();
     const w = Math.max(1, Math.round(sr.width * this.dpr));
     const h = Math.max(1, Math.round(sr.height * this.dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
