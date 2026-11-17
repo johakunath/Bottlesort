@@ -28,7 +28,7 @@ const ATLAS_CELLS = 4, ATLAS_PX = 96;
 const GLYPH = { digit0: 4, question: 13 };
 const ELEMENT_ID = { icy: 1, electric: 2, boiling: 3, toxic: 4 };
 /* translucent washes the element emblems lay over their band (as in the 2D renderer) */
-const ELEMENT_TINT = { icy: [0.78, 0.94, 1.0, 0.22], electric: [0.55, 0.94, 1.0, 0.14], toxic: [0.43, 1.0, 0.55, 0.16] };
+const ELEMENT_TINT = { icy: [0.78, 0.94, 1.0, 0.1], electric: [0.55, 0.94, 1.0, 0.06], toxic: [0.43, 1.0, 0.55, 0.07] };
 
 const GLASS_VERT = `
   varying vec3 vN; varying vec3 vV; varying vec3 vL; varying float vNy;
@@ -86,7 +86,7 @@ const LIQUID_FRAG = `
   uniform float uTops[${MAX_LAYERS}]; uniform vec3 uLight[${MAX_LAYERS}]; uniform vec3 uDark[${MAX_LAYERS}]; uniform int uCount;
   uniform vec2 uSpan; uniform float uWave[${WAVE_N}]; uniform int uWaveN; uniform float uUpright; uniform float uMeniscus; uniform vec3 uRipple;
   uniform vec4 uDecal[${MAX_DECALS}]; uniform int uDecalN; uniform sampler2D uAtlas; uniform vec3 uDeep; uniform float uYb;
-  uniform int uElem[${MAX_LAYERS}]; uniform float uBot; uniform float uTime; uniform vec3 uImpact; uniform vec2 uFlash; uniform float uSheen;
+  uniform int uElem[${MAX_LAYERS}]; uniform float uBot; uniform float uTime; uniform vec3 uImpact; uniform vec2 uFlash; uniform float uSheen; uniform float uAmbient;
   varying vec3 vN; varying vec3 vL; varying float vNy;
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float tri(float x) { return abs(fract(x) - 0.5) * 2.0; }
@@ -101,6 +101,24 @@ const LIQUID_FRAG = `
     float rim = smoothstep(0.75, 0.15, abs(d - r)), fill = smoothstep(r, r - 0.6, d);
     float spec = smoothstep(r * 0.36, 0.0, length(vec2(bx, by) - c + vec2(r * 0.35)));
     return vec2(max(rim * 0.85, spec * fill), fill * 0.26);     /* (white amount, soft fill) */
+  }
+  /* idle life: sparse beads rising from the base through every layer to the surface,
+     each column wobbling a little. x = surface-frame x, d = depth below the top,
+     H = column height. Speeds are in viewBox units per second, independent of H. */
+  float rising(float x, float d, float H, float cellW, float seed) {
+    float cx = floor((x + 64.0) / cellW);
+    if (hash(vec2(cx, seed)) < 0.4) return 0.0;
+    float v = 6.0 + 7.0 * hash(vec2(cx, seed + 1.7));
+    float P = H + 14.0;
+    float up = mod(hash(vec2(cx, seed + 2.9)) * P + uTime * v, P) - 6.0;     /* height above the base */
+    float wob = 1.3 * sin(uTime * (1.1 + hash(vec2(cx, seed + 4.3))) + up * 0.09 + cx);
+    vec2 c = vec2((cx + 0.3 + 0.4 * hash(vec2(cx, seed + 3.3))) * cellW - 64.0 + wob, H - up);
+    float r = (1.0 + 1.3 * hash(vec2(cx, seed + 5.1))) * smoothstep(0.0, 10.0, up) * smoothstep(0.0, 5.0, H - up);
+    if (r < 0.05) return 0.0;
+    float dist = length(vec2(x, d) - c);
+    float rim = smoothstep(0.6, 0.1, abs(dist - r)) * 0.55;
+    float spec = smoothstep(r * 0.5, 0.0, length(vec2(x, d) - c + vec2(r * 0.35, r * 0.35))) * 0.9;
+    return max(rim, spec) + smoothstep(r, r - 0.5, dist) * 0.12;
   }
   void main() {
     /* bottle frame (u - 50, v) → surface frame: the bottle rotated by alpha about (50, 0) */
@@ -141,33 +159,39 @@ const LIQUID_FRAG = `
     col = mix(col, uDeep, 0.2 * smoothstep(uYb - 70.0, uYb, ys));                /* deeper toward the base */
     /* elements live in the liquid itself (purely cosmetic): frost, arcs, bubbles, murk */
     float by = ys - bandTop, bh = max(bandBot - bandTop, 0.001);
+    /* element hints stay faint: a touch of character, never a pattern over the colour */
     if (elem == 1) {
-      float frost = 2.6 + 3.2 * tri(xs / 9.0) + 1.8 * tri(xs / 3.7 + 0.3);
-      col = mix(col, vec3(0.96, 0.99, 1.0), 0.78 * smoothstep(frost + 0.6, frost - 0.6, by) * step(7.0, bh));
-      vec2 g = vec2(xs, by) / 13.0, id = floor(g);
-      vec2 o = (fract(g) - 0.5 - 0.5 * (vec2(hash(id), hash(id + 9.2)) - 0.5)) * 13.0;
-      float tw = 0.6 + 0.4 * sin(uTime * 3.0 + hash(id + 2.0) * 6.28);
-      float star = smoothstep(1.0, 0.0, abs(o.x) * abs(o.y) * 1.6 + dot(o, o) * 0.09) * step(0.45, hash(id + 4.0));
-      col = mix(col, vec3(1.0), star * tw * smoothstep(frost, frost + 3.0, by));
+      /* icy: a soft frosted rim under the band top and the odd glint */
+      col = mix(col, vec3(0.94, 0.98, 1.0), 0.22 * smoothstep(5.0, 0.0, by) * step(7.0, bh));
+      vec2 g = vec2(xs, by) / 15.0, id = floor(g);
+      vec2 o = (fract(g) - 0.5 - 0.5 * (vec2(hash(id), hash(id + 9.2)) - 0.5)) * 15.0;
+      float tw = smoothstep(0.55, 1.0, sin(uTime * 1.4 + hash(id + 2.0) * 6.28));
+      float star = smoothstep(0.8, 0.0, abs(o.x) * abs(o.y) * 1.8 + dot(o, o) * 0.12) * step(0.72, hash(id + 4.0));
+      col = mix(col, vec3(1.0), star * tw * 0.7);
     } else if (elem == 2) {
-      float flick = floor(uTime * 14.0);
-      float amp = min(bh * 0.26, 7.0);
-      /* a jagged polyline through random heights: reads as a spark, not a sawtooth */
-      float sx0 = xs / 6.5 + hash(vec2(flick, 1.0)) * 4.0, si = floor(sx0), sf = fract(sx0);
-      float zig = (mix(hash(vec2(si, flick)), hash(vec2(si + 1.0, flick)), sf) - 0.5) * 2.0 * amp;
-      float d = abs(by - bh * 0.5 - zig);
-      col = mix(col, vec3(1.0, 0.98, 0.72), 0.45 * exp(-d * 0.45));
-      col = mix(col, vec3(1.0), smoothstep(1.3, 0.25, d));
+      /* electric: brief, small sparks at random spots */
+      vec2 g = vec2(xs + 40.0, by) / 12.0, id = floor(g);
+      vec2 o = (fract(g) - 0.5) * 12.0 - (vec2(hash(id + 1.0), hash(id + 6.0)) - 0.5) * 6.0;
+      float on = smoothstep(0.93, 1.0, sin(uTime * (1.3 + hash(id + 3.0)) + hash(id) * 6.28));
+      float d = length(o);
+      col = mix(col, vec3(1.0, 0.98, 0.78), on * (smoothstep(1.3, 0.2, d) * 0.85 + smoothstep(5.0, 0.0, d) * 0.18));
     } else if (elem == 3) {
-      vec2 b = max(bubbles(xs + 40.0, by, bh, 12.0, 0.55, 1.0), bubbles(xs + 46.0, by, bh, 17.0, 0.35, 5.0));
-      col = mix(col, vec3(1.0), clamp(b.x + b.y, 0.0, 1.0));
+      /* boiling: a few quicker bubbles inside the band */
+      vec2 b = bubbles(xs + 40.0, by, bh, 15.0, 0.4, 1.0);
+      col = mix(col, vec3(1.0), clamp(b.x * 0.55 + b.y * 0.5, 0.0, 1.0));
     } else if (elem == 4) {
-      /* slow murky veils in a darker shade of the band's own colour, so the hue stays readable */
-      float w = sin(by * 0.34 + 1.7 * sin(xs * 0.1 + uTime * 0.7) + 0.6 * sin(xs * 0.23 - by * 0.08));
-      col = mix(col, dark * 0.5, 0.32 * smoothstep(0.1, 0.85, w));
-      vec2 g = vec2(xs, by + uTime * 2.0) / 10.0, id = floor(g);
-      vec2 o = (fract(g) - 0.5) * 10.0 - (vec2(hash(id), hash(id + 5.0)) - 0.5) * 5.0;
-      col = mix(col, vec3(0.86, 1.0, 0.55), smoothstep(1.5, 0.6, length(o)) * step(0.62, hash(id + 1.0)) * 0.9);
+      /* toxic: a faint slow cloud and a few drifting motes */
+      float w = sin(by * 0.2 + 1.4 * sin(xs * 0.08 + uTime * 0.5) + 0.8 * sin(xs * 0.19 - by * 0.11 + uTime * 0.3));
+      col = mix(col, dark * 0.6, 0.1 * smoothstep(0.3, 1.0, w));
+      vec2 g = vec2(xs, by + uTime * 1.6) / 12.0, id = floor(g);
+      vec2 o = (fract(g) - 0.5) * 12.0 - (vec2(hash(id), hash(id + 5.0)) - 0.5) * 6.0;
+      col = mix(col, vec3(0.86, 1.0, 0.6), smoothstep(1.2, 0.4, length(o)) * step(0.8, hash(id + 1.0)) * 0.45);
+    }
+    /* rising beads through the whole column (all liquids) */
+    if (uAmbient > 0.0) {
+      float H = uBot - top, d = ys - top;
+      float bead = max(rising(xs, d, H, 10.0, 31.0), rising(xs + 5.0, d, H, 15.0, 47.0));
+      col = mix(col, vec3(1.0), bead * uAmbient);
     }
     /* pour impact: a column of bubbles driven down under the stream */
     if (uImpact.y > 0.01) {
@@ -316,7 +340,7 @@ export function createGlRenderer(env) {
       uDecal: { value: Array.from({ length: MAX_DECALS }, () => new THREE.Vector4()) }, uDecalN: { value: 0 },
       uAtlas: { value: atlas }, uDeep: { value: new THREE.Vector3(0.15, 0.09, 0.04) },
       uElem: { value: new Array(MAX_LAYERS).fill(0) }, uBot: { value: 224 }, uTime: { value: 0 },
-      uImpact: { value: new THREE.Vector3(0, 0, 0) }, uFlash: { value: new THREE.Vector2(0, 0) }, uSheen: { value: 1e6 }
+      uImpact: { value: new THREE.Vector3(0, 0, 0) }, uFlash: { value: new THREE.Vector2(0, 0) }, uSheen: { value: 1e6 }, uAmbient: { value: 0 }
     }
   });
   const makeLidMat = () => new THREE.ShaderMaterial({
@@ -442,16 +466,20 @@ export function createGlRenderer(env) {
       return this;
     },
     setQuality() { return this; },
-    destroy() { this.renderQueued = false; this.clear(); return this; },
+    destroy() { this.renderQueued = false; env.FrameGate.cancel(this.idleToken); this.idleToken = null; this.clear(); return this; },
 
-    renderNow() {
+    renderNow(idleTick) {
       if (!this.ensure()) return;
       if (this.rects.length !== env.slots.length || this.items.length !== env.slots.length) this.syncLayout();
       const now = performance.now();
-      env.PerfMeter.mark('webgl', now);
-      /* effect clock: advances only while the board is animating, so a resting board is a still image */
+      /* idle frames run at 30 FPS on purpose: keep them out of the frame-time
+         meter so they never read as dropped frames and trigger a demotion */
+      if (!idleTick) env.PerfMeter.mark('webgl', now);
+      /* effect clock: advances while the board animates, and while the liquid idles
+         (rising beads) when the quality profile allows idle animation */
       this.live = env.Motion.running;
-      this.dt = this.live && this.lastNow ? Math.min(0.05, (now - this.lastNow) / 1000) : 0;
+      this.ambient = env.liquidIdle();
+      this.dt = (this.live || this.ambient) && this.lastNow ? Math.min(0.05, (now - this.lastNow) / 1000) : 0;
       this.lastNow = now;
       this.time = (this.time + this.dt) % 600;
       this.busy = false;
@@ -464,6 +492,14 @@ export function createGlRenderer(env) {
       for (let i = 0; i < n; i++) this.updateBottle(i);
       this.updateStreams();
       this.three.render(this.scene, this.camera);
+      if (this.ambient && !this.idleToken) {
+        this.idleToken = env.FrameGate.request('gl-idle', () => {
+          this.idleToken = null;
+          /* the board's own animation already paints every frame */
+          if (env.Motion.running || this.renderQueued) { if (env.liquidIdle()) this.renderAll(); return; }
+          this.renderNow(true);
+        }, 30);
+      }
       /* fading effects ask the shared loop for a few more frames */
       if (this.busy && !this.keepAlive) {
         this.keepAlive = true;
@@ -598,6 +634,7 @@ export function createGlRenderer(env) {
       u.uCount.value = count;
       u.uBot.value = lv.yb - 2;
       u.uTime.value = this.time;
+      u.uAmbient.value = this.ambient ? 1 : 0;
 
       /* live surface */
       const span = lv.span || { xl: lv.x0, xr: lv.x1 };

@@ -181,6 +181,11 @@ function chooseAutoRenderQuality() {
   if (cores <= 4 || area < 520000) return 'normal';
   return 'pretty';
 }
+/* rising beads in resting liquid: only on the game screen, never with reduced
+   motion or on the Low profile (which has no idle animation) */
+function liquidIdle() {
+  return !RM && activeRenderProfile().idleAnimations && document.body.dataset.screen === 'game' && state.length > 0;
+}
 function isTouchDevice() {
   return (navigator.maxTouchPoints || 0) > 1 || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
 }
@@ -1020,6 +1025,7 @@ const boardEnv = {
   get ELEMENT_MAP() { return ELEMENT_MAP; },
   get Fluid() { return Fluid; },
   get FrameGate() { return FrameGate; },
+  get liquidIdle() { return liquidIdle; },
   get GLASS_SHADOW() { return GLASS_SHADOW; },
   get HIDDEN_FILL() { return HIDDEN_FILL; },
   get LID() { return LID; },
@@ -3201,6 +3207,7 @@ window.__vessel = {
   get slots() { return slots; },
   get hiddenDepth() { return hiddenDepth; },
   get shapes() { return shapesByBottle; },
+  get elements() { return ELEMENT_MAP; },
   get veiled() { return veiled; },
   get frozen() { return frozen; },
   get corks() { return corks; },
