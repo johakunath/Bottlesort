@@ -31,24 +31,29 @@ const ELEMENT_ID = { icy: 1, electric: 2, boiling: 3, toxic: 4 };
 const ELEMENT_TINT = { icy: [0.78, 0.94, 1.0, 0.22], electric: [0.55, 0.94, 1.0, 0.14], toxic: [0.43, 1.0, 0.55, 0.16] };
 
 const GLASS_VERT = `
-  varying vec3 vN; varying vec3 vV; varying vec3 vL;
+  varying vec3 vN; varying vec3 vV; varying vec3 vL; varying float vNy;
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vL = position;
+    vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vL = position; vNy = normal.y;
     gl_Position = projectionMatrix * mv;
   }`;
 const GLASS_FRAG = `
   uniform vec3 uRim; uniform vec4 uTint; uniform float uH;
   uniform float uTicks[11]; uniform int uTickN;
   uniform vec4 uGlow; uniform float uSheen;
-  varying vec3 vN; varying vec3 vV; varying vec3 vL;
+  varying vec3 vN; varying vec3 vV; varying vec3 vL; varying float vNy;
   void main() {
     vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
     float fres = pow(1.0 - clamp(n.z, 0.0, 1.0), 2.4);
-    /* two fake softbox reflections: a wide key strip on the left, a thin one on the right */
+    /* two fake softbox reflections: a wide key strip on the left, a thin one on the right.
+       Strips only on vertical walls (object normal level); on curved glass such as the
+       flask's bulb they become specular spots instead of straight chords across it. */
     float ends = smoothstep(1.0, 0.72, abs(vL.y) / uH);
-    float key = smoothstep(0.13, 0.0, abs(n.x + 0.56)) * 0.8 * ends;
-    float fill = smoothstep(0.05, 0.0, abs(n.x - 0.66)) * 0.42 * ends;
+    float wall = smoothstep(0.32, 0.12, abs(vNy));
+    float key = max(smoothstep(0.13, 0.0, abs(n.x + 0.56)) * wall * ends,
+                    smoothstep(0.24, 0.04, length(n.xy - vec2(-0.5, 0.42)))) * 0.8;
+    float fill = max(smoothstep(0.05, 0.0, abs(n.x - 0.66)) * wall * ends,
+                     smoothstep(0.1, 0.0, length(n.xy - vec2(0.6, 0.3)))) * 0.42;
     float a = 0.05 + 0.62 * fres + key + fill;
     vec3 col = mix(uRim, vec3(1.0), clamp(key + fill, 0.0, 1.0));
     if (!gl_FrontFacing) a *= 0.35;
@@ -71,9 +76,9 @@ const GLASS_FRAG = `
   }`;
 
 const LIQUID_VERT = `
-  varying vec3 vN; varying vec3 vL;
+  varying vec3 vN; varying vec3 vL; varying float vNy;
   void main() {
-    vN = normalize(normalMatrix * normal); vL = position;
+    vN = normalize(normalMatrix * normal); vL = position; vNy = normal.y;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }`;
 const LIQUID_FRAG = `
@@ -82,7 +87,7 @@ const LIQUID_FRAG = `
   uniform vec2 uSpan; uniform float uWave[${WAVE_N}]; uniform int uWaveN; uniform float uUpright; uniform float uMeniscus; uniform vec3 uRipple;
   uniform vec4 uDecal[${MAX_DECALS}]; uniform int uDecalN; uniform sampler2D uAtlas; uniform vec3 uDeep; uniform float uYb;
   uniform int uElem[${MAX_LAYERS}]; uniform float uBot; uniform float uTime; uniform vec3 uImpact; uniform vec2 uFlash; uniform float uSheen;
-  varying vec3 vN; varying vec3 vL;
+  varying vec3 vN; varying vec3 vL; varying float vNy;
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float tri(float x) { return abs(fract(x) - 0.5) * 2.0; }
   /* rising bubbles in band coordinates: by = distance below the band top, bh = band height */
@@ -132,7 +137,7 @@ const LIQUID_FRAG = `
     }
     vec3 n = normalize(vN);
     vec3 col = mix(dark, light, smoothstep(0.08, 0.86, clamp(n.z, 0.0, 1.0)));
-    col += vec3(1.0) * smoothstep(0.16, 0.0, abs(n.x + 0.5)) * 0.14;            /* inner highlight */
+    col += vec3(1.0) * smoothstep(0.16, 0.0, abs(n.x + 0.5)) * smoothstep(0.32, 0.12, abs(vNy)) * 0.14;   /* inner highlight, walls only */
     col = mix(col, uDeep, 0.2 * smoothstep(uYb - 70.0, uYb, ys));                /* deeper toward the base */
     /* elements live in the liquid itself (purely cosmetic): frost, arcs, bubbles, murk */
     float by = ys - bandTop, bh = max(bandBot - bandTop, 0.001);

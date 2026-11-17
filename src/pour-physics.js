@@ -24,36 +24,40 @@ const THETA_MAX = 105 * Math.PI / 180;
 const TH_N = 480;
 const TH_RANGE = 110 * Math.PI / 180;
 
+/* Interior profiles, read straight off the SVG interior paths in bottle-design.js:
+   neck half-width, cubic shoulder (y0, c1y, c2y, y1 → half-width hw0 to hw1),
+   straight wall, quadratic bottom corner (from wall half-width at y = bottom - corner
+   to foot half-width at y = bottom). */
+const PROFILES = {
+  round: { shoulder: [34, 46, 46, 64], hw: [14, 32], corner: 16, foot: 16 },
+  classic: { shoulder: [54, 64, 68, 84], hw: [12, 28], corner: 20, foot: 8 },
+  tall: { shoulder: [50, 58, 62, 74], hw: [10, 20], corner: 18, foot: 0 }
+};
+function profileWidth(p, bottom, y) {
+  const [y0, c1, c2, y1] = p.shoulder, [h0, h1] = p.hw;
+  if (y <= y0) return 2 * h0;
+  if (y < y1) {
+    // Invert the shoulder's cubic Bezier (control x equals its end x) to match the rendered glass.
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 24; i++) {
+      const t = (lo + hi) / 2, u = 1 - t;
+      const py = u * u * u * y0 + 3 * u * u * t * c1 + 3 * u * t * t * c2 + t * t * t * y1;
+      if (py < y) lo = t; else hi = t;
+    }
+    const t = (lo + hi) / 2;
+    return 2 * (h0 + (h1 - h0) * (3 * t * t - 2 * t * t * t));
+  }
+  if (y <= bottom - p.corner) return 2 * h1;
+  // Quadratic corner with its control point below the wall: y = bottom - corner·(1-t)².
+  const t = 1 - Math.sqrt(Math.max(0, (bottom - y) / p.corner));
+  return 2 * (h1 - (h1 - p.foot) * t * t);
+}
+
 /* interior width (viewBox units) at height y */
 function shapeWidthAt(sn, y) {
-  if (sn === 'round' || sn.startsWith('tower')) {
-    if (y <= 34) return 28;
-    if (y < 64) {
-      // Invert the shoulder's cubic Bezier to match the rendered glass.
-      let lo = 0, hi = 1;
-      for (let i = 0; i < 24; i++) {
-        const t = (lo + hi) / 2, u = 1 - t;
-        const py = u * u * u * 34 + 3 * u * u * t * 46 + 3 * u * t * t * 46 + t * t * t * 64;
-        if (py < y) lo = t; else hi = t;
-      }
-      const t = (lo + hi) / 2;
-      return 28 + 36 * (3 * t * t - 2 * t * t * t);
-    }
-    const bottom = SHAPE_GEO[sn].bottom;
-    if (y <= bottom - 16) return 64;
-    const t = 1 - Math.sqrt(Math.max(0, (bottom - y) / 16));
-    return 64 - 32 * t * t;
-  } else if (sn === 'classic') {
-    if (y <= 54) return 24;
-    if (y <= 84) return 24 + (y - 54) / 30 * 32;
-    if (y <= 204) return 56;
-    return Math.max(4, 56 - (y - 204) / 17 * 36);
-  } else if (sn === 'tall') {
-    if (y <= 50) return 20;
-    if (y <= 74) return 20 + (y - 50) / 24 * 20;
-    if (y <= 286) return 40;
-    return Math.max(4, 40 - (y - 286) / 15 * 30);
-  } else if (sn === 'flask') {
+  if (sn.startsWith('tower')) return profileWidth(PROFILES.round, SHAPE_GEO[sn].bottom, y);
+  if (PROFILES[sn]) return profileWidth(PROFILES[sn], SHAPE_GEO[sn].bottom, y);
+  if (sn === 'flask') {
     if (y <= 131) return 16;
     const dy = y - 170.2;
     return 2 * Math.sqrt(Math.max(0, 1600 - dy * dy));

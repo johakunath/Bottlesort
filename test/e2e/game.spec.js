@@ -3,9 +3,9 @@ const boot = async page => { await page.goto('/'); await page.waitForFunction(()
 const solution = page => page.evaluate(async()=> (await window.__vessel.requestSolution({state:window.__vessel.state,frozen:window.__vessel.frozen,budget:400000})).solution);
 const pour = (page, move) => page.evaluate(([a,b])=>{window.__vessel.onTap(a);window.__vessel.onTap(b);},move);
 
-test('collections, labels, resume, undo, and sharing on mobile', async ({page}) => {
+test('early levels use round bottles; labels, resume, undo, and sharing on mobile', async ({page}) => {
   const errors=[]; page.on('pageerror', e=>errors.push(e.message)); await boot(page);
-  await page.click('#btn-settings'); await page.selectOption('#bottle-collection','round'); await page.click('#sw-symbols'); await page.click('#settings-close');
+  await page.click('#btn-settings'); await expect(page.locator('#bottle-collection')).toHaveCount(0); await page.click('#sw-symbols'); await page.click('#settings-close');
   await page.evaluate(()=>window.__vessel.loadLevel(1));
   expect(await page.evaluate(()=>window.__vessel.shapes.filter(s=>!s.startsWith('tower')).every(s=>s==='round'))).toBe(true);
   const initial = await page.evaluate(()=>JSON.stringify(window.__vessel.state));
@@ -77,11 +77,11 @@ test('seeded challenge links reproduce the board without classic progress reward
   expect(await other.evaluate(()=>JSON.parse(localStorage.getItem('vessel_save_v1')||'{}').progress?.normal || {})).toEqual({});
 });
 
-test('SVG labels respect hidden expert layers; tall collection fits mobile', async ({page}) => {
-  await page.addInitScript(()=>localStorage.setItem('vessel_save_v1',JSON.stringify({symbols:true,bottleCollection:'tall',difficulty:'expert'})));
+test('SVG labels respect hidden expert layers; every bottle shape fits mobile', async ({page}) => {
+  await page.addInitScript(()=>localStorage.setItem('vessel_save_v1',JSON.stringify({symbols:true,difficulty:'expert'})));
   await page.goto('/?renderer=svg');await page.waitForFunction(()=>!!window.__vessel);
-  await page.evaluate(()=>window.__vessel.loadLevel(14));
-  expect(await page.evaluate(()=>window.__vessel.shapes.filter(s=>!s.startsWith('tower')).every(s=>s==='tall'))).toBe(true);
+  await page.evaluate(()=>window.__vessel.loadLevel(25));
+  expect(await page.evaluate(()=>['round','flask','classic','tall'].every(s=>window.__vessel.shapes.includes(s)))).toBe(true);
   expect(await page.evaluate(()=>window.__vessel.slots.every(({btn})=>{const r=btn.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}))).toBe(true);
   const labels=await page.evaluate(()=>window.__vessel.slots.map((slot,i)=>({hidden:window.__vessel.hiddenDepth[i],size:window.__vessel.state[i].length,text:[...slot.svg.querySelectorAll('text')].map(t=>t.textContent)})));
   for(const item of labels) if(item.hidden===item.size&&item.size) expect(item.text.some(t=>/^[1-9]$/.test(t))).toBe(false);
@@ -119,7 +119,7 @@ test('worker initialization failure is recoverable and never traps controls', as
 });
 
 test('towers stand beside the grid at the same scale across phone and tablet sizes', async ({page}) => {
-  await page.addInitScript(()=>localStorage.setItem('vessel_save_v1',JSON.stringify({bottleCollection:'tower'})));
+  await page.addInitScript(()=>localStorage.setItem('vessel_save_v1',JSON.stringify({})));
   await boot(page); await page.evaluate(()=>window.__vessel.loadLevel(14));
   for (const viewport of [{width:390,height:844},{width:320,height:740},{width:844,height:390},{width:820,height:1180},{width:1180,height:820}]) {
     await page.setViewportSize(viewport);
@@ -175,10 +175,8 @@ test('animated tower transfer stays aligned and restores its full height in both
   }
 });
 
-test('towers are permanent across styles; early levels use 8-segment towers', async ({page}) => {
-  await boot(page);await page.click('#btn-settings');
-  await expect(page.locator('#bottle-collection option[value="tower"]')).toHaveCount(0);
-  await page.selectOption('#bottle-collection','round');await page.click('#settings-close');
+test('towers are permanent; early levels use 8-segment towers', async ({page}) => {
+  await boot(page);
   await page.evaluate(()=>window.__vessel.loadLevel(1));
   expect(await page.evaluate(()=>window.__vessel.state.filter(b=>b.capacity===8).length)).toBe(2);
   await expect(page.locator('.capacity-label').first()).toHaveText('0 / 8');

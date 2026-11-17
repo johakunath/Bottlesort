@@ -277,7 +277,7 @@ body[data-skin="tidepool"][data-background-quality="hifi"] #backdrop .tide.reef 
   opacity: 0.16;
 }
 body[data-skin="tidepool"][data-background-quality="hifi"] #backdrop .tide.glow {
-  opacity: 0.42;
+  opacity: 0.12;
 }
 body[data-skin="tidepool"][data-background-quality="hifi"] #backdrop .tide.caustics {
   opacity: 0.28;
@@ -400,6 +400,15 @@ body[data-skin="neon"] .brand p { font-style: normal; letter-spacing: 0.16em; te
 
 /* ---------------- Game HUD ---------------- */
 #game { padding: max(10px, env(safe-area-inset-top)) 0 max(8px, env(safe-area-inset-bottom)); overscroll-behavior: none; touch-action: none; }
+/* Play column: never wider than 1 : 1.2 (width : height) so mouse and finger
+   travel stays short on wide screens, never taller than 1 : 2 on phones.
+   The backdrop stays full screen; only HUD and board are boxed. */
+#game {
+  --play-ratio: 1.2; --play-tall: 2;
+  inset: 0; margin: auto;
+  width: min(100vw, 100vh / var(--play-ratio)); width: min(100vw, 100dvh / var(--play-ratio));
+  height: min(100vh, 100vw * var(--play-tall)); height: min(100dvh, 100vw * var(--play-tall));
+}
 .hud {
   display: flex; align-items: center; gap: 10px;
   margin: 4px clamp(10px, 2vw, 24px) 0;

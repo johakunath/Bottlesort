@@ -89,7 +89,7 @@ const SHAPES = {
     cork: { x: 35, y: 12, w: 30, h: 16, r: 5 },
     label: { x: 30, y: 150, w: 40, h: 42, rx: 18 },
     gloss: [
-      { x: 26, y: 150, w: 10, h: 44, rx: 5, o: 0.5 },
+      { x: 25, y: 142, w: 9, h: 20, rx: 4.5, o: 0.5 },
       { x: 44, y: 32, w: 5, h: 60, rx: 2.5, o: 0.45 }
     ],
     sparkle: [[33, 146], [70, 186], [58, 158]]
@@ -125,5 +125,32 @@ SHAPES.classic.label = { x: 29, y: 150, w: 42, h: 54, rx: 4 };
 SHAPES.tall.cork = { x: 34, y: 11, w: 32, h: 16, r: 5 };
 SHAPES.tall.label = { x: 34, y: 196, w: 32, h: 76, rx: 4 };
 
+/* ---------------- shape progression ----------------
+   Early Classic levels use only the plain round bottle; each tier adds one
+   new glass. Daily and shared challenges use every shape; Rush follows its stage. */
+const SHAPE_TIERS = [
+  { from: 1, shapes: ['round'] },
+  { from: 5, shapes: ['round', 'flask'] },
+  { from: 11, shapes: ['round', 'flask', 'classic'] },
+  { from: 18, shapes: ['round', 'flask', 'classic', 'tall'] }
+];
+function shapePool(mode, level) {
+  if (mode === 'daily' || mode === 'challenge') return SHAPE_TIERS[SHAPE_TIERS.length - 1].shapes;
+  let pool = SHAPE_TIERS[0].shapes;
+  for (const t of SHAPE_TIERS) if (level >= t.from) pool = t.shapes;
+  return pool;
+}
+/* Shapes for the small bottles: round stays the most common, and every
+   unlocked shape appears at least once when there is room for it. */
+function pickSmallShapes(count, pool, rng) {
+  const out = Array.from({ length: count }, () => rng() < 0.4 ? 'round' : pool[1 + Math.floor(rng() * (pool.length - 1))] || 'round');
+  if (count >= pool.length) for (const shape of pool) {
+    if (out.includes(shape)) continue;
+    /* replace a bottle whose shape occurs more than once (one always exists here) */
+    const spare = out.flatMap((s, i) => out.indexOf(s) !== out.lastIndexOf(s) ? [i] : []);
+    out[spare[Math.floor(rng() * spare.length)]] = shape;
+  }
+  return out;
+}
 
-export { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, TOWER_BOTTOM, towerShapeName, isTowerShape };
+export { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, TOWER_BOTTOM, towerShapeName, isTowerShape, SHAPE_TIERS, shapePool, pickSmallShapes };

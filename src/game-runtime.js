@@ -5,7 +5,7 @@ import { createCanvasRenderer } from './canvas-renderer.js';
 import { SESSION_KEY, readSession, parseChallenge, isOutdatedChallenge, challengeURL } from './session.js';
 import { WorkerClient } from './worker-client.js';
 import { storage, SAVE_KEY, createDefaultSave, normalizeSave, preferredRenderer } from './storage.js';
-import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, towerShapeName, isTowerShape } from './bottle-design.js';
+import { APO_COLORS, NEON_COLORS, TIDE_COLORS, COLOR_NAMES, SHAPES, towerShapeName, isTowerShape, shapePool, pickSmallShapes } from './bottle-design.js';
 import { createAudio } from './audio.js';
 import { VesselLogic as Logic } from './game-logic.js';
 /* ============================================================
@@ -164,7 +164,8 @@ const HIFI_BACKGROUNDS = {
     avif1365: '/assets/optimized/tidepool-hifi-backdrop-1365.avif',
     webp960: '/assets/optimized/tidepool-hifi-backdrop-960.webp',
     webp1365: '/assets/optimized/tidepool-hifi-backdrop-1365.webp',
-    overlay: 'radial-gradient(78% 60% at 50% 40%, rgba(227, 255, 247, 0.12), transparent 72%)'
+    /* darkened so the pale glass stands out against the bright water */
+    overlay: 'linear-gradient(rgba(4, 40, 52, 0.34), rgba(4, 40, 52, 0.34))'
   }
 };
 
@@ -1330,11 +1331,12 @@ function sharePuzzle() {
 /* ---------------- level lifecycle ---------------- */
 function assignShapes(n) {
   const rng = Logic.mulberry32(Logic.diffSeed(level, difficulty) + 777);
-  return Array.from({length:n}, (_, i) => {
-    if (Logic.capacityOf(state[i]) > Logic.CAP) return towerShapeName(Logic.capacityOf(state[i]));
-    if (save.bottleCollection !== 'mixed') return save.bottleCollection;
-    return rng() < 0.22 ? 'flask' : 'round';
-  });
+  const towerAt = i => Logic.capacityOf(state[i]) > Logic.CAP;
+  const small = Array.from({length:n}, (_, i) => i).filter(i => !towerAt(i));
+  const picked = pickSmallShapes(small.length, shapePool(mode, level), rng);
+  const out = Array.from({length:n}, (_, i) => towerAt(i) ? towerShapeName(Logic.capacityOf(state[i])) : null);
+  small.forEach((i, k) => { out[i] = picked[k]; });
+  return out;
 }
 
 function applySpecials(gen) {
@@ -2613,7 +2615,6 @@ function renderSettings() {
   setSwitch('#sw-haptics', !!save.haptics);
   setSwitch('#sw-fluid', !!save.fluid);
   setSwitch('#sw-symbols', save.symbols);
-  $('#bottle-collection').value = save.bottleCollection;
   setSwitch('#sw-dark', save.mode === 'dark');
   const rq = $('#render-quality');
   if (rq) rq.value = save.renderQuality;
@@ -2962,7 +2963,6 @@ function buildHeroBottles() {
     ['tall', [{ c: 1, u: 1 }, { c: 2, u: 2 }, { c: 5, u: 1 }]]
   ];
   demos.forEach(([shapeName, segs]) => {
-    shapeName = save.bottleCollection === 'mixed' ? shapeName : save.bottleCollection;
     const sh = SHAPES[shapeName];
     const svg = buildBottleSVG(shapeName, { cork: true, label: true });
     const g = svg.querySelector('.liquids');
@@ -3112,7 +3112,6 @@ function init() {
     try { await navigator.clipboard.writeText($('#share-result').textContent + '\n' + $('#share-link').value); $('#share-copy').textContent = 'Copied!'; }
     catch { $('#share-link').focus(); $('#share-link').select(); $('#share-copy').textContent = 'Select and copy the link'; }
   });
-  $('#bottle-collection').addEventListener('change', e => { save.bottleCollection = e.target.value; persist(); refreshBottles(); });
   $('#sw-symbols').addEventListener('click', () => { save.symbols = !save.symbols; persist(); renderSettings(); });
   window.addEventListener('hashchange', openSharedChallenge);
   window.addEventListener('pagehide', saveSession);
