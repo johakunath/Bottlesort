@@ -6,6 +6,37 @@
   generous on big boards.
 - **Real-device re-test** of frame timing on phone and tablet (see below).
 
+## Shipped — play-first menu, slim in-game bar, grouped settings
+
+- Menu: one call to action (Resume puzzle, else Continue · Level N), Daily and
+  Rush as a slim row, Awards and Settings as corner buttons, levels on the
+  first screen. Stat chips, the sound button and "New challenge" are gone
+  (shared puzzle links still open as challenges).
+- In-game bar: back, title with the full move count, undo, restart. The orb
+  and the sound button were removed; sound lives in Settings only.
+- Settings: Look (themes, dark mode), Play, and a folded Advanced section
+  (graphics quality, backdrop, liquid motion, erase progress).
+- UI icons are inline SVG instead of OS emoji. Light themes have darker ink,
+  more opaque cards and stronger borders.
+
+## Shipped — WebGL board (Three.js), Canvas 2D as fallback
+
+- The board is drawn as lit 3D glass by `src/gl-renderer.js` (default). It
+  reads the same runtime adapter as the Canvas 2D renderer and uses the same
+  volume-true cut lines, so rules, poses, pour timing and hit targets are
+  unchanged. Three.js loads on demand after start-up.
+- Frames are drawn only when the runtime asks (nothing at rest), with no
+  post-processing. The spike on a Xiaomi 17 stayed cool and smooth.
+- Elements are drawn in the liquid itself (frost rim and glints, a spark,
+  rising bubbles, murky veils) instead of emblems; they are cosmetic only.
+  Effects: pour impact rings and bubble column, completion flash, selection rim
+  glow, win wave, Neon halo. All run on an effect clock that only advances
+  while the board animates, so a resting board is a still image. The Canvas 2D
+  and SVG fallbacks keep the old emblems.
+- Fallback chain: WebGL → Canvas 2D → SVG. Software-only WebGL is refused and a
+  lost context returns the board to Canvas 2D. `?renderer=webgl|canvas2d|svg`
+  forces one.
+
 ## Shipped — colour-splash finish, equal volumes, small early towers
 
 - Finish effect (option D): droplets in the liquid's colour jump out of the

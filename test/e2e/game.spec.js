@@ -19,9 +19,10 @@ test('collections, labels, resume, undo, and sharing on mobile', async ({page}) 
 });
 
 test('both renderers finish queued pours and restore undo state', async ({page}) => {
-  for (const renderer of ['canvas2d','svg']) {
+  for (const renderer of ['webgl','canvas2d','svg']) {
     await page.goto('/?renderer='+renderer); await page.waitForFunction(()=>!!window.__vessel);
     await page.evaluate(()=>window.__vessel.loadLevel(1));
+    if (renderer==='webgl') await page.waitForFunction(()=>window.__vesselRenderer.active==='webgl');
     const sol=await solution(page), initial=await page.evaluate(()=>JSON.stringify(window.__vessel.state));
     await pour(page,sol[0]); await page.evaluate(()=>window.__vessel.undo());
     expect(await page.evaluate(()=>JSON.stringify(window.__vessel.state))).toBe(initial);
@@ -48,7 +49,7 @@ test('fresh-player reset clears achievements, session and progress across reload
   for (const move of await solution(page)) await pour(page,move);
   await expect(page.locator('#overlay')).toHaveClass(/show/);
   await page.click('#btn-menu'); await page.click('#btn-settings');
-  page.on('dialog',d=>d.accept()); await page.click('#btn-reset'); await page.reload();
+  page.on('dialog',d=>d.accept()); await page.click('.set-advanced summary'); await page.click('#btn-reset'); await page.reload();
   const save=await page.evaluate(()=>JSON.parse(localStorage.getItem('vessel_save_v1')));
   expect(save.progress).toEqual({normal:{},relaxed:{},expert:{}}); expect(save.ach).toEqual({});
   await expect(page.locator('#btn-resume')).toBeHidden();
@@ -62,7 +63,7 @@ test('blocked storage still starts a playable board', async ({page}) => {
 });
 
 test('seeded challenge links reproduce the board without classic progress rewards', async ({page,context}) => {
-  await boot(page); await page.click('#btn-challenge'); await expect(page.locator('#game')).toBeVisible();
+  await boot(page); await page.evaluate(()=>window.__vessel.loadChallenge({seed:123456789,colors:5,sets:1,empties:1})); await expect(page.locator('#game')).toBeVisible();
   const original=await page.evaluate(()=>JSON.stringify(window.__vessel.state));
   await page.click('#btn-share');const link=await page.inputValue('#share-link');
   const other=await context.newPage(); await other.goto(link); await expect(other.locator('#game')).toBeVisible();
@@ -111,7 +112,7 @@ test('Daily and Rush generate asynchronously and resume the same board', async (
 test('worker initialization failure is recoverable and never traps controls', async ({page}) => {
   await page.addInitScript(()=>{window.Worker=class {constructor(){throw new Error('Unavailable');}};});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await boot(page);
-  await page.click('#btn-challenge'); await expect(page.locator('#loading-status')).toContainText('unavailable');
+  await page.click('#card-daily'); await expect(page.locator('#loading-status')).toContainText('unavailable');
   await page.evaluate(()=>window.__vessel.loadLevel(1));await page.click('#btn-hint');
   await expect(page.locator('#btn-hint')).toBeEnabled();
   await page.click('#btn-back');await expect(page.locator('#menu')).toBeVisible();expect(errors).toEqual([]);

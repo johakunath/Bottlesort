@@ -15,7 +15,10 @@ export async function registerPwa() {
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
     const update = document.querySelector('#btn-update');
-    const ready = () => { if (registration.waiting) update.classList.remove('hidden'); };
+    /* An update is only "ready" when an older version controls this page. On a
+       first visit the new worker also passes through `waiting` for a moment,
+       which used to leave "Update ready" on screen for brand-new players. */
+    const ready = () => { if (registration.waiting && navigator.serviceWorker.controller) update.classList.remove('hidden'); };
     ready();
     registration.addEventListener('updatefound', () => {
       registration.installing?.addEventListener('statechange', ready);

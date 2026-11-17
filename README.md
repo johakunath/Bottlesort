@@ -34,7 +34,7 @@ supported install UI; on iOS use Safari's Add to Home Screen.
 | Liquid geometry and tilt | `src/pour-physics.js` |
 | Bottle silhouettes and palettes | `src/bottle-design.js` |
 | Responsive center grid and tower rails | `src/board-layout.js` |
-| Canvas / SVG drawing | `src/canvas-renderer.js`, `src/svg-renderer.js` |
+| WebGL (default) / Canvas / SVG drawing | `src/gl-renderer.js`, `src/canvas-renderer.js`, `src/svg-renderer.js` |
 | Board lifecycle, input, animation, UI | `src/game-runtime.js` |
 | Audio synthesis | `src/audio.js` |
 | Defaults, migrations, optional storage | `src/storage.js` |

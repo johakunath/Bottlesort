@@ -109,13 +109,13 @@ const RENDER_PROFILES = {
     settleMs: 70, streamGlow: false
   },
   normal: {
-    id: 'normal', label: 'Normal', targetFps: 60, dprCap: 1.5,
+    id: 'normal', label: 'Normal', targetFps: 60, dprCap: 2,
     fluidSamples: 11, particleScale: 0.75, glowStrength: 0.75,
     idleAnimations: true, celebrationIntensity: 0.75,
     settleMs: 120, streamGlow: true
   },
   pretty: {
-    id: 'pretty', label: 'Pretty', targetFps: 60, dprCap: 2,
+    id: 'pretty', label: 'Pretty', targetFps: 60, dprCap: 3,
     fluidSamples: 17, particleScale: 1, glowStrength: 1,
     idleAnimations: true, celebrationIntensity: 1,
     settleMs: 180, streamGlow: true
@@ -174,8 +174,10 @@ function chooseAutoRenderQuality() {
   const touch = isTouchDevice();
   if (RM || save.lowPowerEffects) return 'low';
   if (touch) return 'normal';
-  if (cores <= 4 || area < 520000) return 'low';
-  if (cores <= 6 || area < 850000) return 'normal';
+  /* resting bottles are cached sprites, so only very weak machines need Low;
+     auto-demotion still steps down if frames run long */
+  if (cores <= 2) return 'low';
+  if (cores <= 4 || area < 520000) return 'normal';
   return 'pretty';
 }
 function isTouchDevice() {
@@ -184,6 +186,10 @@ function isTouchDevice() {
 function activeRenderProfile() {
   return RENDER_PROFILES[renderQualityEffective] || RENDER_PROFILES.normal;
 }
+/* Resolution the board is drawn at. Slow frames first lower this cap (sharp →
+   standard) before the whole profile is demoted. */
+let runtimeDprCap = Infinity;
+function activeDprCap() { return Math.min(activeRenderProfile().dprCap, runtimeDprCap); }
 function explicitPrettyEffects() {
   return !RM && save.renderQuality === 'pretty' && activeRenderProfile().id === 'pretty';
 }
@@ -240,6 +246,7 @@ function applyBackgroundQuality() {
 }
 function applyRenderQuality(reason) {
   renderQualityUser = save.renderQuality;
+  runtimeDprCap = Infinity;
   renderQualityEffective = save.renderQuality === 'auto' ? chooseAutoRenderQuality() : save.renderQuality;
   renderQualityDemotionReason = reason || (save.renderQuality === 'auto' ? 'auto device baseline' : '');
   const p = activeRenderProfile();
@@ -249,12 +256,19 @@ function applyRenderQuality(reason) {
   document.documentElement.style.setProperty('--render-glow', String(p.glowStrength));
   applyBackgroundQuality();
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
-  if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
+  if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
   if (!p.idleAnimations) { stopAmbient(); MenuLife.stop(); }
   else if (document.body && document.body.dataset.screen === 'menu') { startAmbient(); MenuLife.start(); }
 }
 function demoteRenderQuality(reason) {
+  if (activeDprCap() > 1.5 && (window.devicePixelRatio || 1) > 1.5) {
+    runtimeDprCap = 1.5;
+    renderQualityDemotionReason = 'resolution lowered: ' + (reason || 'slow frames');
+    if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
+    if (state.length && slots.length) renderer.renderAll();
+    return true;
+  }
   const idx = QUALITY_ORDER.indexOf(renderQualityEffective);
   if (idx <= 0) return false;
   renderQualityEffective = QUALITY_ORDER[idx - 1];
@@ -265,7 +279,7 @@ function demoteRenderQuality(reason) {
   resetFluidRuntime();
   document.documentElement.style.setProperty('--render-glow', String(p.glowStrength));
   if (renderer && renderer.setQuality) renderer.setQuality(renderQualityEffective);
-  if (renderer && renderer.active === 'canvas2d' && renderer.backend.syncLayout) renderer.backend.syncLayout();
+  if (renderer && isCanvasMode() && renderer.backend.syncLayout) renderer.backend.syncLayout();
   if (state.length && slots.length) renderer.renderAll();
   if (!p.idleAnimations) { stopAmbient(); MenuLife.stop(); }
   return true;
@@ -385,7 +399,7 @@ const PerfMeter = (() => {
         droppedFrames,
         currentRenderer: renderer,
         targetFps: targetFps(),
-        dpr: rounded(Math.min(window.devicePixelRatio || 1, activeRenderProfile().dprCap), 2),
+        dpr: rounded(Math.min(window.devicePixelRatio || 1, activeDprCap()), 2),
         qualityProfile: qualityProfile(),
         renderQuality: renderQualityEffective,
         renderQualitySetting: save.renderQuality,
@@ -402,24 +416,30 @@ const PerfMeter = (() => {
   return api;
 })();
 
+/* Frame scheduler. Callbacks always run inside requestAnimationFrame, so
+   they stay locked to the display refresh. A lower target rate (30 FPS dust,
+   the low profile) is reached by skipping refreshes, never with a timer: a
+   timer that fires a moment after a refresh loses that whole frame, which
+   halved the frame rate on slower phones. */
 const FrameGate = (() => {
   const last = new Map();
   function frameMs(fps) { return 1000 / (fps || activeRenderProfile().targetFps || 60); }
   return {
     reset(key) { if (key) last.delete(key); else last.clear(); },
-    remaining(key, now, fps) {
-      const prev = last.get(key) || 0;
-      if (!prev) return 0;
-      return Math.max(0, frameMs(fps) - (now - prev));
-    },
     note(key, now) { last.set(key, now); },
+    cancel(token) { if (token) { token.cancelled = true; cancelAnimationFrame(token.raf); } },
     request(key, cb, fps) {
-      const now = performance.now();
-      const delay = this.remaining(key, now, fps);
-      return setTimeout(() => requestAnimationFrame(ts => {
-        this.note(key, ts);
+      const token = { cancelled: false, raf: 0 };
+      const tick = ts => {
+        if (token.cancelled) return;
+        const prev = last.get(key) || 0;
+        /* 3 ms of slack absorbs refresh jitter around the target interval */
+        if (prev && ts - prev < frameMs(fps) - 3) { token.raf = requestAnimationFrame(tick); return; }
+        last.set(key, ts);
         cb(ts);
-      }), delay);
+      };
+      token.raf = requestAnimationFrame(tick);
+      return token;
     }
   };
 })();
@@ -461,7 +481,7 @@ const Motion = {
   frame(now) {
     const dt = Math.min(0.05, Math.max(0.001, (now - this.last) / 1000)) / SLOWMO;
     this.last = now;
-    PerfMeter.mark(isCanvasMode() ? 'canvas-motion' : 'svg-motion', now);
+    PerfMeter.mark(renderer.active === 'webgl' ? 'webgl-motion' : isCanvasMode() ? 'canvas-motion' : 'svg-motion', now);
     for (const fn of [...this.tasks]) {
       let keep = false;
       try { keep = fn(dt, now); } catch (e) { console.error(e); }
@@ -993,7 +1013,7 @@ const SvgRenderer = createSvgRenderer({
   get visual() { return visual; }
 });
 
-const CanvasRenderer = createCanvasRenderer({
+const boardEnv = {
   get $() { return $; },
   get COLORS() { return COLORS; },
   get ELEMENT_MAP() { return ELEMENT_MAP; },
@@ -1011,6 +1031,11 @@ const CanvasRenderer = createCanvasRenderer({
   get SHAPES() { return SHAPES; },
   get SKIN() { return SKIN; },
   get activeRenderProfile() { return activeRenderProfile; },
+  get activeDprCap() { return activeDprCap; },
+  get jobs() { return jobs; },
+  get shapeWidthAt() { return shapeWidthAt; },
+  get onContextLost() { return onGlContextLost; },
+  get glForced() { return glForced; },
   get bodies() { return bodies; },
   get boltPath() { return boltPath; },
   get bottleAnimating() { return bottleAnimating; },
@@ -1034,12 +1059,35 @@ const CanvasRenderer = createCanvasRenderer({
   get state() { return state; },
   get veiled() { return veiled; },
   get visual() { return visual; }
-});
+};
+const CanvasRenderer = createCanvasRenderer(boardEnv);
 
 function preferredRendererMode() { return preferredRenderer(location.search, window.__vesselRendererMode); }
 
+/* true when the board is painted off-DOM (Canvas 2D or WebGL): the slots are
+   then invisible hit targets and poses stay in memory */
 function isCanvasMode() {
-  return typeof renderer !== 'undefined' && (renderer.active === 'canvas' || renderer.active === 'canvas2d' || (renderer.backend && (renderer.backend.backend === 'canvas' || renderer.backend.backend === 'canvas2d')));
+  return typeof renderer !== 'undefined' && (renderer.active === 'canvas2d' || renderer.active === 'webgl');
+}
+
+/* The WebGL renderer (and Three.js with it) loads on demand, after the first
+   board is already up in Canvas 2D. If it cannot load or start, or the
+   context is lost later, the board simply stays on / returns to Canvas 2D. */
+let GlRenderer = null;
+let glLoading = false;
+function loadGlRenderer() {
+  if (GlRenderer || glLoading || preferredRendererMode() !== 'webgl') return;
+  glLoading = true;
+  import('./gl-renderer.js').then(mod => {
+    GlRenderer = mod.createGlRenderer(boardEnv);
+    if (!state.length || !slots.length) return;
+    /* never swap renderers under a running pour; the settle hook re-syncs */
+    if (pendingCount() === 0) { renderer.syncLayout(); renderer.renderAll(); } else pendingLayout = true;
+  }).catch(e => { console.warn('WebGL renderer unavailable; staying on Canvas 2D.', e); });
+}
+function glForced() { return new URLSearchParams(location.search).get('renderer') === 'webgl'; }
+function onGlContextLost() {
+  if (state.length && slots.length) { renderer.syncLayout(); renderer.renderAll(); }
 }
 
 const renderer = {
@@ -1053,13 +1101,22 @@ const renderer = {
   chooseBackend() {
     const mode = preferredRendererMode();
     const stage = $('#stage');
-    if (mode === 'canvas2d' && CanvasRenderer.ensure()) {
-      this.active = 'canvas2d'; this.backend = CanvasRenderer; stage.classList.add('canvas-active');
+    const was = this.active;
+    if (mode === 'webgl' && GlRenderer && GlRenderer.ensure()) {
+      this.active = 'webgl'; this.backend = GlRenderer;
+    } else if (mode !== 'svg' && CanvasRenderer.ensure()) {
+      this.active = 'canvas2d'; this.backend = CanvasRenderer;
     } else {
-      this.active = 'svg'; this.backend = SvgRenderer; stage.classList.remove('canvas-active');
-      if (mode === 'canvas2d') console.warn('Canvas 2D renderer unavailable; falling back to SVG.');
+      this.active = 'svg'; this.backend = SvgRenderer;
+      if (mode !== 'svg') console.warn('Canvas renderer unavailable; falling back to SVG.');
     }
-    slots.forEach(slot => slot && slot.el && slot.el.classList.toggle('canvas-dom-proxy', this.active === 'canvas2d'));
+    if (was !== this.active) {   /* the outgoing backend must not leave pixels behind */
+      if (was === 'canvas2d') CanvasRenderer.clear();
+      if (was === 'webgl' && GlRenderer) GlRenderer.clear();
+    }
+    stage.classList.toggle('canvas-active', this.active !== 'svg');
+    stage.dataset.renderer = this.active;
+    slots.forEach(slot => slot && slot.el && slot.el.classList.toggle('canvas-dom-proxy', this.active !== 'svg'));
     return this;
   },
   syncLayout() {
@@ -1074,7 +1131,7 @@ const renderer = {
     return this.backend.renderBottle(i, renderOpts);
   },
   renderAll() {
-    if (this.active === 'canvas2d') this.backend.renderAll();
+    if (this.active !== 'svg') this.backend.renderAll();
     else state.forEach((b, i) => this.renderBottle(i, { tiltDeg: 0 }));
     return this;
   },
@@ -1178,7 +1235,6 @@ function restoreBoardSnapshot(snap) {
   state.forEach((b, i) => rebuildSlotSpecialClasses(i));
   renderer.renderAll();
   syncCaps();
-  orbUpdate(false);
   updateHUD();
 }
 
@@ -1449,7 +1505,6 @@ function setupBoard(gen) {
   renderer.renderAll();
   syncCaps();
   applyBottleFocus(focusedBottle, false);
-  orbUpdate(false);
   updateHUD();
   $('#overlay').classList.remove('show');
   updateBottleLabels();
@@ -1570,59 +1625,21 @@ function onRushStageClear() {
   }, RM ? 250 : 1300);
 }
 
-/* ---------------- magic orb (fills as bottles complete) ---------------- */
-let orbFill = null, orbSurf = null, orbFrac = 0;
-function buildOrb() {
-  const host = $('#orb');
-  if (!host) return;
-  const svg = svgEl('svg', { viewBox: '0 0 60 64' });
-  const defs = svgEl('defs', {});
-  const clip = svgEl('clipPath', { id: 'orbClip' });
-  clip.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23 }));
-  defs.appendChild(clip);
-  const og = svgEl('linearGradient', { id: 'orbGrad', x1: 0, y1: 0, x2: 0, y2: 1 });
-  og.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#ffe2b3' }));
-  og.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#e8893a' }));
-  defs.appendChild(og);
-  svg.appendChild(defs);
-  svg.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23, fill: 'rgba(255,255,255,0.06)' }));
-  const lg = svgEl('g', { 'clip-path': 'url(#orbClip)' });
-  orbFill = svgEl('rect', { x: 2, y: 59, width: 56, height: 0, fill: 'url(#orbGrad)' });
-  orbSurf = svgEl('ellipse', { cx: 30, cy: 59, rx: 22, ry: 3, fill: '#ffe9c4', opacity: 0.8 });
-  lg.appendChild(orbFill); lg.appendChild(orbSurf);
-  svg.appendChild(lg);
-  svg.appendChild(svgEl('circle', { cx: 30, cy: 36, r: 23, fill: 'none', stroke: 'rgba(255,255,255,0.5)', 'stroke-width': 2.2 }));
-  svg.appendChild(svgEl('ellipse', { cx: 22, cy: 26, rx: 6, ry: 9, fill: 'rgba(255,255,255,0.35)', transform: 'rotate(-24 22 26)' }));
-  svg.appendChild(svgEl('rect', { x: 24, y: 4, width: 12, height: 9, rx: 4, fill: 'url(#lipGrad)', stroke: 'rgba(255,255,255,0.4)', 'stroke-width': 1.2 }));
-  host.appendChild(svg);
-}
-function orbUpdate(pulse) {
-  if (!orbFill) return;
-  orbFrac = Logic.completionProgress(state);
-  const h = 46 * orbFrac;
-  orbFill.setAttribute('y', 59 - h);
-  orbFill.setAttribute('height', h + 1);
-  orbSurf.setAttribute('cy', 59 - h);
-  orbSurf.setAttribute('opacity', orbFrac > 0.01 ? 0.8 : 0);
-  const host = $('#orb');
-  if (pulse && host) { host.classList.remove('pulse'); void host.offsetWidth; host.classList.add('pulse'); }
-}
-
 function updateHUD() {
   const lvlEl = $('#hud-level'), subEl = $('#hud-sub');
   /* compact copy — the old three-part line wrapped on phone widths */
   if (mode === 'challenge') {
     lvlEl.textContent = 'Shared Challenge';
-    subEl.textContent = 'Moves ' + moves + ' · Par ' + par;
+    subEl.textContent = moves + (moves === 1 ? ' move' : ' moves') + ' · par ' + par;
   } else if (mode === 'daily') {
     lvlEl.textContent = 'Daily Challenge';
-    subEl.textContent = dailyDate.slice(5).replace('-', '/') + ' · Moves ' + moves;
+    subEl.textContent = dailyDate.slice(5).replace('-', '/') + ' · ' + moves + (moves === 1 ? ' move' : ' moves');
   } else if (mode === 'rush') {
     lvlEl.textContent = 'Rush · Stage ' + rushStage;
-    subEl.textContent = '⏱ ' + Math.max(0, rushTimeLeft) + 's · Moves ' + moves;
+    subEl.textContent = Math.max(0, rushTimeLeft) + ' s left · ' + moves + (moves === 1 ? ' move' : ' moves');
   } else {
     lvlEl.textContent = 'Level ' + level;
-    subEl.textContent = 'Moves ' + moves + ' · Par ' + par;
+    subEl.textContent = moves + (moves === 1 ? ' move' : ' moves') + ' · par ' + par;
   }
   subEl.classList.toggle('warn', mode === 'rush' && rushTimeLeft <= 10);
   const undoBtn = $('#btn-undo');
@@ -1646,7 +1663,7 @@ function setSelected(i) {
     if (!isCanvasMode()) sweepSheen(slots[i].svg);
   }
   updateBottleLabels();
-  if (renderer.active === 'canvas2d') renderer.renderAll();
+  if (isCanvasMode()) renderer.renderAll();
 }
 function shake(i) {
   const el = slots[i].el;
@@ -2108,7 +2125,7 @@ function kickSlosh(i, v) {
    HUD) and queues its animation. A queued pour starts when neither of its
    bottles is claimed by a running pour or an earlier queued one, so each
    bottle's pours play in order and independent pours run side by side.
-   Specials (mystery reveal, orb, thaw) fire when the pour's job completes. */
+   Specials (mystery reveal, thaw) fire when the pour's job completes. */
 let queue = [];
 let settleArmed = false;   /* a pour finished since the board last settled */
 let boardRevision = 0;
@@ -2190,7 +2207,6 @@ function postJob(job, quiet) {
   const { si, di } = job;
   revealMystery(si, job.entry ? job.entry.srcAfter.length : state[si].length);
   if (job.dstComplete) {
-    orbUpdate(!quiet);
     if (frozen.size) thawAll();
   }
   if (!quiet) { sloshBottle(di, Math.min(2, job.n)); sloshBottle(si, 0.5); }
@@ -2258,7 +2274,6 @@ function flushAll() {
   visual = state.map(mergeRuns);
   refreshBusy();
   syncCaps();
-  orbUpdate(false);
   renderer.renderAll();
   updateHUD();
 }
@@ -2612,6 +2627,7 @@ function starsFor(m) { return m <= par ? 3 : m <= Math.ceil(par * 1.5) ? 2 : 1; 
 
 function onWin() {
   storage.remove(SESSION_KEY);
+  if (renderer.backend.winWave) renderer.backend.winWave();
   if (mode === 'rush') return onRushStageClear();
   const st = usedAuto ? 1 : starsFor(moves);
   let meta = moves + ' moves · par ' + par;
@@ -2656,8 +2672,6 @@ function onWin() {
   $('#win-stars').innerHTML = [1, 2, 3].map(k => '<span class="' + (k <= st ? '' : 'off') + '">★</span>').join('');
   $('#win-meta').textContent = meta;
   $('#overlay').classList.add('show');
-  const orbHost = $('#orb');
-  if (orbHost && !RM) { orbHost.classList.add('burst'); spawnSparkles(orbHost, 10, 0.7); setTimeout(() => orbHost.classList.remove('burst'), 900); }
   AudioFX.win(); buzz([20, 50, 20, 50, 60]);
   if (!RM) {
     confetti();
@@ -2779,7 +2793,7 @@ function confetti() {
 /* ---------------- ambient dust ---------------- */
 let ambientOn = false;
 let ambientGen = 0;     /* invalidates callbacks already handed to rAF on stop/restart */
-let ambientRaf = 0;
+let ambientRaf = null;
 let ambientResize = null;
 
 function clearAmbientCanvas() {
@@ -2853,8 +2867,8 @@ function stopAmbient() {
   ambientOn = false;
   ambientGen++;
   if (ambientRaf) {
-    clearTimeout(ambientRaf);
-    ambientRaf = 0;
+    FrameGate.cancel(ambientRaf);
+    ambientRaf = null;
   }
   FrameGate.reset('ambient');
   if (ambientResize) {
@@ -2896,14 +2910,27 @@ function unlockedUpTo() {
   return u;
 }
 
+const LOCK_ICON = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9.5" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+/* the Classic level the player is on: the first open one without a result */
+function nextLevel() {
+  const max = unlockedUpTo();
+  for (let l = 1; l <= max; l++) if (!save.progress[difficulty][l]) return l;
+  return max;
+}
 function renderMenu() {
-  $('#btn-resume').classList.toggle('hidden', !readSession(storage));
+  /* one call to action: resume an unfinished puzzle, else the next Classic level */
+  const hasSession = !!readSession(storage);
+  const next = nextLevel(), started = Object.keys(save.progress[difficulty]).length > 0;
+  $('#btn-resume').classList.toggle('hidden', !hasSession);
+  $('#btn-play').classList.toggle('hidden', hasSession);
+  $('#play-title').textContent = (started ? 'Continue' : 'Play') + ' · Level ' + next;
+  $('#play-sub').textContent = cap1(difficulty);
   document.querySelectorAll('#diff-seg button').forEach(b => b.classList.toggle('on', b.dataset.d === difficulty));
-  $('#chip-stars').textContent = '★ ' + totalStars();
-  $('#chip-streak').textContent = '🔥 ' + (save.daily.streak || 0) + ' day streak';
+  $('#chip-stars').textContent = totalStars();
   const doneToday = save.daily.lastWin === todayStr();
   $('#card-daily').classList.toggle('done', doneToday);
-  $('#daily-sub').textContent = doneToday ? '✓ Done · back tomorrow' : 'Play today’s puzzle';
+  const streak = save.daily.streak || 0;
+  $('#daily-sub').textContent = doneToday ? 'Done · back tomorrow' : streak > 0 ? streak + '-day streak' : 'Today’s puzzle';
   $('#rush-sub').textContent = save.rushBest > 0 ? 'Best · stage ' + save.rushBest : 'Race the clock';
   const grid = $('#level-grid');
   grid.innerHTML = '';
@@ -2915,16 +2942,16 @@ function renderMenu() {
     const open = l <= maxOpen;
     if (!open) t.classList.add('locked');
     if (p) t.classList.add('done');
+    if (open && l === next) t.classList.add('next');
     let starsHTML = '';
     if (p) starsHTML = [1, 2, 3].map(k => '<span class="' + (k <= p.stars ? '' : 'off') + '">★</span>').join('');
     t.innerHTML = '<div class="num">' + l + '</div>' +
-      (open ? '<div class="stars">' + starsHTML + '</div>' : '<div class="lock">🔒</div>');
+      (open ? '<div class="stars">' + starsHTML + '</div>' : '<div class="lock">' + LOCK_ICON + '</div>');
     if (open) t.addEventListener('click', () => { AudioFX.select(); loadLevel(l); });
     else t.addEventListener('click', () => { AudioFX.invalid(); });
     t.setAttribute('aria-label', 'Level ' + l + (open ? '' : ' locked'));
     grid.appendChild(t);
   }
-  $('#btn-sound-menu').textContent = save.sound ? '🔊 Sound on' : '🔇 Sound off';
 }
 
 function buildHeroBottles() {
@@ -3046,8 +3073,8 @@ function init() {
   Fluid.enabled = save.fluid !== false;
   applyRenderQuality();
   applyTheme();
+  loadGlRenderer();
   buildDefs();
-  buildOrb();
   buildHeroBottles();
   renderMenu();
   window.history.replaceState({ screen: 'menu' }, '');   /* seed a clean base entry for Back handling */
@@ -3058,19 +3085,10 @@ function init() {
       difficulty = b.dataset.d; save.difficulty = difficulty; persist();
       AudioFX.select(); renderMenu();
     }));
-  $('#btn-sound-menu').addEventListener('click', () => {
-    save.sound = !save.sound; persist(); AudioFX.syncMute(); renderMenu(); AudioFX.select();
-  });
+  $('#btn-play').addEventListener('click', () => { AudioFX.select(); loadLevel(nextLevel()); });
   $('#btn-back').addEventListener('click', () => { AudioFX.swap(); exitToMenu(); });
   $('#btn-undo').addEventListener('click', undo);
   $('#btn-restart').addEventListener('click', () => { if (!autoPlaying) { AudioFX.swap(); flushAll(); restartCurrent(); } });
-  $('#btn-sound').addEventListener('click', () => {
-    save.sound = !save.sound; persist(); AudioFX.syncMute();
-    $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
-    AudioFX.select();
-  });
-  $('#btn-sound').textContent = save.sound ? '🔊' : '🔇';
-
   $('#btn-replay').addEventListener('click', () => {
     $('#overlay').classList.remove('show');
     if (mode === 'rush') startRush();      /* a fresh run after Time's up */
@@ -3087,7 +3105,6 @@ function init() {
   $('#btn-hint').addEventListener('click', showHint);
 
   $('#btn-resume').addEventListener('click', resumeSession);
-  $('#btn-challenge').addEventListener('click', () => loadChallenge({ seed: crypto.getRandomValues(new Uint32Array(1))[0], colors: 5, sets: 1, empties: 1 }));
   $('#btn-share').addEventListener('click', sharePuzzle);
   $('#btn-share-win').addEventListener('click', sharePuzzle);
   $('#share-close').addEventListener('click', () => closeModal($('#share-modal')));
@@ -3173,7 +3190,7 @@ function init() {
 }
 
 window.__vessel = {
-  loadLevel, onTap, undo, loadDaily, startRush, showHint, autoSolve, requestSolution, cancelSolution, totalStars,
+  loadLevel, loadChallenge, onTap, undo, loadDaily, startRush, showHint, autoSolve, requestSolution, cancelSolution, totalStars,
   get mode() { return mode; },
   get rushStage() { return rushStage; },
   get rushTimeLeft() { return rushTimeLeft; },
@@ -3187,7 +3204,6 @@ window.__vessel = {
   get shapes() { return shapesByBottle; },
   get veiled() { return veiled; },
   get frozen() { return frozen; },
-  get orbFrac() { return orbFrac; },
   get corks() { return corks; },
   get jobs() { return jobs; }
 };
@@ -3244,7 +3260,7 @@ window.__vesselPerf = {
   get renderQualitySetting() { return save.renderQuality; },
   get renderProfile() { return Object.assign({}, activeRenderProfile()); },
   get autoDemotionReason() { return renderQualityDemotionReason; },
-  get dprCap() { return activeRenderProfile().dprCap; },
+  get dprCap() { return activeDprCap(); },
   get dpr() { return PerfMeter.snapshot().dpr; },
   get qualityProfile() { return PerfMeter.snapshot().qualityProfile; },
   get perfSampleCount() { return PerfMeter.snapshot().sampleCount; },

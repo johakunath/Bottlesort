@@ -1,4 +1,5 @@
-﻿import './styles.css';
+import './fonts.css';
+import './styles.css';
 import './game-logic.js';
 import './game-runtime.js';
 import { registerPwa } from './pwa.js';

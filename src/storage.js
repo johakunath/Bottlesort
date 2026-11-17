@@ -52,5 +52,5 @@ export function normalizeSave(input) {
 }
 export function preferredRenderer(search = '', override) {
   const raw = new URLSearchParams(search).get('renderer') || storage.get('vessel_renderer') || override;
-  return raw === 'svg' ? 'svg' : 'canvas2d';
+  return raw === 'svg' || raw === 'canvas2d' ? raw : 'webgl';
 }

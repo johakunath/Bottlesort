@@ -28,74 +28,61 @@
 
 <!-- ============ Menu ============ -->
 <div id="menu" class="screen">
+  <div class="menu-top">
+    <button class="corner-btn" id="btn-ach" aria-label="Awards"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z"/></svg><span id="chip-stars">0</span></button>
+    <button class="corner-btn" id="btn-settings" aria-label="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
   <div class="brand">
     <span class="kicker" id="brand-kicker">The Apothecary</span>
     <h1>Vessel</h1>
     <p id="brand-tag">Decant, settle, set in order.</p>
   </div>
   <div class="hero-bottles" aria-hidden="true"></div>
-  <div class="stat-chips">
-    <span class="chip" id="chip-stars">★ 0</span>
-    <span class="chip" id="chip-streak">🔥 0 day streak</span>
-  </div>
   <div class="utility-actions">
-    <button class="btn primary hidden" id="btn-resume">Resume puzzle</button>
-    <button class="btn" id="btn-challenge">New challenge</button>
+    <button class="btn primary cta" id="btn-play"><span id="play-title">Play · Level 1</span><span class="cta-sub" id="play-sub">Normal</span></button>
+    <button class="btn primary cta hidden" id="btn-resume"><span>Resume puzzle</span><span class="cta-sub">Pick up where you left off</span></button>
     <button class="btn hidden" id="btn-install">Install game</button>
     <button class="btn hidden" id="btn-update">Update ready · reload</button>
   </div>
   <p id="loading-status" role="status" aria-live="polite"></p>
   <div class="menu-actions">
     <button class="mode-card" id="card-daily">
-      <span class="mc-icon">📅</span><span class="mc-name">Daily</span>
-      <span class="mc-sub" id="daily-sub">Play today's puzzle</span>
+      <span class="mc-name"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.500" y="5" width="17" height="15.500" rx="3"/><path d="M3.500 10h17M8 3v4M16 3v4"/></svg>Daily</span>
+      <span class="mc-sub" id="daily-sub">Today's puzzle</span>
     </button>
     <button class="mode-card" id="card-rush">
-      <span class="mc-icon">⚡</span><span class="mc-name">Rush</span>
+      <span class="mc-name"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.500 2 5 13.500h5.200L9 22l9.500-12.500h-5.300z"/></svg>Rush</span>
       <span class="mc-sub" id="rush-sub">Race the clock</span>
     </button>
-    <button class="mode-card" id="btn-ach">
-      <span class="mc-icon">&#x1F3C6;</span><span class="mc-name">Awards</span>
-      <span class="mc-sub">Stars & badges</span>
-    </button>
-    <button class="mode-card" id="btn-settings">
-      <span class="mc-icon">&#x2699;&#xFE0F;</span><span class="mc-name">Settings</span>
-      <span class="mc-sub">Sound & style</span>
-    </button>
   </div>
-  <p class="section-label">Classic · pick your level</p>
   <div class="seg" id="diff-seg" role="group" aria-label="Difficulty">
     <button data-d="relaxed">Relaxed</button>
     <button data-d="normal">Normal</button>
     <button data-d="expert">Expert</button>
   </div>
   <div class="level-grid" id="level-grid"></div>
-  <div class="menu-foot">
-    <button id="btn-sound-menu">🔊 Sound on</button>
-  </div>
   <p class="credit">Every puzzle is verified solvable</p>
 </div>
 
 <!-- ============ Game ============ -->
 <div id="game" class="screen hidden">
   <div class="hud">
-    <button class="icon-btn" id="btn-back" aria-label="Back to levels">‹</button>
+    <button class="icon-btn" id="btn-back" aria-label="Back to levels"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
     <div class="mid">
       <div class="lvl" id="hud-level">Level 1</div>
       <div class="sub" id="hud-sub"></div>
     </div>
-    <div id="orb" aria-hidden="true"></div>
-    <button class="icon-btn" id="btn-undo" aria-label="Undo">↩<span class="badge hidden" id="undo-badge"></span></button>
-    <button class="icon-btn" id="btn-restart" aria-label="Restart level">⟳</button>
-    <button class="icon-btn" id="btn-sound" aria-label="Toggle sound">🔊</button>
+    <button class="icon-btn" id="btn-undo" aria-label="Undo"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12h-1" transform="translate(0,-3.500)"/></svg><span class="badge hidden" id="undo-badge"></span></button>
+    <button class="icon-btn" id="btn-restart" aria-label="Restart level"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.600-5.900"/><path d="M20 4v5h-5"/></svg></button>
   </div>
   <div id="stage">
     <canvas id="board-canvas" aria-hidden="true"></canvas>
+    <canvas id="board-gl" aria-hidden="true"></canvas>
     <div id="fx"></div>
     <div id="hint">Tap a bottle, then tap where to pour</div>
     <div class="fabs">
       <button class="fab" id="btn-share" aria-label="Share puzzle"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      <button class="fab" id="btn-hint" aria-label="Hint"><span class="fi">💡</span></button>
+      <button class="fab" id="btn-hint" aria-label="Hint"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.800 10.600c.700.600 1.100 1.400 1.200 2.400h5.200c.100-1 .500-1.800 1.200-2.400A6 6 0 0 0 12 3z"/></svg></button>
     </div>
   </div>
 </div>
@@ -120,17 +107,21 @@
 <div class="modal hidden" id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
   <div class="sheet">
     <h2 id="settings-title">Settings</h2>
-    <div class="set-row"><span>Sound<span class="desc">Pours, chimes and fanfares</span></span><button class="switch" id="sw-sound" role="switch" aria-label="Sound"></button></div>
-    <div class="set-row"><span>Haptics<span class="desc">Gentle vibration on touch</span></span><button class="switch" id="sw-haptics" role="switch" aria-label="Haptics"></button></div>
-    <div class="set-row"><span>Liquid motion<span class="desc">Living surface — waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
-    <div class="set-row"><span>Colorblind labels<span class="desc">A distinct number for each liquid color</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Colorblind labels"></button></div>
-    <div class="set-row"><label for="bottle-collection">Small bottle style<span class="desc">12-segment towers are always included</span></label><select class="quality-select" id="bottle-collection"><option value="mixed">Mixed glassware</option><option value="round">Round bottles</option><option value="tall">Tall cylinders</option><option value="flask">Potion flasks</option></select></div>
-    <div class="set-row"><span>Render quality<span class="desc">Auto can step down if frames get slow</span></span><select class="quality-select" id="render-quality" aria-label="Render quality"><option value="auto">Auto</option><option value="low">Low</option><option value="normal">Normal</option><option value="pretty">Pretty</option></select></div>
-    <div class="set-row"><span>Background quality<span class="desc">Hifi art backdrops or lightweight gradients</span></span><select class="quality-select" id="background-quality" aria-label="Background quality"><option value="hifi">Hifi</option><option value="basic">Basic</option></select></div>
-    <div class="set-row" id="row-dark"><span>Dark mode<span class="desc">Candlelit palette for the Apothecary theme</span></span><button class="switch" id="sw-dark" role="switch" aria-label="Dark mode"></button></div>
-    <div class="set-row" style="border-bottom:none; padding-bottom:4px;"><span>Theme<span class="desc">Choose your favorite atmosphere</span></span></div>
+    <p class="set-group">Look</p>
     <div class="theme-grid" id="theme-grid"></div>
-    <button class="danger-btn" id="btn-reset">Erase all progress</button>
+    <div class="set-row" id="row-dark"><span>Dark mode<span class="desc">Candlelit Apothecary</span></span><button class="switch" id="sw-dark" role="switch" aria-label="Dark mode"></button></div>
+    <p class="set-group">Play</p>
+    <div class="set-row"><span>Sound</span><button class="switch" id="sw-sound" role="switch" aria-label="Sound"></button></div>
+    <div class="set-row"><span>Vibration</span><button class="switch" id="sw-haptics" role="switch" aria-label="Vibration"></button></div>
+    <div class="set-row"><span>Colour-blind numbers<span class="desc">A number on each liquid colour</span></span><button class="switch" id="sw-symbols" role="switch" aria-label="Colour-blind numbers"></button></div>
+    <div class="set-row"><label for="bottle-collection">Bottle style</label><select class="quality-select" id="bottle-collection"><option value="mixed">Mixed glassware</option><option value="round">Round bottles</option><option value="tall">Tall cylinders</option><option value="flask">Potion flasks</option></select></div>
+    <details class="set-advanced">
+      <summary>Advanced</summary>
+      <div class="set-row"><span>Graphics quality<span class="desc">Auto steps down if frames get slow</span></span><select class="quality-select" id="render-quality" aria-label="Graphics quality"><option value="auto">Auto</option><option value="low">Low</option><option value="normal">Normal</option><option value="pretty">Pretty</option></select></div>
+      <div class="set-row"><span>Backdrop<span class="desc">Painted art or plain gradients</span></span><select class="quality-select" id="background-quality" aria-label="Backdrop"><option value="hifi">Painted</option><option value="basic">Plain</option></select></div>
+      <div class="set-row"><span>Liquid motion<span class="desc">Waves slosh and settle</span></span><button class="switch" id="sw-fluid" role="switch" aria-label="Liquid motion"></button></div>
+      <button class="danger-btn" id="btn-reset">Erase all progress</button>
+    </details>
     <button class="btn primary" id="settings-close">Done</button>
   </div>
 </div>
