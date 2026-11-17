@@ -181,10 +181,11 @@ function chooseAutoRenderQuality() {
   if (cores <= 4 || area < 520000) return 'normal';
   return 'pretty';
 }
-/* rising beads in resting liquid: only on the game screen, never with reduced
-   motion or on the Low profile (which has no idle animation) */
+/* Rising beads and element effects in resting liquid, on the game screen. They
+   keep running after an automatic quality drop; only reduced motion, the
+   Liquid motion switch, or choosing Low by hand turns them off. */
 function liquidIdle() {
-  return !RM && activeRenderProfile().idleAnimations && document.body.dataset.screen === 'game' && state.length > 0;
+  return !RM && save.fluid !== false && save.renderQuality !== 'low' && document.body.dataset.screen === 'game' && state.length > 0;
 }
 function isTouchDevice() {
   return (navigator.maxTouchPoints || 0) > 1 || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);

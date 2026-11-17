@@ -28,7 +28,7 @@ const ATLAS_CELLS = 4, ATLAS_PX = 96;
 const GLYPH = { digit0: 4, question: 13 };
 const ELEMENT_ID = { icy: 1, electric: 2, boiling: 3, toxic: 4 };
 /* translucent washes the element emblems lay over their band (as in the 2D renderer) */
-const ELEMENT_TINT = { icy: [0.78, 0.94, 1.0, 0.1], electric: [0.55, 0.94, 1.0, 0.06], toxic: [0.43, 1.0, 0.55, 0.07] };
+const ELEMENT_TINT = { icy: [0.78, 0.94, 1.0, 0.14], electric: [0.55, 0.94, 1.0, 0.09], toxic: [0.43, 1.0, 0.55, 0.1] };
 
 const GLASS_VERT = `
   varying vec3 vN; varying vec3 vV; varying vec3 vL; varying float vNy;
@@ -162,30 +162,30 @@ const LIQUID_FRAG = `
     /* element hints stay faint: a touch of character, never a pattern over the colour */
     if (elem == 1) {
       /* icy: a soft frosted rim under the band top and the odd glint */
-      col = mix(col, vec3(0.94, 0.98, 1.0), 0.22 * smoothstep(5.0, 0.0, by) * step(7.0, bh));
+      col = mix(col, vec3(0.94, 0.98, 1.0), 0.34 * smoothstep(6.0, 0.0, by) * step(7.0, bh));
       vec2 g = vec2(xs, by) / 15.0, id = floor(g);
       vec2 o = (fract(g) - 0.5 - 0.5 * (vec2(hash(id), hash(id + 9.2)) - 0.5)) * 15.0;
       float tw = smoothstep(0.55, 1.0, sin(uTime * 1.4 + hash(id + 2.0) * 6.28));
-      float star = smoothstep(0.8, 0.0, abs(o.x) * abs(o.y) * 1.8 + dot(o, o) * 0.12) * step(0.72, hash(id + 4.0));
-      col = mix(col, vec3(1.0), star * tw * 0.7);
+      float star = smoothstep(0.8, 0.0, abs(o.x) * abs(o.y) * 1.8 + dot(o, o) * 0.12) * step(0.62, hash(id + 4.0));
+      col = mix(col, vec3(1.0), star * tw * 0.9);
     } else if (elem == 2) {
       /* electric: brief, small sparks at random spots */
       vec2 g = vec2(xs + 40.0, by) / 12.0, id = floor(g);
       vec2 o = (fract(g) - 0.5) * 12.0 - (vec2(hash(id + 1.0), hash(id + 6.0)) - 0.5) * 6.0;
-      float on = smoothstep(0.93, 1.0, sin(uTime * (1.3 + hash(id + 3.0)) + hash(id) * 6.28));
+      float on = smoothstep(0.88, 1.0, sin(uTime * (1.3 + hash(id + 3.0)) + hash(id) * 6.28));
       float d = length(o);
-      col = mix(col, vec3(1.0, 0.98, 0.78), on * (smoothstep(1.3, 0.2, d) * 0.85 + smoothstep(5.0, 0.0, d) * 0.18));
+      col = mix(col, vec3(1.0, 0.98, 0.78), on * (smoothstep(1.5, 0.2, d) * 0.95 + smoothstep(6.0, 0.0, d) * 0.28));
     } else if (elem == 3) {
       /* boiling: a few quicker bubbles inside the band */
-      vec2 b = bubbles(xs + 40.0, by, bh, 15.0, 0.4, 1.0);
-      col = mix(col, vec3(1.0), clamp(b.x * 0.55 + b.y * 0.5, 0.0, 1.0));
+      vec2 b = bubbles(xs + 40.0, by, bh, 12.0, 0.45, 1.0);
+      col = mix(col, vec3(1.0), clamp(b.x * 0.75 + b.y * 0.6, 0.0, 1.0));
     } else if (elem == 4) {
       /* toxic: a faint slow cloud and a few drifting motes */
       float w = sin(by * 0.2 + 1.4 * sin(xs * 0.08 + uTime * 0.5) + 0.8 * sin(xs * 0.19 - by * 0.11 + uTime * 0.3));
-      col = mix(col, dark * 0.6, 0.1 * smoothstep(0.3, 1.0, w));
+      col = mix(col, dark * 0.6, 0.16 * smoothstep(0.3, 1.0, w));
       vec2 g = vec2(xs, by + uTime * 1.6) / 12.0, id = floor(g);
       vec2 o = (fract(g) - 0.5) * 12.0 - (vec2(hash(id), hash(id + 5.0)) - 0.5) * 6.0;
-      col = mix(col, vec3(0.86, 1.0, 0.6), smoothstep(1.2, 0.4, length(o)) * step(0.8, hash(id + 1.0)) * 0.45);
+      col = mix(col, vec3(0.86, 1.0, 0.6), smoothstep(1.2, 0.4, length(o)) * step(0.72, hash(id + 1.0)) * 0.6);
     }
     /* rising beads through the whole column (all liquids) */
     if (uAmbient > 0.0) {
