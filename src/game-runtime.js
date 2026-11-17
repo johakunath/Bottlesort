@@ -177,7 +177,7 @@ function chooseAutoRenderQuality() {
   if (touch) return 'normal';
   /* resting bottles are cached sprites, so only very weak machines need Low;
      auto-demotion still steps down if frames run long */
-  if (cores <= 2) return 'low';
+  if (cores <= 2) return isDesktop() ? 'normal' : 'low';
   if (cores <= 4 || area < 520000) return 'normal';
   return 'pretty';
 }
@@ -186,6 +186,10 @@ function chooseAutoRenderQuality() {
    Liquid motion switch, or choosing Low by hand turns them off. */
 function liquidIdle() {
   return !RM && save.fluid !== false && save.renderQuality !== 'low' && document.body.dataset.screen === 'game' && state.length > 0;
+}
+/* mouse-first machine (desktop or laptop, touchscreen laptops included) */
+function isDesktop() {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 }
 function isTouchDevice() {
   return (navigator.maxTouchPoints || 0) > 1 || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
@@ -231,10 +235,9 @@ function throttleFluidRuntime(reason) {
   return false;
 }
 function preferredBackgroundQuality() {
-  const params = new URLSearchParams(location.search);
-  const query = (params.get('background') || '').toLowerCase();
-  if (query === 'basic' || query === 'hifi') return query;
-  return save.backgroundQualityUserSet === true && save.backgroundQuality === 'basic' ? 'basic' : 'hifi';
+  /* painted art always; ?background=basic stays as a QA switch */
+  const query = (new URLSearchParams(location.search).get('background') || '').toLowerCase();
+  return query === 'basic' ? 'basic' : 'hifi';
 }
 function activeBackgroundKey() {
   if (SKIN === 'apothecary') return MODE === 'dark' ? 'apothecaryDark' : 'apothecaryLight';
@@ -285,7 +288,9 @@ function demoteRenderQuality(reason) {
     return true;
   }
   const idx = QUALITY_ORDER.indexOf(renderQualityEffective);
-  if (idx <= 0) return false;
+  /* desktops never drop below Normal on their own; Low stays available by hand */
+  const floor = isDesktop() ? QUALITY_ORDER.indexOf('normal') : 0;
+  if (idx <= floor) return false;
   renderQualityEffective = QUALITY_ORDER[idx - 1];
   renderQualityDemotionReason = reason || ('frame time exceeded ' + activeRenderProfile().targetFps + ' FPS budget');
   const p = activeRenderProfile();
@@ -2634,8 +2639,6 @@ function renderSettings() {
   setSwitch('#sw-dark', save.mode === 'dark');
   const rq = $('#render-quality');
   if (rq) rq.value = save.renderQuality;
-  const bq = $('#background-quality');
-  if (bq) bq.value = save.backgroundQuality;
   renderThemeGrid();
 }
 
@@ -3160,15 +3163,6 @@ function init() {
     save.renderQuality = e.target.value;
     persist();
     applyRenderQuality(save.renderQuality === 'auto' ? 'auto profile selected' : '');
-    renderSettings();
-    AudioFX.select();
-  });
-  $('#background-quality').addEventListener('change', e => {
-    save.backgroundQuality = e.target.value === 'basic' ? 'basic' : 'hifi';
-    save.backgroundQualityUserSet = true;
-    storage.set('vessel_background', save.backgroundQuality);
-    persist();
-    applyBackgroundQuality();
     renderSettings();
     AudioFX.select();
   });

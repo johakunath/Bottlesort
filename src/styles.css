@@ -839,7 +839,8 @@ body[data-render-quality="low"] .twinkle { animation: none !important; }
 
 /* ---------------- Play-first menu, slim in-game bar, grouped settings ---------------- */
 .ic { width: 1.25em; height: 1.25em; flex: 0 0 auto; display: block; }
-.menu-top { align-self: stretch; display: flex; justify-content: space-between; align-items: center; margin-bottom: -6px; }
+/* corner buttons line up with the menu content instead of the screen edges */
+.menu-top { align-self: center; width: 100%; max-width: 640px; display: flex; justify-content: space-between; align-items: center; margin-bottom: -6px; }
 .corner-btn {
   display: flex; align-items: center; gap: 6px; min-width: 44px; height: 44px; padding: 0 12px; justify-content: center;
   border-radius: 999px; background: var(--glass-solid); border: 1px solid var(--glass-edge);
